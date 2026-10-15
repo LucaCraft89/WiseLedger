@@ -1,0 +1,30 @@
+# Secrets and local data (seeds, mnemonics, wallets, databases, uploads)
+.data/
+.env
+.env.*
+!.env.example
+*.mnemonic
+*.seed
+*.pem
+*.key
+
+# Dependencies and build
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+
+# Models and heavy binaries (never in git)
+models/
+*.gguf
+*.bin
+*.mp4
+
+# System / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
