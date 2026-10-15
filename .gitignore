@@ -28,3 +28,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.log
+*.zip
+*.node
+*.so
+*.exe
