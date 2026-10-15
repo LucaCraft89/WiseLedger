@@ -20,12 +20,17 @@ Invoice fraud (changed bank details, fake suppliers, duplicate invoices, instruc
 - Possible extra if time allows: RGB over Lightning with `@utexo/wdk-rgb-lightning` (a patched build of a UTEXO fork would be declared here).
 
 ## Work done before the hackathon
-Declared as the organizers asked. Before kickoff (Saturday 17 October 2026, 09:30 CEST) we prepared, and **no application code exists in this repository**:
+Declared as the organizers asked. Before kickoff (Saturday 17 October 2026, 09:30 CEST) we prepared the following. **No product code exists in this repository before kickoff.**
 - **Planning and team organisation**, kept in a separate private repository: architecture, milestones and working rules for our two coding agents. Drafted with the help of Claude.
-- **Machines and downloads**: Linux (WSL2/Ubuntu and Fedora) setups, Node, pnpm, Docker, QVAC and model downloads, funded test wallets on Mutinynet.
-- **Throwaway feasibility experiments on 14–15 October, outside any repository**, to check that the packages install and run on our machines: `@qvac/sdk` with a Qwen3.5 model; `@utexo/wdk-wallet-rgb` on Mutinynet, including an experimental test asset and one test transfer; an experimental Lightning channel with a patched UTEXO node. **None of that code is in this repository.** The product is written from scratch during the hackathon and its test asset is issued again then.
+- **Machines and downloads**: Linux setups (WSL2/Ubuntu, Fedora, Kali), Node, pnpm, Docker, QVAC and model downloads, funded test wallets on Mutinynet.
+- **Throwaway feasibility experiments on 14-15 October (Antonino)**, to check that the packages install and run. Their scripts are in [`prior-work/`](prior-work/), unchanged, with a note on what each one does.
 
-All application code in this repository comes from commits dated within the hackathon.
+### What already works (from the experiments, not product code)
+- `@qvac/sdk` loads a Qwen3.5-0.8B model on a laptop and answers a prompt, offline.
+- `@utexo/wdk-wallet-rgb` creates a wallet on Mutinynet, issues an experimental test asset `TUSDT` and completes one transfer to `Settled`.
+- An experimental RGB-over-Lightning channel and payment with a patched UTEXO node. The compiled node is not in this repository; the two fixes are described in `prior-work/`.
+
+The product is written from scratch during the hackathon, and its test asset is issued again then. All product code in this repository comes from commits dated within the hackathon.
 
 ## How to run
 In progress. Prerequisites, environment, funding a test wallet and running the demo are added during the hackathon and will be complete here before the Sunday 13:00 deadline.
@@ -34,7 +39,7 @@ In progress. Prerequisites, environment, funding a test wallet and running the d
 `packages/` core contracts, AI, wallet · `apps/` server and web · `fixtures/` sample invoices · `evals/` AI evaluations (all created during the hackathon).
 
 ## Team
-Coin³: Luca, Antonino and Giuseppe. Luca and Antonino each work with a coding agent; Giuseppe coordinates and tests.
+Coin³: Luca ([@LucaCraft89](https://github.com/LucaCraft89)), Antonino ([@Antoninova](https://github.com/Antoninova)) and Giuseppe. Luca and Antonino each work with a coding agent; Giuseppe coordinates and tests.
 
 ## Security
 Never commit API keys, `.env` files, seed phrases or private keys. Seeds live in a git-ignored data folder. Use test networks and test funds only.
