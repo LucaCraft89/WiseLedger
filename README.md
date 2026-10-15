@@ -39,7 +39,7 @@ In progress. Prerequisites, environment, funding a test wallet and running the d
 `packages/` core contracts, AI, wallet · `apps/` server and web · `fixtures/` sample invoices · `evals/` AI evaluations (all created during the hackathon).
 
 ## Team
-Coin³: Luca ([@LucaCraft89](https://github.com/LucaCraft89)), Antonino ([@Antoninova](https://github.com/Antoninova)) and Giuseppe. Luca and Antonino each work with a coding agent; Giuseppe coordinates and tests.
+Coin³: Luca ([@LucaCraft89](https://github.com/LucaCraft89)), Antonino ([@Antoninova](https://github.com/Antoninova)) and Giuseppe ([@CassiGiuse](https://github.com/CassiGiuse)). Luca and Antonino each work with a coding agent; Giuseppe coordinates and tests.
 
 ## Security
 Never commit API keys, `.env` files, seed phrases or private keys. Seeds live in a git-ignored data folder. Use test networks and test funds only.
