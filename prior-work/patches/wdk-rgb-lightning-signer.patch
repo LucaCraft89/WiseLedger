@@ -1,0 +1,23 @@
+--- C:/Users/anton/AppData/Local/Temp/claude/C--Users-anton-Desktop-Agentic-Dollars-Bitcoin/5f95132f-1e61-497a-9387-842e54a591cd/scratchpad/npm/package/src/node-binding.js
++++ pacchetto-nuovo-pc/compilati/node-binding.js
+@@ -1,3 +1,5 @@
++import * as __fs from 'node:fs'
++const require_fs = () => __fs
+ // Copyright 2026 UTEXO.
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -126,9 +128,13 @@
+       }
+       return
+     }
+-    this._signer = NativeExternalSigner.create(
++    // PATCH prova: stato VLS persistente (come raccomanda il README del binding)
++    const vlsDir = this._config.dataDir + '/vls'
++    require_fs().mkdirSync(vlsDir, { recursive: true, mode: 0o700 })
++    this._signer = NativeExternalSigner.createWithStorage(
+       seedHex,
+       this._config.network,
++      vlsDir,
+       this._config.permissiveSignerPolicy ?? true
+     )
+     wipeSecret(this._seedHex)

@@ -1,0 +1,11 @@
+Fix applied to node_modules/@utexo/rgb-lightning-node-nodejs/Cargo.lock (0.1.0-beta.16) before building the Node binding from source:
+
+  rln-external-signer
+-   source = "git+https://github.com/UTEXO-Protocol/rln-external-signer.git?branch=main#59e2932eb5d3d40ac5ded2b8951a43ecdb7ad865"
++   source = "git+https://github.com/UTEXO-Protocol/rln-external-signer.git?branch=main#0fb005ec4b927ddbe13e1646d247b5bb11e8ffed"
+
+Why: the commit pinned in the published package panics on the first payment
+(copy_from_slice: source slice length (41) does not match destination slice length (32),
+vls-core channel.rs:119). The RLN v0.11.0-beta.3 source uses 0fb005e ("restored-channel panic" fix).
+Then: RUSTUP_TOOLCHAIN=1.88.0 cargo build --release --locked, and copy target/release/librln_node.so
+to index-linux-x64-gnu.node. The compiled binary is NOT in this repository.
