@@ -23,7 +23,8 @@ Invoice fraud (changed bank details, fake suppliers, duplicate invoices, instruc
 Declared as the organizers asked. Before kickoff (Saturday 17 October 2026, 09:30 CEST) we prepared the following. **No product code exists in this repository before kickoff.**
 - **Planning and team organisation**, kept in a separate private repository: architecture, milestones and working rules for our two coding agents. Drafted with the help of Claude.
 - **Machines and downloads**: Linux setups (WSL2/Ubuntu, Fedora, Kali), Node, pnpm, Docker, QVAC and model downloads, funded test wallets on Mutinynet.
-- **Throwaway feasibility experiments on 14-15 October (Antonino)**, to check that the packages install and run. Their scripts are in [`prior-work/`](prior-work/), unchanged, with a note on what each one does.
+- **Machine setup scripts** (WSL2/Ubuntu by Antonino, Fedora derived from it), in [`prior-work/setup/`](prior-work/setup/): they only install system tools, no product code.
+- **Throwaway feasibility experiments on 14-15 October (Antonino)**, to check that the packages install and run. These were run outside any repository; their scripts are added to [`prior-work/`](prior-work/) as they are, and what is listed under "What already works" below is exactly what they showed.
 
 ### What already works (from the experiments, not product code)
 - `@qvac/sdk` loads a Qwen3.5-0.8B model on a laptop and answers a prompt, offline.
