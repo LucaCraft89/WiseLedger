@@ -1,17 +1,12 @@
-// Local zod DTOs for the M3 routes, with the names and fields B is adding to core/api.ts (not merged yet: core gap).
-// Swap these imports for 'core' once B's PR lands.
-import { JobSchema, JobStatusSchema, LabelEntrySchema } from 'core';
+// Server-side zod DTOs for the M3 routes. Response shapes come from core/api.ts (B); the request validators here are
+// supersets of core's (payee note, includeFailed, from ≤ to, plain-language messages), so core clients stay valid.
+// The onboarding DTOs are local until B copies them into core/api.ts.
+import { JobStatusSchema, LabelEntrySchema } from 'core';
 import { z } from 'zod';
 import { isIsoDate, MAX_LABEL_LENGTH, MAX_LABELS } from './limits.js';
 
 // GET /api/schedule
 export const ScheduleListQuery = z.object({ status: JobStatusSchema.optional() });
-export const ScheduleListResponse = z.object({ jobs: z.array(JobSchema) });
-export type ScheduleListResponse = z.infer<typeof ScheduleListResponse>;
-
-// POST /api/schedule/:jobId/cancel
-export const ScheduleCancelResponse = z.object({ ok: z.boolean() });
-export type ScheduleCancelResponse = z.infer<typeof ScheduleCancelResponse>;
 
 // GET /api/labels
 export const LabelsListResponse = z.object({ labels: z.array(LabelEntrySchema) });
@@ -45,7 +40,7 @@ export const FiscalQuery = z
   .refine((q) => q.from <= q.to, { message: 'the start date must be on or before the end date', path: ['from'] });
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
-/** Server routes added in M3 (not in core API_ROUTES yet: core gap). */
+/** Server routes added in M3 (core API_ROUTES has all but labelsList, labelsPutPayee and fiscalAlias). */
 export const M3_ROUTES = {
   scheduleList: 'GET /api/schedule',
   scheduleCancel: 'POST /api/schedule/:jobId/cancel',

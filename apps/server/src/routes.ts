@@ -17,6 +17,8 @@ import {
   isWalletError,
   type LlmInfo,
   RejectRequest,
+  type ScheduleCancelResponse,
+  type ScheduleListResponse,
   type TransferDto,
   type TransferInfo,
   type TransfersResponse,
@@ -35,9 +37,7 @@ import {
   type LabelsListResponse,
   LabelsPutRequest,
   M3_ROUTES,
-  type ScheduleCancelResponse,
   ScheduleListQuery,
-  type ScheduleListResponse,
 } from './api-local.js';
 import type { WalletFiscalService } from './fiscal.js';
 import type { SqliteJobStore } from './jobs.js';
