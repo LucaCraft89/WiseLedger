@@ -8,6 +8,7 @@ import { SqliteGuardStore } from './guard-store.js';
 import { StoreHistory } from './history.js';
 import { SqliteJobStore } from './jobs.js';
 import { SqliteLabelStore } from './labels.js';
+import { registerOnboardingRoutes } from './onboarding.js';
 import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
 import { registerRoutes } from './routes.js';
@@ -69,8 +70,10 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   settle = () => {
     orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
   };
-  // The mock wallet has no sync loop: settle on a timer instead (e.g. a timed-out mock payment).
-  const mockSettle = providers.sync ? null : setInterval(settle, Math.max(1000, config.mockStepMs));
+  // The mock wallet has no sync loop: settle on a timer instead (e.g. a timed-out mock payment). The real wallet
+  // settles after each sync (its loop starts once onboarding has a ready wallet).
+  const mockSettle =
+    providers.sync || config.walletBackend !== 'mock' ? null : setInterval(settle, Math.max(1000, config.mockStepMs));
   mockSettle?.unref();
 
   await app.register(multipart, { limits: { fileSize: maxUploadBytes, files: 1 } });
@@ -83,6 +86,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     jobs,
     fiscal: fiscalService,
     llmInfo: providers.llmInfo,
+    holder: providers.holder,
     walletBackend: config.walletBackend,
     network: config.rgbNetwork,
     uploadMaxMb: config.uploadMaxMb,
@@ -100,6 +104,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       ...providers.problems(),
     ],
   });
+  registerOnboardingRoutes(app, providers.holder);
   app.addHook('onClose', async () => {
     if (mockSettle) clearInterval(mockSettle);
     await orchestrator.idle();

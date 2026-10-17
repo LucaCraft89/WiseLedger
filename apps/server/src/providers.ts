@@ -24,9 +24,10 @@ import type {
   WalletPort,
 } from 'core';
 import { MemoryJobStore, MemoryLabelStore, MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
-import { createWallet, type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
+import { type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
 import { ConfigError, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
+import { onboardingNetwork, realWalletFactory, type WalletFactory, WalletHolder } from './onboarding.js';
 
 export interface Providers {
   wallet: WalletPort;
@@ -35,8 +36,10 @@ export interface Providers {
   /** The PaymentGuard every execution goes through. */
   guard: LiveGuard;
   llmInfo: () => LlmInfo;
-  /** Background sync for the real wallet; null on the mock wallet. */
-  sync: SyncLoop | null;
+  /** Background sync for the real wallet; null on the mock wallet and until the real wallet is ready. */
+  readonly sync: SyncLoop | null;
+  /** Onboarding state and the wallet swap (create / restore / unlock). `wallet` is its port on the real backend. */
+  holder: WalletHolder;
   /** Labels (SqliteLabelStore in the server), for the Treasurer's label tools once B's ai package takes them. */
   labels: LabelStore;
   /** Scheduled payments (SqliteJobStore in the server), for B's Scheduler. */
@@ -64,6 +67,8 @@ export interface ProviderOptions {
   /** Test seams: use these instead of building from config. */
   llm?: LlmProvider;
   wallet?: WalletPort;
+  /** Test seam for onboarding on the real backend (fake create / restore / unlock, no native code). */
+  walletFactory?: WalletFactory;
 }
 
 type AssetLike = Awaited<ReturnType<WalletPort['listAssets']>>[number];
@@ -204,14 +209,31 @@ class GuardedTreasurer implements TreasurerAgent {
   chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
 }
 
-async function openWallet(config: ServerConfig, env: NodeJS.ProcessEnv): Promise<WalletPort> {
-  if (config.walletBackend === 'mock') return new MockWallet({ stepMs: config.mockStepMs });
+/** Opens the wallet holder: mock and injected wallets are ready at once; the real backend may wait for onboarding. */
+async function openHolder(
+  config: ServerConfig,
+  env: NodeJS.ProcessEnv,
+  opts: ProviderOptions,
+  onReady: (wallet: WalletPort) => void,
+): Promise<WalletHolder> {
+  const base = { walletBackend: config.walletBackend, network: onboardingNetwork(config), onReady };
+  if (opts.wallet || config.walletBackend === 'mock') {
+    const wallet = opts.wallet ?? new MockWallet({ stepMs: config.mockStepMs });
+    const holder = WalletHolder.ready(wallet, base);
+    await holder.boot();
+    return holder;
+  }
   try {
-    const wallet = await createWallet(
-      walletConfigFromEnv({ ...env, WALLET_BACKEND: config.walletBackend, RGB_NETWORK: config.rgbNetwork }),
-    );
-    await wallet.init();
-    return wallet;
+    let factory = opts.walletFactory;
+    let envPassphrase: string | undefined = env.WALLET_PASSPHRASE;
+    if (!factory) {
+      const cfg = walletConfigFromEnv({ ...env, WALLET_BACKEND: config.walletBackend, RGB_NETWORK: config.rgbNetwork });
+      envPassphrase = cfg.seedPassphrase;
+      factory = realWalletFactory(cfg);
+    }
+    const holder = new WalletHolder(factory, { ...base, ...(envPassphrase ? { envPassphrase } : {}) });
+    await holder.boot();
+    return holder;
   } catch (err) {
     throw new ConfigError(
       `The wallet could not start (WALLET_BACKEND=${config.walletBackend}, RGB_NETWORK=${config.rgbNetwork}): ${
@@ -272,22 +294,25 @@ function realAi(config: ServerConfig, wallet: WalletPort, guard: PaymentGuard, o
 
 export async function createProviders(config: ServerConfig, opts: ProviderOptions): Promise<Providers> {
   const env = opts.env ?? process.env;
-  const wallet = opts.wallet ?? (await openWallet(config, env));
-  if (opts.wallet) await wallet.init();
-
-  const sync =
-    config.walletBackend === 'mock'
-      ? null
-      : startSyncLoop(wallet, {
-          intervalMs: config.walletSyncMs,
-          onSynced: () => opts.onSynced?.(),
-          onError: (err, next) => opts.log?.warn({ err, nextDelayMs: next }, 'Wallet sync failed; will retry'),
-        });
+  let sync: SyncLoop | null = null;
   const kick = () => {
     void sync?.kick().catch(() => undefined);
   };
-  // First sync right away (background), so /api/health shows a sync time without waiting a full interval.
-  kick();
+  // The real wallet syncs in the background once it is ready (at boot, or after create / restore / unlock).
+  const onReady = (ready: WalletPort) => {
+    if (config.walletBackend === 'mock' || sync) return;
+    sync = startSyncLoop(ready, {
+      intervalMs: config.walletSyncMs,
+      onSynced: () => opts.onSynced?.(),
+      onError: (err, next) => opts.log?.warn({ err, nextDelayMs: next }, 'Wallet sync failed; will retry'),
+    });
+    // First sync right away (background), so /api/health shows a sync time without waiting a full interval.
+    kick();
+  };
+  const holder = await openHolder(config, env, opts, onReady);
+  // Mock and injected wallets are used directly (unchanged mock path); the real backend goes through the holder.
+  const wallet: WalletPort =
+    (opts.wallet || config.walletBackend === 'mock') && holder.current ? holder.current : holder.port;
 
   const guard = new LiveGuard({ store: opts.guardStore, wallet, config });
   const ai =
@@ -306,11 +331,14 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
     jobs,
     fiscal,
     wallet,
+    holder,
+    get sync() {
+      return sync;
+    },
     analyzer: ai.analyzer,
     treasurer,
     guard,
     llmInfo,
-    sync,
     problems: () => {
       const out: string[] = [];
       if (sync?.lastError) out.push(`The last wallet sync failed: ${sync.lastError}. It will be retried.`);
@@ -321,7 +349,7 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
     async close() {
       sync?.stop();
       await ai.close();
-      (wallet as { close?: () => void }).close?.();
+      holder.close();
     },
   };
 }
