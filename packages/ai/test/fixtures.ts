@@ -20,6 +20,7 @@ export interface ExpectedFixture {
   verdict: string | string[];
   flags: string[];
   seenBefore?: string[];
+  lineAmounts: string[];
 }
 
 export const EXPECTED: ExpectedFixture[] = JSON.parse(
@@ -47,7 +48,7 @@ export function perfectAnswer(f: ExpectedFixture): LlmExtraction {
     dueDate: null,
     currency: f.currency,
     total: f.total,
-    lineItems: [{ description: 'item', quantity: 1, amount: f.total }],
+    lineItems: f.lineAmounts.map((amount, i) => ({ description: `line ${i + 1}`, quantity: 1, amount })),
     paymentMethod: f.paymentMethod as LlmExtraction['paymentMethod'],
     rgbInvoice: f.rgbInvoice,
     iban: null,
