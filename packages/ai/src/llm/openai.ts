@@ -36,7 +36,7 @@ export class OpenAiCompatProvider implements LlmProvider {
   constructor(private readonly opts: OpenAiCompatOptions = {}) {
     const raw = (opts.baseUrl ?? process.env.OPENAI_COMPAT_BASE_URL ?? 'http://localhost:11434').replace(/\/+$/, '');
     this.baseUrl = raw.endsWith('/v1') ? raw : `${raw}/v1`;
-    this.model = opts.model ?? process.env.QVAC_MODEL ?? 'QWEN3_5_2B_MULTIMODAL_Q4_K_M';
+    this.model = opts.model ?? (process.env.QVAC_MODEL || 'QWEN3_5_2B_MULTIMODAL_Q4_K_M');
   }
 
   info(): LlmInfo {
