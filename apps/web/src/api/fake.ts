@@ -117,6 +117,9 @@ function kindOf(name: string): InvoiceSourceKind {
   return 'text';
 }
 
+/** What the demo-mode microphone always "hears". */
+export const FAKE_TRANSCRIPT = 'pay the latest invoice on Friday';
+
 export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const wallet = new MockWallet({ stepMs: opts.transferStepMs ?? 1500 });
   const { state: onboardingState, ...onboarding } = createFakeOnboarding(opts.onboarding);
@@ -512,6 +515,12 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       return labels.set(transferId, clean);
     },
     chat: (req) => fakeChat(req.message),
+    async transcribe(audio) {
+      if (!audio.size) {
+        throw new ApiCallError('AUDIO_EMPTY', 'We did not hear anything. Hold the button and speak, then try again.');
+      }
+      return { text: FAKE_TRANSCRIPT, ms: 0 };
+    },
     async schedule() {
       return { jobs: await jobs.list() };
     },
