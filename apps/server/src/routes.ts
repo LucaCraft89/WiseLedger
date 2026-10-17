@@ -16,6 +16,7 @@ import {
   type InvoiceSummaryDto,
   isWalletError,
   type LlmInfo,
+  type ReceivesListResponse,
   RejectRequest,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
@@ -37,8 +38,6 @@ import {
   type LabelsListResponse,
   LabelsPutRequest,
   M3_ROUTES,
-  M4_ROUTES,
-  ReceiveNote,
   ScheduleListQuery,
 } from './api-local.js';
 import type { WalletFiscalService } from './fiscal.js';
@@ -297,7 +296,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
-    const { note } = ReceiveNote.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
       expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
@@ -305,7 +303,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(body.amount ? { amount: body.amount } : {}),
     });
     // Remembered so the app can tell when it is paid (matched after each wallet sync).
-    deps.receives.add(inv, note);
+    deps.receives.add(inv, body.note);
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
@@ -315,7 +313,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
-  route(app, M4_ROUTES.receivesList, async () => {
+  route(app, API_ROUTES.walletReceives, async (): Promise<ReceivesListResponse> => {
     deps.receives.reconcile(await wallet.listTransfers());
     return { receives: deps.receives.list() };
   });
