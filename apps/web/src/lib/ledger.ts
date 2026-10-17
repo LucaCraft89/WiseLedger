@@ -1,4 +1,5 @@
 // Pure helpers for the wallet screens: labels, transfers, scheduled payments, chat and the fiscal report.
+import type { ApiClient } from '../api/client.js';
 import type { ChatResponse, FiscalQuery, Job, TransferDto } from '../api/contracts.js';
 
 // ---------- labels ----------
@@ -137,6 +138,27 @@ export function fiscalFromToolCall(c: ToolCall): FiscalQuery | undefined {
   const date = /^\d{4}-\d{2}-\d{2}$/;
   if (typeof r.from !== 'string' || typeof r.to !== 'string' || !date.test(r.from) || !date.test(r.to)) return undefined;
   return { from: r.from, to: r.to, format: r.format === 'json' ? 'json' : 'csv' };
+}
+
+/**
+ * "Confirm" on a schedule card: reads the invoice for its current planId, then confirms with executeAt
+ * (taken from the schedule_payment call). override only when the verdict is review. Returns a plain sentence.
+ */
+export async function confirmScheduleFromChat(
+  api: Pick<ApiClient, 'getInvoice' | 'confirm'>,
+  nc: NeedsConfirmation,
+  calls: readonly ToolCall[],
+): Promise<string> {
+  const executeAt = scheduleExecuteAt(calls);
+  if (!executeAt) throw new Error('The payment date is missing. Please ask the Treasurer again.');
+  if (!nc.invoiceId) throw new Error('The invoice is missing. Please ask the Treasurer again.');
+  const d = await api.getInvoice(nc.invoiceId);
+  const planId = d.plan?.planId;
+  if (!planId) throw new Error('This invoice has no payment ready. Open the invoice to check it.');
+  const verdict = d.report?.verdict;
+  if (verdict === 'block') throw new Error('This invoice was stopped because it looks unsafe. It cannot be paid.');
+  await api.confirm(nc.invoiceId, { planId, executeAt, ...(verdict === 'review' ? { override: true } : {}) });
+  return scheduledSentence(executeAt);
 }
 
 export interface ChatTurn {
