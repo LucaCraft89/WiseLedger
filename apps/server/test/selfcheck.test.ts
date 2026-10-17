@@ -70,6 +70,16 @@ describe('SelfCheck', () => {
     expect(await mock.run()).toEqual([]);
   });
 
+  it('a payment settling (spendable 0, future fine) is not a problem', async () => {
+    const busy = { ...TUSDT, balance: { settled: '862000000', future: '837000000', spendable: '0' } };
+    const c = new SelfCheck({
+      ...base,
+      wallet: () => wallet({ sats: 90_000, freeUtxos: 2, assets: [busy] }),
+      fetch: up,
+    });
+    expect(await c.run()).toEqual([]);
+  });
+
   it('no asset in the allowlist held → says so', async () => {
     const c = new SelfCheck({
       ...base,

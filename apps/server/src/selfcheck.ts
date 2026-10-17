@@ -165,7 +165,8 @@ export class SelfCheck {
             ? 'The wallet does not hold the asset in ASSET_ALLOWLIST yet: receive some, or check the asset ID.'
             : 'No test asset to pay with yet: run `pnpm -F wallet issue-asset` (or receive TUSDT).',
         );
-      } else if (BigInt(asset.balance.spendable) < min) {
+      } else if (BigInt(asset.balance.spendable) < min && BigInt(asset.balance.future) < min) {
+        // spendable alone drops to 0 while a payment settles (change is locked): only the future balance counts.
         out.push(
           `Only ${tokens(BigInt(asset.balance.spendable), asset.precision)} ${asset.ticker} can be spent right now (a demo payment is ${tokens(min, asset.precision)}). Wait for pending transfers to settle, or receive more.`,
         );
