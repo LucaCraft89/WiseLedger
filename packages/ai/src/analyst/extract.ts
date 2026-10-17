@@ -116,8 +116,13 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     return typeof v === 'string' ? (v.trim() as T) : v;
   };
 
-  const total = normalizeDecimal(raw.total);
-  if (raw.total && !total) fieldConfidence.total = 0;
+  // Small models sometimes drop the total: read it from a single printed TOTAL line instead (lower confidence).
+  let total = normalizeDecimal(raw.total);
+  let totalFromText = false;
+  if (!total && sourceText !== undefined) {
+    total = printedTotal(sourceText);
+    totalFromText = total !== undefined;
+  }
 
   // The RGB invoice must be printed in the document (text mode). If the model altered it, fall back to the
   // single rgb: string in the text; with several candidates keep the model's verbatim choice or nothing.
@@ -127,6 +132,9 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     if (rgbInvoice && !sourceText.includes(rgbInvoice)) rgbInvoice = undefined;
     if (!rgbInvoice && candidates.length === 1) rgbInvoice = candidates[0];
   }
+
+  const keptTotal = total ? keep('total', total) : (keep('total', undefined) as undefined);
+  if (totalFromText) fieldConfidence.total = Math.min(conf, 0.6);
 
   const ext: InvoiceExtraction = {
     issuer: {
@@ -138,7 +146,7 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     ...opt('issueDate', keep('issueDate', raw.issueDate)),
     ...opt('dueDate', keep('dueDate', raw.dueDate)),
     ...opt('currency', keep('currency', raw.currency?.toUpperCase())),
-    ...opt('total', total ? keep('total', total) : undefined),
+    ...opt('total', keptTotal),
     lineItems: raw.lineItems.slice(0, 10).map((l) => ({
       description: l.description.slice(0, 200),
       ...opt('quantity', l.quantity ?? undefined),
@@ -154,6 +162,18 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     fieldConfidence,
   };
   return InvoiceExtraction.parse(ext);
+}
+
+/** The amount on the one line that starts with TOTAL/TOTALE/AMOUNT DUE; undefined if absent or ambiguous. */
+export function printedTotal(text: string): string | undefined {
+  const found = new Set<string>();
+  for (const m of text.matchAll(
+    /^\s*(?:grand\s+)?(?:total(?:e)?(?:\s+due)?|amount\s+due|importo\s+totale)\b[^\d\n]*([\d][\d.,]*)/gim,
+  )) {
+    const v = normalizeDecimal(m[1]);
+    if (v) found.add(v);
+  }
+  return found.size === 1 ? [...found][0] : undefined;
 }
 
 /** "1.250,00" | "1,250.00" | "€ 25" | "25.00 TUSDT" → "1250.00" | "25". Undefined when not a number. */

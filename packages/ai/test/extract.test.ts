@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MockLlm } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
-import { extractInvoice, normalizeDecimal, toExtraction } from '../src/analyst/extract.js';
+import { extractInvoice, normalizeDecimal, printedTotal, toExtraction } from '../src/analyst/extract.js';
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
@@ -67,6 +67,13 @@ describe('extract: deterministic clean-up', () => {
     const text = 'rgb:a/1 and rgb:b/2';
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:b/2' }, text).payment.rgbInvoice).toBe('rgb:b/2');
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:c/3' }, text).payment.rgbInvoice).toBeUndefined();
+  });
+  it('falls back to a single printed TOTAL line when the model drops the total', () => {
+    const e = toExtraction({ ...base, total: null }, 'Item 10.00\nTOTAL DUE: 55.00 TUSDT\n');
+    expect(e.total).toBe('55.00');
+    expect(e.fieldConfidence.total).toBeLessThanOrEqual(0.6);
+    expect(printedTotal('TOTAL: 12.00\nTotale: 13.00')).toBeUndefined();
+    expect(printedTotal('TOTALE: EUR 120.00')).toBe('120.00');
   });
   it('marks missing fields with confidence 0', () => {
     const e = toExtraction({ ...base, invoiceNumber: null, total: 'abc' });
