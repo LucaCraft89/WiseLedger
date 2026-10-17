@@ -1,0 +1,14 @@
+VERDE GIARDINI SNC
+Strada del Drosso 33, 10135 Torino - P.IVA IT07788990011
+fatture@verdegiardini.example
+
+INVOICE No. VG-2027-01
+Issue date: 2027-03-01
+Due date: 2027-03-31
+
+Description                      Qty   Unit price   Amount
+Garden maintenance, spring         1        40.00    40.00
+
+TOTAL DUE: 40.00 TUSDT
+
+RGB invoice: rgb:mock/rgb:mock-tusdt/40000000/1900000000

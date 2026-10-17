@@ -11,13 +11,15 @@ export const sortFlags = (flags: readonly RiskFlag[]): RiskFlag[] =>
 /** One flag: colour bar + "Stop/Check/Info", a short title, the plain sentence and a quoted evidence snippet. */
 export function FlagCard({ flag }: { flag: RiskFlag }) {
   const c = SEVERITY_COLORS[flag.severity];
+  // Info flags are calm notes: thin grey bar, no coloured badge.
+  const calm = flag.severity === 'info';
   return (
     <li
       data-severity={flag.severity}
       data-code={flag.code}
       style={{
         background: c.bg,
-        borderLeft: `6px solid ${c.border}`,
+        borderLeft: `${calm ? 3 : 6}px solid ${c.border}`,
         borderRadius: 4,
         padding: '8px 12px',
         marginBottom: 8,
@@ -26,8 +28,9 @@ export function FlagCard({ flag }: { flag: RiskFlag }) {
       <div>
         <span
           style={{
-            background: c.border,
-            color: '#fff',
+            background: calm ? 'transparent' : c.border,
+            color: calm ? c.border : '#fff',
+            border: calm ? `1px solid ${c.border}` : undefined,
             fontWeight: 700,
             fontSize: '0.8em',
             padding: '1px 8px',

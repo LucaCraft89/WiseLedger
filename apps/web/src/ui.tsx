@@ -1,5 +1,7 @@
 import QRCode from 'qrcode';
 import { Component, createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import { ApiCallError } from './api/client.js';
+import { apiErrorWords } from './lib/payment.js';
 
 type ToastKind = 'info' | 'success' | 'error';
 interface ToastItem {
@@ -15,8 +17,10 @@ const ToastContext = createContext<ShowToast>(() => {});
 export const useToast = (): ShowToast => useContext(ToastContext);
 
 /** Error → message for a toast (ApiCallError messages are already plain language). */
-export const errorText = (err: unknown, fallback = 'Something went wrong. Please try again.'): string =>
-  err instanceof Error && err.message ? err.message : fallback;
+export const errorText = (err: unknown, fallback = 'Something went wrong. Please try again.'): string => {
+  if (err instanceof ApiCallError) return apiErrorWords(err.code, err.message, err.status);
+  return err instanceof Error && err.message ? err.message : fallback;
+};
 
 const TOAST_COLORS: Record<ToastKind, string> = { info: '#e2e3e5', success: '#d4edda', error: '#f8d7da' };
 

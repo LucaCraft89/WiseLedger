@@ -3,6 +3,7 @@ import type { ApiClient } from './api/client.js';
 import type { AppEvent, InvoiceDetailResponse, PaymentPlan, Stage } from './api/contracts.js';
 import { ConfirmDialog, PaymentProgressView } from './ConfirmDialog.js';
 import { StatusChip } from './InvoiceListPage.js';
+import { aiRunStats, recordAiRun } from './lib/ai-stats.js';
 import {
   type AssetMeta,
   dialogSentence,
@@ -68,6 +69,12 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
     return unsubscribe;
   }, [api, invoiceId, addEvents, refresh]);
 
+  // Speed of the last analysis, for the "Local AI" panel in Settings (memory only).
+  const report = detail?.report;
+  useEffect(() => {
+    recordAiRun(aiRunStats(events, report));
+  }, [events, report]);
+
   if (error && !detail) {
     return (
       <section>
@@ -78,7 +85,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   }
   if (!detail) return <p>Loading the invoice…</p>;
 
-  const { invoice, report, plan, confirmationSentence, execution } = detail;
+  const { invoice, plan, confirmationSentence, execution } = detail;
   const timeline = buildFullTimeline(events);
   const history = stateHistory(events);
   const progress = paymentProgress(invoice.state, events, execution);

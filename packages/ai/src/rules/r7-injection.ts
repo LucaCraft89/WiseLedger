@@ -23,12 +23,35 @@ export function findInjection(text: string): string | undefined {
   return undefined;
 }
 
-export const r7Injection: Rule = ({ sourceText, extraction }) => {
+export const r7Injection: Rule = ({ sourceText, extraction, removed = [] }) => {
+  const tokens = removed.filter((r) => r.startsWith('chat-template'));
+  if (tokens.length) {
+    return [
+      {
+        code: FLAG_CODES.R7_INJECTION,
+        severity: 'block',
+        message: 'The invoice contains hidden AI control codes. We removed them and stopped here.',
+        evidence: (tokens[0] ?? '').slice(0, 80),
+      },
+    ];
+  }
   const fields = [extraction.notes, extraction.issuer.name, ...extraction.lineItems.map((l) => l.description)]
     .filter(Boolean)
     .join('\n');
   const hit = findInjection(`${sourceText ?? ''}\n${fields}`);
-  if (!hit) return [];
+  const invisible = removed.find((r) => r.includes('invisible'));
+  if (!hit) {
+    return invisible
+      ? [
+          {
+            code: FLAG_CODES.R7_INJECTION,
+            severity: 'warn',
+            message: 'The invoice text contained invisible characters. We removed them; check the details carefully.',
+            evidence: invisible,
+          },
+        ]
+      : [];
+  }
   return [
     {
       code: FLAG_CODES.R7_INJECTION,
