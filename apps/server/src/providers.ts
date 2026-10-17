@@ -37,7 +37,8 @@ export interface Providers {
   treasurer: SchedulingTreasurer;
   /** The PaymentGuard every execution goes through. */
   guard: LiveGuard;
-  llmInfo: () => LlmInfo;
+  /** Model status; warmUpMs once the model is warm (shown in the "Local AI" panel). */
+  llmInfo: () => LlmInfo & { warmUpMs?: number };
   /** Background sync for the real wallet; null on the mock wallet and until the real wallet is ready. */
   readonly sync: SyncLoop | null;
   /** Onboarding state and the wallet swap (create / restore / unlock). `wallet` is its port on the real backend. */
@@ -272,7 +273,7 @@ async function openHolder(
 export interface AiProviders {
   analyzer: InvoiceAnalyzer;
   treasurer: SchedulingTreasurer;
-  llmStatus: () => LlmInfo;
+  llmStatus: () => LlmInfo & { warmUpMs?: number };
   /** Starts loading the model in the background; never rejects. */
   warmUp: () => void;
   close: () => Promise<void>;
@@ -312,8 +313,7 @@ function realAi(
       ...(opts.chatInvoices ? { invoices: opts.chatInvoices } : {}),
     }),
     llmStatus: () => {
-      const { warmUpMs: _ms, ...info } = runtime.status();
-      return info;
+      return runtime.status();
     },
     warmUp: () => {
       void runtime.warmUp().then(() => {

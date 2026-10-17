@@ -56,7 +56,7 @@ export interface RouteDeps {
   labels: SqliteLabelStore;
   jobs: SqliteJobStore;
   fiscal: WalletFiscalService;
-  llmInfo: () => LlmInfo;
+  llmInfo: () => LlmInfo & { warmUpMs?: number };
   /** Onboarding state (needs_setup / locked / ready) for /api/health. */
   holder: WalletHolder;
   walletBackend: WalletResponse['backend'];
@@ -193,7 +193,13 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return {
       ok: llm.state !== 'error',
       time: new Date().toISOString(),
-      llm: { provider: llm.provider, model: llm.model, state: llm.state, onDevice: llm.onDevice },
+      llm: {
+        provider: llm.provider,
+        model: llm.model,
+        state: llm.state,
+        onDevice: llm.onDevice,
+        ...(llm.warmUpMs !== undefined ? { warmUpMs: llm.warmUpMs } : {}),
+      },
       // blockHeight: WalletPort exposes no chain tip yet (core gap), so it is omitted.
       wallet: { backend: deps.walletBackend, network: deps.network, ready: deps.holder.state === 'ready' },
       walletSync: deps.walletSync(),
