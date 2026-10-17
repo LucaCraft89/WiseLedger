@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AnalysisReport, BaseUnits, InvoiceSourceKind, IsoDateTime, LlmProviderName, Verdict } from './analysis.js';
 import { AppEvent } from './events.js';
 import type { AgentReply } from './llm.js';
-import { ExecutionResultSchema, InvoiceStateSchema, PaymentPlanSchema } from './orchestrator.js';
+import { ExecutionResultSchema, InvoiceStateSchema, type PaymentPlan, PaymentPlanSchema } from './orchestrator.js';
 import { AssetBalanceSchema, TransferStatusSchema } from './wallet.js';
 
 const InvoiceStateDto = InvoiceStateSchema;
@@ -222,3 +222,29 @@ export const API_ROUTES = {
   agentChat: 'POST /api/agent/chat',
   health: 'GET /api/health',
 } as const;
+
+/** Base units → display decimal: at least 2 decimals, trailing zeros trimmed ("25000000", 6 → "25.00"; "1234567", 6 → "1.234567"). */
+export function formatAssetAmount(baseUnits: string, precision: number): string {
+  if (!/^\d+$/.test(baseUnits)) return baseUnits;
+  if (precision === 0) return baseUnits;
+  const padded = baseUnits.padStart(precision + 1, '0');
+  const int = padded.slice(0, -precision).replace(/^0+(?=\d)/, '');
+  const frac = padded.slice(-precision).replace(/0+$/, '').padEnd(Math.min(2, precision), '0');
+  return frac ? `${int}.${frac}` : int;
+}
+
+/**
+ * The one sentence the user confirms, built by code from the plan (never by the LLM). Server and web both use this.
+ * "Pay 25.00 TUSDT (asset rgb:…) to Acme Srl, now. Confirm?"
+ */
+export function buildConfirmationSentence(
+  plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
+  asset: { ticker: string; precision: number } | undefined,
+): string {
+  const amount = asset
+    ? `${formatAssetAmount(plan.amount, asset.precision)} ${asset.ticker}`
+    : `${plan.amount} base units`;
+  const when =
+    plan.executeAt === 'now' ? 'now' : `on ${new Date(plan.executeAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}`;
+  return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
+}
