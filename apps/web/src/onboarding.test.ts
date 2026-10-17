@@ -1,3 +1,5 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ApiCallError, createHttpClient, READY_ONBOARDING } from './api/client.js';
 import {
@@ -28,6 +30,8 @@ import {
   SEVERITY_ICON_WORD,
   splitFlags,
 } from './lib/payment.js';
+import { SetupScreen, UnlockScreen } from './OnboardingScreens.js';
+import { LocalAiPanel } from './SettingsPage.js';
 import { errorText } from './ui.js';
 
 const at = '2026-10-17T10:00:00.000Z';
@@ -231,5 +235,28 @@ describe('supplier check and calm info notes', () => {
     expect(splitFlags([note, warn])).toEqual({ alerts: [warn], notes: [note] });
     expect(splitFlags([note]).alerts).toHaveLength(0);
     expect(VERDICT_LABELS.ok).toBe('Looks fine');
+  });
+});
+
+describe('first-run and settings screens render', () => {
+  it('setup screen offers create and restore; unlock asks for the passphrase', () => {
+    const api = createFakeClient({ onboarding: 'needs_setup' });
+    const status = { ...READY_ONBOARDING, state: 'needs_setup' as const, minPassphrase: 8 };
+    const setup = renderToStaticMarkup(createElement(SetupScreen, { api, status, onDone: () => {} }));
+    expect(setup).toContain('Create a new wallet');
+    expect(setup).toContain('Restore from 12 or 24 words');
+    const unlock = renderToStaticMarkup(createElement(UnlockScreen, { api, onDone: () => {} }));
+    expect(unlock).toMatch(/<label[^>]*>Passphrase<input[^>]*type="password"/);
+  });
+
+  it('Local AI panel states where the model runs', () => {
+    const html = renderToStaticMarkup(
+      createElement(LocalAiPanel, {
+        llm: { provider: 'qvac', model: 'qwen3.5-2b-q4', state: 'ready', onDevice: true, warmUpMs: 4200 },
+      }),
+    );
+    expect(html).toContain('running on this computer. Nothing is sent to the internet.');
+    expect(html).toContain('qwen3.5-2b-q4');
+    expect(html).toContain('loaded in 4.2 s');
   });
 });
