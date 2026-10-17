@@ -1,6 +1,8 @@
 // WalletPort on WDK core + @utexo/wdk-wallet-rgb (rgb-lib underneath). Pitfalls handled here (PLAN §3):
 // feeRate always passed; some methods exist only on the rgb-sdk wallet (`getRgbWallet()`); receive invoices are
 // created without assetId; dispose() throws "Invalid checksum" so it is guarded; amounts cross as base-unit strings.
+import fs from 'node:fs';
+import path from 'node:path';
 import WDK from '@tetherto/wdk';
 import WalletManagerRgb from '@utexo/wdk-wallet-rgb';
 import {
@@ -13,6 +15,7 @@ import {
   InvoiceExpired,
   type IssueNiaRequest,
   NoUtxo,
+  type OnboardingInfo,
   type PaymentRequest,
   type PayResult,
   type QuoteResult,
@@ -173,6 +176,7 @@ export class WdkRgbWallet implements WalletPort {
   private wdk: WDK | null = null;
   private account: RgbAccount | null = null;
   private registered = false;
+  private created = false;
 
   /** `deps.account` injects a fake WDK account in tests (no native code, no chain). */
   constructor(
@@ -193,7 +197,8 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
-      const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir);
+      this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
       const Manager = WalletManagerRgb as unknown as Parameters<WDK['registerWallet']>[1];
       this.wdk = new WDK(mnemonic).registerWallet('rgb', Manager, {
@@ -209,6 +214,15 @@ export class WdkRgbWallet implements WalletPort {
       this.registered = true;
     }
     return { backend: 'wdk-rgb', network: this.cfg.network };
+  }
+
+  async onboarding(opts: { reveal?: boolean } = {}): Promise<OnboardingInfo> {
+    const marker = path.join(this.cfg.dataDir, 'seed-shown');
+    const seedShown = fs.existsSync(marker);
+    if (!opts.reveal || seedShown) return { walletCreated: this.created, seedShown };
+    const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+    fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    return { walletCreated: this.created, seedShown: true, mnemonic };
   }
 
   async receiveAddress(): Promise<string> {

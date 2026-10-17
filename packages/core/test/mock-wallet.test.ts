@@ -121,6 +121,10 @@ describe('MockWallet', () => {
     expect(out[0]).toMatchObject({ amount: MOCK_TIMEOUT_AMOUNT, status: 'Settled', rgbInvoice: inv });
   });
 
+  it('reports onboarding done and never reveals a seed', async () => {
+    expect(await new MockWallet().onboarding({ reveal: true })).toEqual({ walletCreated: false, seedShown: true });
+  });
+
   it('issues a new NIA asset', async () => {
     const w = new MockWallet();
     const a = await w.issueAssetNia({ ticker: 'EURT', name: 'Test EUR', precision: 6, amounts: ['500', '500'] });
