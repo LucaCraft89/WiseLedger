@@ -522,6 +522,42 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       // Only what the mock wallet itself reports; a wallet without Lightning means off.
       return wallet.lightningStatus ? wallet.lightningStatus() : LIGHTNING_OFF;
     },
+    async btcTransactions() {
+      // Demo mode only: sample on-chain history so the screen can be tried without a wallet.
+      const day = 86_400_000;
+      const at = (ago: number) => new Date(Date.now() - ago * day).toISOString();
+      return {
+        transactions: [
+          {
+            txid: 'f'.repeat(64),
+            direction: 'sent' as const,
+            purpose: 'token_payment' as const,
+            amountSats: '0',
+            feeSats: '300',
+            confirmed: true,
+            createdAt: at(1),
+          },
+          {
+            txid: 'e'.repeat(64),
+            direction: 'internal' as const,
+            purpose: 'utxo_setup' as const,
+            amountSats: '0',
+            feeSats: '420',
+            confirmed: true,
+            createdAt: at(2),
+          },
+          {
+            txid: 'd'.repeat(64),
+            direction: 'received' as const,
+            purpose: 'bitcoin' as const,
+            amountSats: '150000',
+            feeSats: '0',
+            confirmed: true,
+            createdAt: at(3),
+          },
+        ],
+      };
+    },
     async transfers() {
       return { transfers: await transferList() };
     },

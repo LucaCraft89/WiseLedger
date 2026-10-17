@@ -134,6 +134,27 @@ export const WalletResponse = z.object({
 });
 export type WalletResponse = z.infer<typeof WalletResponse>;
 
+// GET /api/wallet/btc: on-chain Bitcoin (sats) movements of the wallet, newest first. Sats pay network fees and
+// carry the RGB tokens; they are not the TUSDT balance.
+export const BtcTransactionDto = z.object({
+  txid: z.string(),
+  /** received = test bitcoin came in; sent = test bitcoin went out to someone else; internal = only the fee left. */
+  direction: z.enum(['received', 'sent', 'internal']),
+  /** Why the wallet made it: a token payment, preparing coins for tokens, emptying the wallet, or a plain send. */
+  purpose: z.enum(['token_payment', 'utxo_setup', 'drain', 'bitcoin']),
+  /** Sats that moved to or from the wallet, fee excluded. Decimal string. */
+  amountSats: BaseUnits,
+  /** Network fee in sats. Decimal string; "0" when the wallet did not pay it. */
+  feeSats: BaseUnits,
+  confirmed: z.boolean(),
+  /** Absent while unconfirmed. */
+  createdAt: IsoDateTime.optional(),
+});
+export type BtcTransactionDto = z.infer<typeof BtcTransactionDto>;
+
+export const BtcTransactionsResponse = z.object({ transactions: z.array(BtcTransactionDto) });
+export type BtcTransactionsResponse = z.infer<typeof BtcTransactionsResponse>;
+
 // POST /api/wallet/receive
 export const WalletReceiveRequest = z.object({
   assetId: z.string().optional(),
@@ -372,6 +393,7 @@ export const API_ROUTES = {
   walletReceive: 'POST /api/wallet/receive',
   walletReceives: 'GET /api/wallet/receives',
   walletLightning: 'GET /api/wallet/lightning',
+  walletBtc: 'GET /api/wallet/btc',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
   /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */

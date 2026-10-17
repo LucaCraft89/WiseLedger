@@ -5,6 +5,8 @@ import {
   API_ROUTES,
   type ApiError,
   type AppEvent,
+  type BtcTransactionDto,
+  type BtcTransactionsResponse,
   ChatRequest,
   type ChatResponse,
   type ChatStreamLine,
@@ -113,6 +115,41 @@ function btcBalanceSats(wallet: WalletPort): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+const BTC_PURPOSE = ['token_payment', 'drain', 'utxo_setup', 'bitcoin'] as const; // rgb-sdk TransactionType order
+
+interface RawBtcTx {
+  transactionType?: number;
+  txid?: string;
+  received?: number;
+  sent?: number;
+  fee?: number;
+  confirmationTime?: { timestamp?: number };
+}
+
+/** On-chain movements, newest first (unconfirmed on top). BDK: sent − received = amount out + fee. */
+export function toBtcTransactions(raw: unknown): BtcTransactionDto[] {
+  if (!Array.isArray(raw)) return [];
+  const out: (BtcTransactionDto & { at: number })[] = [];
+  for (const t of raw as RawBtcTx[]) {
+    const { txid, received = 0, sent = 0, fee = 0 } = t;
+    if (!txid || ![received, sent, fee].every((n) => Number.isSafeInteger(n) && n >= 0)) continue;
+    const ours = sent > 0;
+    const amount = ours ? Math.max(0, sent - received - fee) : received;
+    const ts = t.confirmationTime?.timestamp;
+    out.push({
+      txid,
+      direction: !ours ? 'received' : amount > 0 ? 'sent' : 'internal',
+      purpose: BTC_PURPOSE[t.transactionType ?? 3] ?? 'bitcoin',
+      amountSats: String(amount),
+      feeSats: String(ours ? fee : 0),
+      confirmed: ts !== undefined,
+      ...(ts !== undefined ? { createdAt: new Date(ts * 1000).toISOString() } : {}),
+      at: ts !== undefined ? ts : Number.MAX_SAFE_INTEGER,
+    });
+  }
+  return out.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto);
 }
 
 function isTooLarge(err: unknown): boolean {
@@ -333,6 +370,17 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           }
         : {}),
     };
+  });
+
+  route(app, API_ROUTES.walletBtc, async (): Promise<BtcTransactionsResponse> => {
+    const w = wallet as { btcTransactions?: () => unknown };
+    let raw: unknown;
+    try {
+      raw = w.btcTransactions?.();
+    } catch {
+      raw = undefined; // the Bitcoin list is a read-only extra: never fail the wallet screen over it
+    }
+    return { transactions: toBtcTransactions(raw) };
   });
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {

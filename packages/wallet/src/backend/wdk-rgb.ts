@@ -43,6 +43,8 @@ export interface RgbSdkWallet {
   /** Plain BTC send (scripts only: test sats between our own wallets; RGB payments go through pay()). */
   sendBtc(p: { address: string; amount: number; feeRate: number; skipSync?: boolean }): Promise<string>;
   listUnspents(): { utxo: { colorable: boolean; btcAmount: number }; rgbAllocations: unknown[] }[];
+  /** On-chain movements (BDK): `sent` = the wallet's inputs, `received` = outputs back to the wallet. */
+  listTransactions(): SdkTransaction[];
   listAssets(): { nia?: SdkAsset[] };
   getAssetBalance(assetId: string): Partial<SdkBalance>;
   issueAssetNia(p: { ticker: string; name: string; amounts: number[]; precision: number }): SdkAsset;
@@ -65,6 +67,16 @@ export interface RgbSdkWallet {
   refreshWallet(): void;
   syncWallet(): void;
   createBackup(p: { backupPath: string; password: string }): { message: string; backupPath: string };
+}
+
+/** rgb-sdk TransactionType: 0 RGB_SEND, 1 DRAIN, 2 CREATE_UTXOS, 3 USER. */
+export interface SdkTransaction {
+  transactionType: number;
+  txid: string;
+  received: number;
+  sent: number;
+  fee: number;
+  confirmationTime?: { height: number; timestamp: number };
 }
 
 interface SdkBalance {
@@ -308,6 +320,11 @@ export class WdkRgbWallet implements WalletPort {
       }
     }
     return this.rgb.getBtcBalance();
+  }
+
+  /** On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). */
+  btcTransactions(): SdkTransaction[] {
+    return this.rgb.listTransactions();
   }
 
   async listAssets(): Promise<AssetInfo[]> {
