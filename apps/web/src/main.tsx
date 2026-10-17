@@ -5,7 +5,12 @@ import '@fontsource-variable/google-sans-flex';
 import { App } from './App.js';
 import './brand.css';
 import './material.css';
+import './theme.css';
+import { applyTheme, initialTheme } from './lib/theme.js';
 import { ErrorBoundary, ToastProvider } from './ui.js';
+
+// Theme before the first paint, so a dark-mode user never sees a white flash.
+applyTheme(initialTheme());
 
 const root = document.getElementById('root');
 if (root) {

@@ -191,7 +191,7 @@ describe('Treasurer chat (MockLlm)', () => {
   it('a payment request made in chat is reported to the server (listed under Get paid)', async () => {
     const made: unknown[] = [];
     const llm = new MockLlm({
-      replies: [call('create_receive_invoice', { amount: '7000000' }), { text: 'Here is your payment request.' }],
+      replies: [call('create_receive_invoice', { amount: '7' }), { text: 'Here is your payment request.' }],
     });
     const t = new Treasurer({
       llm,

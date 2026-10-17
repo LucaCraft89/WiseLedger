@@ -47,7 +47,7 @@ export function ConfirmDialog(props: {
     <section
       role="dialog"
       aria-labelledby="confirm-title"
-      style={{ border: '2px solid #333', borderRadius: 6, padding: 16, marginTop: 16 }}
+      style={{ border: '2px solid var(--wl-c-strong)', borderRadius: 6, padding: 16, marginTop: 16 }}
     >
       <h3 id="confirm-title" style={{ marginTop: 0 }}>
         Confirm payment
@@ -69,7 +69,7 @@ export function ConfirmDialog(props: {
       )}
 
       {props.verdict === 'block' && (
-        <p style={{ background: '#f8d7da', padding: 10 }} data-testid="block-explanation">
+        <p style={{ background: 'var(--wl-c-error-bg)', padding: 10 }} data-testid="block-explanation">
           {BLOCK_EXPLANATION}
         </p>
       )}
@@ -87,7 +87,7 @@ export function ConfirmDialog(props: {
       )}
 
       {error && (
-        <p role="alert" style={{ color: '#b00020' }}>
+        <p role="alert" style={{ color: 'var(--wl-c-error)' }}>
           {error}
         </p>
       )}
@@ -151,7 +151,11 @@ export function PaymentProgressView({ progress }: { progress: PaymentProgress })
       <h3>Payment</h3>
       <ol style={{ listStyle: 'none', padding: 0 }}>
         {progress.steps.map((s) => (
-          <li key={s.label} data-status={s.status} style={{ color: s.status === 'pending' ? '#888' : undefined }}>
+          <li
+            key={s.label}
+            data-status={s.status}
+            style={{ color: s.status === 'pending' ? 'var(--wl-c-faint)' : undefined }}
+          >
             {PROGRESS_ICON[s.status]} {s.label}
             {s.status === 'running' && <small> (in progress)</small>}
           </li>

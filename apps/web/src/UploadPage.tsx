@@ -52,7 +52,7 @@ export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (inv
         />
       </label>
 
-      {error && <p style={{ color: '#b00020' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--wl-c-error)' }}>{error}</p>}
       <button type="submit" disabled={busy} style={{ fontSize: '1.1em', padding: '8px 20px' }}>
         {busy ? 'Uploading…' : '2. Check this invoice'}
       </button>

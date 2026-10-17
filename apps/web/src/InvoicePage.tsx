@@ -84,7 +84,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   if (error && !detail) {
     return (
       <section>
-        <p style={{ color: '#b00020' }}>{error}</p>
+        <p style={{ color: 'var(--wl-c-error)' }}>{error}</p>
         <a href="#/">Check another invoice</a>
       </section>
     );
@@ -113,7 +113,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           <li
             key={s.stage}
             data-status={s.status}
-            style={{ color: s.status === 'pending' ? '#888' : s.status === 'error' ? '#b00020' : undefined }}
+            style={{
+              color:
+                s.status === 'pending' ? 'var(--wl-c-faint)' : s.status === 'error' ? 'var(--wl-c-error)' : undefined,
+            }}
           >
             {STEP_ICON[s.status]} {s.label} <small>({STEP_WORD[s.status]})</small>
             {s.message && <div style={{ fontSize: '0.9em' }}>{s.message}</div>}
@@ -179,7 +182,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       )}
 
       {invoice.state === 'BLOCKED' && (
-        <p style={{ background: '#f8d7da', padding: 12 }}>
+        <p style={{ background: 'var(--wl-c-error-bg)', padding: 12 }}>
           We stopped this payment. You do not need to do anything. If you think this is a mistake, contact the supplier
           using a phone number you already know, not the one on the invoice.
         </p>
@@ -216,11 +219,17 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
     <div
       data-testid="live-ai"
       aria-live="polite"
-      style={{ border: '1px solid #b8daff', background: '#f0f7ff', borderRadius: 6, padding: 12, margin: '12px 0' }}
+      style={{
+        border: '1px solid var(--wl-c-note-line)',
+        background: 'var(--wl-c-note-bg)',
+        borderRadius: 6,
+        padding: 12,
+        margin: '12px 0',
+      }}
     >
       <strong>{info.title}</strong>
       <div>{info.detail}</div>
-      <div style={{ fontSize: '0.85em', color: '#555' }}>
+      <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>
         AI running on this computer: your invoice never leaves it.
       </div>
       <pre
@@ -229,8 +238,8 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
           fontSize: '0.85em',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          background: '#fff',
-          border: '1px solid #ddd',
+          background: 'var(--wl-c-surface)',
+          border: '1px solid var(--wl-c-line)',
           padding: 8,
           margin: '8px 0 0',
           minHeight: '3em',
@@ -245,7 +254,7 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
 }
 
 function ErrorLine({ message }: { message: string }) {
-  return <p style={{ color: '#b00020' }}>{message}</p>;
+  return <p style={{ color: 'var(--wl-c-error)' }}>{message}</p>;
 }
 
 /** Prefer the sentence built here by code; fall back to the server's only when the asset is unknown. */
@@ -288,8 +297,13 @@ function FinalStatus({
       />
     );
   }
-  if (state === 'SCHEDULED') return <p style={{ background: '#d1ecf1', padding: 12 }}>The payment is scheduled.</p>;
+  if (state === 'SCHEDULED')
+    return <p style={{ background: 'var(--wl-c-sched-bg)', padding: 12 }}>The payment is scheduled.</p>;
   if (state === 'REJECTED')
-    return <p style={{ background: '#e2e3e5', padding: 12 }}>You chose not to pay this invoice. Nothing was sent.</p>;
+    return (
+      <p style={{ background: 'var(--wl-c-neutral-bg)', padding: 12 }}>
+        You chose not to pay this invoice. Nothing was sent.
+      </p>
+    );
   return null;
 }

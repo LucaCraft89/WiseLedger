@@ -85,11 +85,11 @@ export const JOB_STATUS_WORDS: Record<Job['status'], string> = {
 };
 
 export const JOB_STATUS_COLORS: Record<Job['status'], string> = {
-  pending: '#fff3cd',
-  running: '#cce5ff',
-  done: '#d4edda',
-  cancelled: '#e2e3e5',
-  failed: '#f8d7da',
+  pending: 'var(--wl-c-pending-bg)',
+  running: 'var(--wl-c-running-bg)',
+  done: 'var(--wl-c-ok-bg)',
+  cancelled: 'var(--wl-c-neutral-bg)',
+  failed: 'var(--wl-c-error-bg)',
 };
 
 export const canCancelJob = (job: Pick<Job, 'status'>): boolean => job.status === 'pending';

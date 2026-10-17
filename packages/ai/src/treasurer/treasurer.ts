@@ -25,6 +25,32 @@ import {
 } from 'core';
 import { z } from 'zod';
 import { findInjection } from '../rules/r7-injection.js';
+import { toBaseUnits } from '../rules/types.js';
+
+/**
+ * Asset and base-unit amount for a payment request from chat. The asset must be one this wallet holds, matched by
+ * asset ID (never by ticker); with an amount and no asset, the wallet's only asset is used. Amounts come in tokens and
+ * are converted here, because small models misread base units. Throws plain-language errors the model can relay.
+ */
+export async function receiveTarget(
+  wallet: Pick<WalletPort, 'listAssets'>,
+  args: { assetId?: string | undefined; amount?: string | undefined },
+): Promise<{ assetId?: string; amount?: string }> {
+  const assets = await wallet.listAssets();
+  const held = assets.map((a) => `${a.ticker} (assetId=${a.assetId})`).join(', ') || 'no tokens yet';
+  let asset = args.assetId ? assets.find((a) => a.assetId === args.assetId) : undefined;
+  if (args.assetId && !asset) throw new Error(`This wallet can only ask for tokens it holds: ${held}.`);
+  if (!asset && args.amount) {
+    if (assets.length !== 1) throw new Error(`Which token should the request be in? This wallet holds: ${held}.`);
+    asset = assets[0];
+  }
+  if (!asset) return {};
+  if (!args.amount) return { assetId: asset.assetId };
+  const amount = toBaseUnits(args.amount, asset.precision);
+  if (!amount || amount === '0')
+    throw new Error(`${args.amount} is not a valid amount of ${asset.ticker} (at most ${asset.precision} decimals).`);
+  return { assetId: asset.assetId, amount };
+}
 
 export const TREASURER_SYSTEM = [
   'You are the Treasurer of a small business wallet. You move money only through tools.',
@@ -41,10 +67,10 @@ export const ExecutePlanArgs = z.object({
 export const GetBalanceArgs = z.object({ assetId: z.string().max(100).optional() });
 export const CreateReceiveArgs = z.object({
   assetId: z.string().max(100).optional(),
-  /** Base units as a decimal string. */
+  /** Tokens as the user says them ("100", "12.50"); code converts to base units with the asset's precision. */
   amount: z
     .string()
-    .regex(/^\d{1,20}$/)
+    .regex(/^\d{1,12}(\.\d{1,18})?$/)
     .optional(),
   expiryMinutes: z.number().int().min(1).max(10_080).optional(),
 });
@@ -200,13 +226,14 @@ export class Treasurer implements TreasurerAgent {
       {
         name: 'create_receive_invoice',
         description:
-          'Create an RGB invoice so someone can pay this wallet. Optional: assetId, amount (base units), expiryMinutes.',
+          'Create an invoice (payment request) so someone can pay this wallet. Needs no address. Optional: amount in tokens as the user says it (e.g. "100" or "12.50"), assetId from CONTEXT, expiryMinutes (how long it stays valid).',
         params: CreateReceiveArgs as never,
         requiresConfirmation: false,
         handler: async (args: z.infer<typeof CreateReceiveArgs>) => {
+          const { assetId, amount } = await receiveTarget(wallet, args);
           const inv = await wallet.createReceiveInvoice({
-            ...(args.assetId ? { assetId: args.assetId } : {}),
-            ...(args.amount ? { amount: args.amount } : {}),
+            ...(assetId ? { assetId } : {}),
+            ...(amount ? { amount } : {}),
             expirySec: (args.expiryMinutes ?? 60) * 60,
           });
           await this.deps.onReceiveCreated?.(inv);
@@ -525,6 +552,8 @@ export class Treasurer implements TreasurerAgent {
       'Use IDs exactly as written in CONTEXT. Spend tools only prepare a payment; the user confirms it on screen.',
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
       'Each invoice shows the safety check (check, reasons). To say why an invoice was stopped or needs review, use them; you never see the document itself.',
+      'Your tools: get_balance; create_receive_invoice ("create/make an invoice", "request a payment", "I want to get paid": a payment request someone else pays into this wallet; it needs no address); schedule_payment and execute_plan for uploaded invoices; label_transfer; list_transfers; fiscal_report. Never say you cannot do what a tool does: call it.',
+      'Only the tokens under Assets exist in this wallet. If the user names another one (e.g. USDC), say this wallet holds only those and offer them. Paying a Bitcoin address is not possible here: payments go to invoices the user uploads.',
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
       'Invoices (newest first; the first one is the latest):',
