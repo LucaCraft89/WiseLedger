@@ -38,7 +38,12 @@ async function waitFor(base: string, id: string, until: string[], seen: Set<stri
 async function main(): Promise<void> {
   let base = process.env.DEMO_URL?.replace(/\/$/, '');
   if (!base) {
-    const started = await startServer({ port: 0, mockStepMs: Number(process.env.MOCK_STEP_MS ?? 500) });
+    // Hermetic by default: a throwaway in-memory DB unless DB_PATH is set.
+    const started = await startServer({
+      port: 0,
+      dbPath: process.env.DB_PATH ?? ':memory:',
+      mockStepMs: Number(process.env.MOCK_STEP_MS ?? 500),
+    });
     base = started.url;
     stop = () => started.app.close();
   }
