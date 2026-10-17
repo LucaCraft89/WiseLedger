@@ -222,7 +222,9 @@ export class MockWallet implements WalletPort {
       direction: t.direction,
       status,
       ...(t.txid ? { txid: t.txid } : {}),
-      ...(t.rgbInvoice ? { rgbInvoice: t.rgbInvoice } : {}),
+      ...(t.rgbInvoice
+        ? { rgbInvoice: t.rgbInvoice, recipientId: `mock-recipient-${t.rgbInvoice.split('/').at(-1)}` }
+        : {}),
       createdAt: new Date(t.createdAt).toISOString(),
       updatedAt: new Date(
         t.direction === 'issuance' ? t.createdAt : t.createdAt + stepsDone * this.stepMs,

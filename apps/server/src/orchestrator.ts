@@ -465,12 +465,17 @@ export class Orchestrator {
       if (this.executing.has(id) || !inv.plan) continue;
       let transferId = inv.result?.transferId;
       if (!transferId) {
+        // rgb-lib reports sends without the invoice string: match on it when present, else on the recipient ID.
+        const recipientId = await this.deps.wallet
+          .decodeInvoice(inv.plan.rgbInvoice)
+          .then((d) => d.recipientId)
+          .catch(() => undefined);
         const match = transfers.find(
           (t) =>
             t.direction === 'outgoing' &&
-            t.rgbInvoice === inv.plan?.rgbInvoice &&
+            (t.rgbInvoice === inv.plan?.rgbInvoice || (recipientId !== undefined && t.recipientId === recipientId)) &&
             t.status !== 'Failed' &&
-            !this.store.invoiceForTransfer(t.transferId),
+            [undefined, null, id].includes(this.store.invoiceForTransfer(t.transferId)),
         );
         if (!match) {
           out.pending.push(id);
