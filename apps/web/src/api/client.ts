@@ -9,6 +9,7 @@ import {
   type InvoiceListResponse,
   type RejectResponse,
   SSE_EVENT_NAME,
+  type WalletResponse,
 } from './contracts.js';
 
 export type InvoiceInput = { file: File } | { text: string; filename?: string };
@@ -25,6 +26,8 @@ export interface ApiClient {
   subscribe(id: string, onEvent: (e: AppEvent) => void): () => void;
   confirm(id: string, req: ConfirmRequest): Promise<ConfirmResponse>;
   reject(id: string, reason?: string): Promise<RejectResponse>;
+  /** Wallet backend, network and assets (ticker and precision for amounts). */
+  wallet(): Promise<WalletResponse>;
 }
 
 /** Error with a plain-language message (from the server's ApiError body when present). */
@@ -83,5 +86,6 @@ export function createHttpClient(base = ''): ApiClient {
     },
     confirm: (id, req) => call(`${base}/api/invoices/${encodeURIComponent(id)}/confirm`, json(req)),
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
+    wallet: () => call(`${base}/api/wallet`),
   };
 }

@@ -1,12 +1,12 @@
 // In-browser fake backend: walks the same lifecycle as A's server using the core mocks.
 // Verdict by file name (MockAnalyzer): *scam* / *inject* → block, *eur* → review, anything else → ok.
 
-import { formatAmount } from '../lib/format.js';
 import type { ApiClient, InvoiceInput } from './client.js';
 import { ApiCallError } from './client.js';
 import {
   type AnalysisReport,
   type AppEvent,
+  buildConfirmationSentence,
   type ExecutionResult,
   type InvoiceSourceKind,
   type InvoiceState,
@@ -106,7 +106,8 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       executeAt: p.executeAt ?? 'now',
       labels: [],
     });
-    r.confirmationSentence = `Pay ${formatAmount(p.amount, 6)} TUSDT (asset ${p.assetId}) to ${p.payee}, now. Confirm?`;
+    const asset = (await wallet.listAssets()).find((a) => a.assetId === r.plan?.assetId);
+    r.confirmationSentence = buildConfirmationSentence(r.plan, asset);
     setState(r, 'AWAITING_CONFIRMATION');
   }
 
@@ -192,8 +193,26 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     },
     async reject(id) {
       const r = get(id);
+      if (!['AWAITING_CONFIRMATION', 'BLOCKED', 'FAILED', 'SCHEDULED', 'CONFIRMED'].includes(r.summary.state)) {
+        throw new ApiCallError('INVALID_TRANSITION', 'This invoice can no longer be rejected.');
+      }
       setState(r, 'REJECTED');
       return { invoiceId: id, state: r.summary.state };
+    },
+    async wallet() {
+      const assets = await wallet.listAssets();
+      return {
+        backend: 'mock',
+        network: 'mock',
+        ready: true,
+        assets: assets.map((a) => ({
+          assetId: a.assetId,
+          ticker: a.ticker,
+          name: a.name,
+          precision: a.precision,
+          balance: a.balance,
+        })),
+      };
     },
   };
 }
