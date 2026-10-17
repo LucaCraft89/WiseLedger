@@ -123,6 +123,23 @@ export type NeedsConfirmation = NonNullable<ChatResponse['needsConfirmation']>;
 export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string =>
   `${TOOL_WORDS[c.name] ?? c.name} ${c.ok ? '✓' : '✗ failed'}`;
 
+/** Where to see what a tool made or read ("See it in Wallet"); null when there is nothing to open. */
+export function toolLink(c: Pick<ToolCall, 'name' | 'ok'>): { href: string; label: string } | null {
+  if (!c.ok) return null;
+  if (c.name === 'create_receive_invoice') return { href: '#/wallet', label: 'See it in Wallet' };
+  if (c.name === 'label_transfer' || c.name === 'list_transfers')
+    return { href: '#/transfers', label: 'See transfers' };
+  if (c.name === 'get_balance') return { href: '#/wallet', label: 'Open Wallet' };
+  return null;
+}
+
+/** The payment request a create_receive_invoice call returned, for a copy button in chat. */
+export function receiveFromToolCall(c: Pick<ToolCall, 'name' | 'ok' | 'result'>): string | undefined {
+  if (c.name !== 'create_receive_invoice' || !c.ok) return undefined;
+  const inv = (c.result as { rgbInvoice?: unknown } | undefined)?.rgbInvoice;
+  return typeof inv === 'string' ? inv : undefined;
+}
+
 /** executeAt of the schedule_payment call that asked for the confirmation (last one wins). */
 export function scheduleExecuteAt(calls: readonly ToolCall[]): string | undefined {
   for (const c of [...calls].reverse()) {

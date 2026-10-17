@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import type { ChatResponse } from './api/contracts.js';
+import { loadChat, type StoredMessage, saveChat } from './lib/chat-store.js';
 import {
   CHAT_SUGGESTIONS,
   type ChatTurn,
@@ -9,17 +10,16 @@ import {
   fiscalFilename,
   fiscalFromToolCall,
   type NeedsConfirmation,
+  receiveFromToolCall,
   type ToolCall,
   toolChipText,
+  toolLink,
 } from './lib/ledger.js';
 import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type VoiceRecording } from './lib/voice.js';
 import { Markdown } from './Markdown.js';
-import { ErrorBox, errorText, useToast } from './ui.js';
+import { CopyButton, ErrorBox, errorText, useToast } from './ui.js';
 
-interface Message extends ChatTurn {
-  id: number;
-  reply?: ChatResponse;
-}
+type Message = StoredMessage;
 
 const bubble = (role: ChatTurn['role']) =>
   ({
@@ -32,16 +32,24 @@ const bubble = (role: ChatTurn['role']) =>
   }) as const;
 
 let nextMsgId = 0;
+/** The last conversation from this browser (kept until "New chat"); IDs continue after it. */
+function restoredChat(): Message[] {
+  const list = loadChat();
+  nextMsgId = Math.max(nextMsgId, ...list.map((m) => m.id));
+  return list;
+}
 
 /** #/chat: ask the Treasurer (local AI with wallet tools). Spending always needs a confirmation card. */
 export function ChatPage({ api }: { api: ApiClient }) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(restoredChat);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [voiceHint, setVoiceHint] = useState(false);
+
+  useEffect(() => saveChat(messages), [messages]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the end when a message or "Thinking…" appears
   useEffect(() => {
@@ -68,7 +76,23 @@ export function ChatPage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Ask the Treasurer</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <h2>Ask the Treasurer</h2>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            className="wl-secondary"
+            disabled={busy}
+            onClick={() => {
+              setMessages([]);
+              setError(null);
+            }}
+            title="Clear this conversation and start again (the Treasurer forgets it too)"
+          >
+            New chat
+          </button>
+        )}
+      </div>
       <p style={{ marginTop: 0, color: '#555' }}>
         AI running on this computer. It can check your balance, label payments, prepare reports and schedule payments.
         It never pays without your confirmation.
@@ -78,7 +102,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         {messages.map((m) => (
           <div key={m.id} style={bubble(m.role)}>
             {m.role === 'assistant' ? <Markdown text={m.text} /> : <div>{m.text}</div>}
-            {m.reply && <ReplyExtras api={api} reply={m.reply} />}
+            {m.reply && <ReplyExtras api={api} reply={m.reply} restored={m.restored ?? false} />}
           </div>
         ))}
         {busy && <div style={{ ...bubble('assistant'), color: '#555' }}>Thinking…</div>}
@@ -210,7 +234,7 @@ function MicButton({
   );
 }
 
-function ReplyExtras({ api, reply }: { api: ApiClient; reply: ChatResponse }) {
+function ReplyExtras({ api, reply, restored }: { api: ApiClient; reply: ChatResponse; restored: boolean }) {
   return (
     <>
       {reply.toolCalls.length > 0 && (
@@ -221,7 +245,14 @@ function ReplyExtras({ api, reply }: { api: ApiClient; reply: ChatResponse }) {
           ))}
         </div>
       )}
-      {reply.needsConfirmation && <ConfirmCard api={api} nc={reply.needsConfirmation} calls={reply.toolCalls} />}
+      {reply.needsConfirmation &&
+        (restored ? (
+          <p style={{ fontSize: '0.9em', color: '#555', margin: '6px 0 0' }}>
+            This confirmation was from an earlier visit. Ask again to prepare it now.
+          </p>
+        ) : (
+          <ConfirmCard api={api} nc={reply.needsConfirmation} calls={reply.toolCalls} />
+        ))}
     </>
   );
 }
@@ -230,6 +261,8 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
   const toast = useToast();
   const fiscal = fiscalFromToolCall(call);
   const url = fiscal ? api.fiscalUrl(fiscal) : null;
+  const link = toolLink(call);
+  const request = receiveFromToolCall(call);
   return (
     <span
       title={`Tool: ${call.name}${call.error ? `. ${call.error}` : ''}`}
@@ -242,6 +275,18 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
       }}
     >
       {toolChipText(call)}
+      {request && (
+        <>
+          {' '}
+          <CopyButton value={request} what="Payment request" />
+        </>
+      )}
+      {link && (
+        <>
+          {' '}
+          <a href={link.href}>{link.label}</a>
+        </>
+      )}
       {fiscal &&
         (url ? (
           <>

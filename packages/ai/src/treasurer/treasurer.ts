@@ -16,6 +16,7 @@ import {
   type NeedsConfirmation,
   type PaymentGuard,
   type PaymentPlan,
+  type ReceiveInvoice,
   type ToolDef,
   type TransferStatus,
   type TreasurerAgent,
@@ -136,6 +137,8 @@ export interface TreasurerDeps {
   invoices?: () => Promise<ChatInvoice[]>;
   /** IANA zone for dates in confirmation sentences (default: this machine's zone). */
   timeZone?: string;
+  /** Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own. */
+  onReceiveCreated?: (inv: ReceiveInvoice) => void | Promise<void>;
 }
 
 /** Guard stub: knows the confirmed plans, checks the hash and executes each plan once. */
@@ -200,12 +203,15 @@ export class Treasurer implements TreasurerAgent {
           'Create an RGB invoice so someone can pay this wallet. Optional: assetId, amount (base units), expiryMinutes.',
         params: CreateReceiveArgs as never,
         requiresConfirmation: false,
-        handler: async (args: z.infer<typeof CreateReceiveArgs>) =>
-          wallet.createReceiveInvoice({
+        handler: async (args: z.infer<typeof CreateReceiveArgs>) => {
+          const inv = await wallet.createReceiveInvoice({
             ...(args.assetId ? { assetId: args.assetId } : {}),
             ...(args.amount ? { amount: args.amount } : {}),
             expirySec: (args.expiryMinutes ?? 60) * 60,
-          }),
+          });
+          await this.deps.onReceiveCreated?.(inv);
+          return inv;
+        },
       } as ToolDef<never>,
       {
         name: 'schedule_payment',

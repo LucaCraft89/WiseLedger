@@ -39,7 +39,16 @@ export interface AppOptions {
   /** Test seams for the provider factory (an injected LLM or wallet). */
   providers?: Omit<
     ProviderOptions,
-    'history' | 'log' | 'guardStore' | 'onSynced' | 'syncBusy' | 'labels' | 'jobs' | 'fiscalFor' | 'chatInvoices'
+    | 'history'
+    | 'log'
+    | 'guardStore'
+    | 'onSynced'
+    | 'syncBusy'
+    | 'onReceiveCreated'
+    | 'labels'
+    | 'jobs'
+    | 'fiscalFor'
+    | 'chatInvoices'
   >;
   /** Scheduler runner period (default 30 s). */
   schedulerMs?: number;
@@ -66,6 +75,9 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       guardStore,
       onSynced: () => settle(),
       syncBusy: () => receives.waitingRecently(),
+      onReceiveCreated: (inv) => {
+        receives.add(inv, 'Made in chat');
+      },
       labels,
       jobs,
       chatInvoices: async () => chatInvoices(store),
