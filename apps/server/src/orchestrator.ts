@@ -8,6 +8,7 @@ import {
   type AnalysisReport,
   type AppEvent,
   assertTransition,
+  buildConfirmationSentence,
   type ConfirmRequest,
   type ConfirmResponse,
   canTransition,
@@ -92,14 +93,6 @@ export function detectKind(filename: string, mimeType?: string): InvoiceSourceKi
   if (IMAGE_EXT.has(ext) || mime.startsWith('image/')) return 'image';
   if (ext === '.xml' || mime.endsWith('/xml')) return 'xml';
   return 'text';
-}
-
-/** Base units → human decimal, trailing zeros trimmed to at least 2 decimals ("25000000", 6 → "25.00"; "25123400" → "25.1234"). */
-export function formatUnits(amount: string, precision: number): string {
-  if (precision === 0) return amount;
-  const padded = amount.padStart(precision + 1, '0');
-  const frac = padded.slice(-precision).replace(/0+$/, '').padEnd(Math.min(2, precision), '0');
-  return `${padded.slice(0, -precision)}.${frac}`;
 }
 
 export class Orchestrator {
@@ -327,12 +320,10 @@ export class Orchestrator {
     });
   }
 
+  /** The shared sentence builder (core), so server and web always show the same words. */
   private async sentenceFor(plan: PaymentPlan): Promise<string> {
-    const assets = await this.deps.wallet.listAssets();
-    const asset = assets.find((a) => a.assetId === plan.assetId);
-    const amount = asset ? `${formatUnits(plan.amount, asset.precision)} ${asset.ticker}` : `${plan.amount} base units`;
-    const when = plan.executeAt === 'now' ? 'now' : `on ${plan.executeAt}`;
-    return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
+    const asset = (await this.deps.wallet.listAssets()).find((a) => a.assetId === plan.assetId);
+    return buildConfirmationSentence(plan, asset);
   }
 
   async confirm(id: string, req: ConfirmRequest): Promise<ConfirmResponse> {

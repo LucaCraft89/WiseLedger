@@ -12,7 +12,8 @@
     "smoke": "tsx scripts/wallet-smoke.ts",
     "issue-asset": "tsx scripts/issue-asset.ts",
     "payee": "tsx scripts/payee.ts",
-    "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run"
+    "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run",
+    "demo:prepare": "tsx scripts/demo-prepare.ts"
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "playwright-core": "1.64.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
