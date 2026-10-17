@@ -1,3 +1,4 @@
+import { fiscalUrl } from '../lib/ledger.js';
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
@@ -21,7 +22,6 @@ import {
   type WalletReceiveResponse,
   type WalletResponse,
 } from './contracts.js';
-import { fiscalUrl } from '../lib/ledger.js';
 
 export type InvoiceInput = { file: File } | { text: string; filename?: string };
 

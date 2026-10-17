@@ -39,6 +39,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
   const [error, setError] = useState<unknown>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the end when a message or "Thinking…" appears
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
   }, [messages.length, busy]);
@@ -121,9 +122,7 @@ function ReplyExtras({ api, reply }: { api: ApiClient; reply: ChatResponse }) {
           ))}
         </div>
       )}
-      {reply.needsConfirmation && (
-        <ConfirmCard api={api} nc={reply.needsConfirmation} calls={reply.toolCalls} />
-      )}
+      {reply.needsConfirmation && <ConfirmCard api={api} nc={reply.needsConfirmation} calls={reply.toolCalls} />}
     </>
   );
 }
@@ -168,7 +167,12 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
   );
 }
 
-type CardState = { s: 'open' } | { s: 'busy' } | { s: 'done'; text: string } | { s: 'cancelled' } | { s: 'error'; text: string };
+type CardState =
+  | { s: 'open' }
+  | { s: 'busy' }
+  | { s: 'done'; text: string }
+  | { s: 'cancelled' }
+  | { s: 'error'; text: string };
 
 function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation; calls: readonly ToolCall[] }) {
   const toast = useToast();

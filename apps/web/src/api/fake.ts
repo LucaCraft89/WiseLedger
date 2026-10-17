@@ -15,11 +15,11 @@ import {
   type InvoiceState,
   type InvoiceSummaryDto,
   LabelsPutRequest,
+  MemoryJobStore,
+  MemoryLabelStore,
   MOCK_ASSET_ID,
   MOCK_FAIL_AMOUNT,
   MOCK_TIMEOUT_AMOUNT,
-  MemoryJobStore,
-  MemoryLabelStore,
   MockAnalyzer,
   MockTreasurer,
   MockWallet,
@@ -237,10 +237,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       }
       const executeAt = (/friday/.test(m) ? nextFriday() : new Date(Date.now() + 86_400_000)).toISOString();
       const invoiceId = target.summary.id;
-      const sentence = buildConfirmationSentence(
-        { ...target.plan, executeAt },
-        await assetMeta(target.plan.assetId),
-      );
+      const sentence = buildConfirmationSentence({ ...target.plan, executeAt }, await assetMeta(target.plan.assetId));
       const needsConfirmation = {
         needsConfirmation: true as const,
         kind: 'schedule' as const,
@@ -250,9 +247,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       };
       return {
         text: `Please confirm: ${sentence}`,
-        toolCalls: [
-          { name: 'schedule_payment', args: { invoiceId, executeAt }, ok: true, result: needsConfirmation },
-        ],
+        toolCalls: [{ name: 'schedule_payment', args: { invoiceId, executeAt }, ok: true, result: needsConfirmation }],
         needsConfirmation,
       };
     }

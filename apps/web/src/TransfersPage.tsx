@@ -27,7 +27,9 @@ export function TransfersPage({ api }: { api: ApiClient }) {
       {error ? <ErrorBox error={error} retry={reload} /> : null}
       {loading && !data ? <Loading text="Loading transfers…" /> : null}
       {data && data.transfers.length === 0 && <Empty text="No transfers yet." />}
-      {data && data.transfers.length > 0 && <TransfersTable api={api} transfers={data.transfers} assets={data.assets} />}
+      {data && data.transfers.length > 0 && (
+        <TransfersTable api={api} transfers={data.transfers} assets={data.assets} />
+      )}
       <FiscalForm api={api} />
     </section>
   );

@@ -136,7 +136,8 @@ export function fiscalFromToolCall(c: ToolCall): FiscalQuery | undefined {
   if (c.name !== 'fiscal_report' || !c.ok || !c.result || typeof c.result !== 'object') return undefined;
   const r = c.result as Record<string, unknown>;
   const date = /^\d{4}-\d{2}-\d{2}$/;
-  if (typeof r.from !== 'string' || typeof r.to !== 'string' || !date.test(r.from) || !date.test(r.to)) return undefined;
+  if (typeof r.from !== 'string' || typeof r.to !== 'string' || !date.test(r.from) || !date.test(r.to))
+    return undefined;
   return { from: r.from, to: r.to, format: r.format === 'json' ? 'json' : 'csv' };
 }
 
