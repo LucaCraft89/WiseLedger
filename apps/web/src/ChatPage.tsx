@@ -84,7 +84,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         <div ref={endRef} />
       </div>
       {error ? <ErrorBox error={error} /> : null}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+      <div className="wl-chips" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         {CHAT_SUGGESTIONS.map((s) => (
           <button key={s} type="button" disabled={busy} onClick={() => void send(s)}>
             {s}
