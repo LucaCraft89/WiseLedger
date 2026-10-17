@@ -1,4 +1,6 @@
 // REST + SSE routes from core API_ROUTES. Requests are validated with the core zod DTOs.
+
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, TranscribeError, type Transcriber } from 'ai';
 import {
   API_ROUTES,
   type ApiError,
@@ -16,9 +18,11 @@ import {
   type InvoiceSummaryDto,
   isWalletError,
   type LlmInfo,
+  type ReceivesListResponse,
   RejectRequest,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  type TranscribeResponse,
   type TransferDto,
   type TransferInfo,
   type TransfersResponse,
@@ -37,8 +41,6 @@ import {
   type LabelsListResponse,
   LabelsPutRequest,
   M3_ROUTES,
-  M4_ROUTES,
-  ReceiveNote,
   ScheduleListQuery,
 } from './api-local.js';
 import type { WalletFiscalService } from './fiscal.js';
@@ -70,6 +72,8 @@ export interface RouteDeps {
   uploadMaxMb: number;
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
+  /** B's on-device speech-to-text (Parakeet); the text only fills the chat box. */
+  transcriber?: Transcriber;
 }
 
 /** Wallet errors caused by the request (400); the rest are the wallet's own failures (502). */
@@ -120,6 +124,8 @@ function route(app: FastifyInstance, spec: string, handler: Handler): void {
   app.route({ method, url, handler });
 }
 
+const url = (spec: string): string => spec.split(' ')[1] as string;
+
 function apiError(code: string, message: string): ApiError {
   return { error: { code, message } };
 }
@@ -162,8 +168,14 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   const { store, orchestrator, wallet, treasurer } = deps;
 
-  app.setErrorHandler((err, _req, reply) => {
+  app.setErrorHandler((err, req, reply) => {
     if (err instanceof ApiFailure) return reply.status(err.status).send(apiError(err.code, err.message));
+    if (err instanceof TranscribeError) return reply.status(err.status).send(apiError(err.code, err.message));
+    if (isTooLarge(err) && req.url.startsWith(url(API_ROUTES.agentTranscribe))) {
+      return reply
+        .status(413)
+        .send(apiError('AUDIO_TOO_LONG', `The recording is too long. Keep it under ${MAX_AUDIO_SECONDS} seconds.`));
+    }
     if (err instanceof IllegalTransition) {
       const f = invalidTransition(err.from, err.to);
       return reply.status(f.status).send(apiError(f.code, f.message));
@@ -297,7 +309,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
-    const { note } = ReceiveNote.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
       expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
@@ -305,7 +316,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(body.amount ? { amount: body.amount } : {}),
     });
     // Remembered so the app can tell when it is paid (matched after each wallet sync).
-    deps.receives.add(inv, note);
+    deps.receives.add(inv, body.note);
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
@@ -315,7 +326,24 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
-  route(app, M4_ROUTES.receivesList, async () => {
+  // Voice: raw audio (audio/wav from the browser) → text for the chat box. Never executes anything by itself.
+  app.addContentTypeParser(/^audio\//, { parseAs: 'buffer', bodyLimit: MAX_AUDIO_BYTES }, (_req, body, done) =>
+    done(null, body),
+  );
+  route(app, API_ROUTES.agentTranscribe, async (req): Promise<TranscribeResponse> => {
+    if (!deps.transcriber)
+      throw new ApiFailure(503, 'STT_UNAVAILABLE', 'Voice input is not available on this computer.');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw new ApiFailure(
+        400,
+        'AUDIO_EMPTY',
+        'No recording arrived. Hold the button while you speak, then try again.',
+      );
+    }
+    return deps.transcriber.transcribe(req.body, req.headers['content-type']);
+  });
+
+  route(app, API_ROUTES.walletReceives, async (): Promise<ReceivesListResponse> => {
     deps.receives.reconcile(await wallet.listTransfers());
     return { receives: deps.receives.list() };
   });
