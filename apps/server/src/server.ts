@@ -161,7 +161,9 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     scheduler.stop();
     selfCheck.stop();
     if (mockSettle) clearInterval(mockSettle);
-    await orchestrator.idle();
+    if (!(await orchestrator.idle(10_000))) {
+      app.log.warn('Stopping with a payment still in progress: it is not sent again; the next start checks its state.');
+    }
     await providers.close();
     store.close();
   });
