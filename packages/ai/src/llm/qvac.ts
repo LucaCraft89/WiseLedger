@@ -58,7 +58,7 @@ export class QvacProvider implements LlmProvider {
   readonly model: string;
 
   constructor(private readonly opts: QvacProviderOptions = {}) {
-    this.model = opts.model ?? process.env.QVAC_MODEL ?? DEFAULT_QVAC_MODEL;
+    this.model = opts.model ?? (process.env.QVAC_MODEL || DEFAULT_QVAC_MODEL); // empty QVAC_MODEL= (.env.example) = unset
   }
 
   info(): LlmInfo {

@@ -109,10 +109,12 @@ describe('Treasurer tools', () => {
     expect(bal.result).toEqual([
       expect.objectContaining({ assetId: MOCK_ASSET_ID, ticker: 'TUSDT', spendable: '1000.00 TUSDT' }),
     ]);
-    const inv = await t.runTool('create_receive_invoice', { amount: '5000000', expiryMinutes: 30 }, ctx);
+    // Amounts are tokens as the user says them; code converts with the asset's precision (5 TUSDT = 5000000).
+    const inv = await t.runTool('create_receive_invoice', { amount: '5', expiryMinutes: 30 }, ctx);
     expect(inv.ok).toBe(true);
+    expect(inv.result).toMatchObject({ amount: '5000000', assetId: MOCK_ASSET_ID });
     expect((inv.result as { rgbInvoice: string }).rgbInvoice).toMatch(/^rgb:mock\//);
-    expect((await t.runTool('create_receive_invoice', { amount: '5.00' }, ctx)).ok).toBe(false); // base units only
+    expect((await t.runTool('create_receive_invoice', { amount: 'five' }, ctx)).ok).toBe(false); // rejected by schema
     expect((await t.runTool('delete_wallet', {}, ctx)).ok).toBe(false);
     expect(events.map((e) => `${(e as { name: string }).name}:${(e as { status: string }).status}`)).toEqual([
       'get_balance:ok',
@@ -120,6 +122,20 @@ describe('Treasurer tools', () => {
       'create_receive_invoice:rejected',
       'delete_wallet:rejected',
     ]);
+  });
+  it('create_receive_invoice: unknown token or bad precision → plain error the model can relay', async () => {
+    const { guard, wallet } = await setup();
+    const t = new Treasurer({ llm: new MockLlm(), wallet, guard, pollMs: 0 });
+    const ctx = { emit: () => undefined };
+    const usdc = await t.runTool('create_receive_invoice', { assetId: 'USDC', amount: '100' }, ctx);
+    expect(usdc).toMatchObject({ ok: false, error: expect.stringMatching(/only ask for tokens it holds: TUSDT/) });
+    const tiny = await t.runTool('create_receive_invoice', { amount: '0.0000001' }, ctx);
+    expect(tiny).toMatchObject({ ok: false, error: expect.stringMatching(/at most 6 decimals/) });
+    // The model passed the ticker it read in CONTEXT: accepted for a request when it names exactly one held token.
+    const byTicker = await t.runTool('create_receive_invoice', { assetId: 'tusdt', amount: '500' }, ctx);
+    expect(byTicker).toMatchObject({ ok: true, result: { assetId: MOCK_ASSET_ID, amount: '500000000' } });
+    const open = await t.runTool('create_receive_invoice', {}, ctx); // payer chooses asset and amount
+    expect(open.ok).toBe(true);
   });
   it('tool definitions are ID-only: no free-text RGB invoice or amount strings in execute_plan', () => {
     const t = new Treasurer({ llm: new MockLlm(), wallet: new MockWallet(), guard: confirmationGuard() });

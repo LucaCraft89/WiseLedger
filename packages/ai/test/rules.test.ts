@@ -79,6 +79,25 @@ describe('rules R1–R10', () => {
       }),
     ).toEqual([]);
   });
+  it('R1: an RGB Lightning invoice on our network passes; wrong network, unreadable or rail mismatch block', () => {
+    const LN = 'lntbs250u1pjrgbtusdtmockinvoice0hash';
+    const lnBase: RuleInput = {
+      ...base,
+      config: { ...CONFIG, networks: ['mutinynet'] },
+      extraction: { ...extraction, payment: { method: 'ln', rgbInvoice: LN } },
+      decoded: { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'lightning' },
+    };
+    expect(r1RgbInvoice(lnBase)).toEqual([]);
+    expect(runRules(lnBase).verdict).toBe('ok');
+    const wrongNet = r1RgbInvoice({
+      ...lnBase,
+      decoded: { ...decoded, rgbInvoice: LN, network: 'bitcoin', rail: 'lightning' },
+    });
+    expect(wrongNet[0]?.message).toMatch(/Lightning payment request is for another network/);
+    expect(r1RgbInvoice({ ...lnBase, decoded: { error: 'InvalidInvoice' } })[0]?.message).toMatch(/Lightning is off/);
+    const mismatch = { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'onchain' as const };
+    expect(r1RgbInvoice({ ...lnBase, decoded: mismatch })[0]?.message).toMatch(/different kind of payment/);
+  });
   it('R2: asset outside the allowlist or contradicting the hint', () => {
     expect(r2Asset({ ...base, decoded: { ...decoded, assetId: 'rgb:evil' } })[0]?.severity).toBe('block');
     const hint = { ...extraction, payment: { ...extraction.payment, assetIdHint: 'rgb:other' } };
