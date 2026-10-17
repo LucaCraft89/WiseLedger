@@ -6,6 +6,7 @@ import {
   type AgentToolCallRecord,
   buildConfirmationSentence,
   type ChatMessage,
+  type ChatStreamHooks,
   type Confirmation,
   type EmitFn,
   type ExecutionResult,
@@ -50,6 +51,29 @@ export async function receiveTarget(
   if (!amount || amount === '0')
     throw new Error(`${args.amount} is not a valid amount of ${asset.ticker} (at most ${asset.precision} decimals).`);
   return { assetId: asset.assetId, amount };
+}
+
+/**
+ * One chat turn through llm.stream(): reply text goes to the screen as it comes. A turn whose text starts like a
+ * tool call ("{", "<tool", a code fence) is held back, so raw JSON never flashes in the chat.
+ */
+async function streamTurn(
+  llm: LlmProvider,
+  req: Parameters<LlmProvider['complete']>[0],
+  hooks: ChatStreamHooks,
+): Promise<Awaited<ReturnType<LlmProvider['complete']>>> {
+  let seen = '';
+  let live: boolean | undefined;
+  for await (const e of llm.stream(req)) {
+    if (e.type === 'token') {
+      seen += e.text;
+      if (live === undefined && seen.trim()) live = !/^\s*(\{|\[|<|```)/.test(seen);
+      if (live) hooks.onToken(e.text === seen ? e.text.trimStart() : e.text);
+    } else if (e.type === 'done') {
+      return e.result;
+    }
+  }
+  throw new Error('The local AI stopped without an answer.');
 }
 
 export const TREASURER_SYSTEM = [
@@ -423,7 +447,7 @@ export class Treasurer implements TreasurerAgent {
    * Plain-language wallet chat. One model call picks a tool (tool_choice auto), at most 3 tool turns. Spend tools never
    * run from chat: they come back as a NeedsConfirmation whose sentence is built by code, and the UI asks the user.
    */
-  async chat(message: string, history: AgentChatTurn[], emit: EmitFn): Promise<AgentReply> {
+  async chat(message: string, history: AgentChatTurn[], emit: EmitFn, stream?: ChatStreamHooks): Promise<AgentReply> {
     const ctx = { emit };
     const tools = this.tools(ctx);
     const specs = tools.map((t) => ({
@@ -439,14 +463,10 @@ export class Treasurer implements TreasurerAgent {
     const records: AgentToolCallRecord[] = [];
     for (let turn = 1; turn <= 3; turn++) {
       let r: Awaited<ReturnType<LlmProvider['complete']>>;
+      const req = { messages, tools: specs, toolChoice: 'auto' as const, temperature: 0.2, maxTokens: 300 };
       try {
-        r = await this.deps.llm.complete({
-          messages,
-          tools: specs,
-          toolChoice: 'auto',
-          temperature: 0.2,
-          maxTokens: 300,
-        });
+        if (turn > 1) stream?.onReset?.();
+        r = stream ? await streamTurn(this.deps.llm, req, stream) : await this.deps.llm.complete(req);
       } catch (err) {
         return { text: 'The local AI is not available right now. Try again in a minute.', toolCalls: records };
       }
@@ -495,7 +515,7 @@ export class Treasurer implements TreasurerAgent {
         ...(out.ok ? { result: out.result } : { error: out.error ?? 'failed' }),
       });
       // Read tools answer in one short call without tool schemas (much faster than another tool turn).
-      return { text: await this.phrase(message, call.name, out), toolCalls: records };
+      return { text: await this.phrase(message, call.name, out, stream), toolCalls: records };
     }
     return { text: 'Done.', toolCalls: records };
   }
@@ -505,10 +525,14 @@ export class Treasurer implements TreasurerAgent {
     question: string,
     tool: string,
     out: { ok: boolean; result?: unknown; error?: string },
+    stream?: ChatStreamHooks,
   ): Promise<string> {
     const facts = JSON.stringify(out.ok ? out.result : { error: out.error }).slice(0, 1200);
     try {
-      const r = await this.deps.llm.complete({
+      stream?.onReset?.();
+      const complete = (req: Parameters<LlmProvider['complete']>[0]) =>
+        stream ? streamTurn(this.deps.llm, req, stream) : this.deps.llm.complete(req);
+      const r = await complete({
         messages: [
           {
             role: 'system',

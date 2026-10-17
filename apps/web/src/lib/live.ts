@@ -118,7 +118,7 @@ export function shortId(id: string, keep = 10): string {
 
 export const BACKEND_WORDS = {
   mock: 'pretend wallet for testing, no real payments',
-  'wdk-rgb': 'WDK wallet with RGB',
+  'wdk-rgb': 'Tether WDK wallet with RGB (self-custodial: your keys stay on this computer)',
   'rgb-lib': 'rgb-lib wallet',
 } as const;
 

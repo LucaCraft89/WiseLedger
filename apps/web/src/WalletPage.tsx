@@ -81,6 +81,8 @@ export function WalletPage({ api }: { api: ApiClient }) {
           </div>
         </div>
       ))}
+      {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
+
       {w.btcBalanceSats !== undefined && (
         <p>
           Bitcoin for network fees: <strong>{formatAssetAmount(w.btcBalanceSats, 8)} BTC</strong> (
@@ -108,6 +110,69 @@ export function WalletPage({ api }: { api: ApiClient }) {
 
       <ReceiveForm api={api} wallet={w} />
     </section>
+  );
+}
+
+/** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
+export function SpendingRules({
+  spending,
+  assets,
+}: {
+  spending: NonNullable<WalletResponse['spending']>;
+  assets: WalletResponse['assets'];
+}) {
+  const asset = (id?: string) => assets.find((a) => a.assetId === id) ?? assets[0];
+  const fmt = (v: string, id?: string) => {
+    const a = asset(id);
+    return a ? `${formatAssetAmount(v, a.precision)} ${a.ticker}` : `${v} smallest units`;
+  };
+  const main = spending.assetAllowlist[0] ?? assets[0]?.assetId;
+  const spent = spending.spentLast24h.find((s) => s.assetId === main)?.amount ?? '0';
+  const share = spending.dailyCap ? Math.min(100, Number((BigInt(spent) * 100n) / BigInt(spending.dailyCap))) : 0;
+  const approved = spending.assetAllowlist.length
+    ? spending.assetAllowlist.map((id) => asset(id)?.ticker ?? shortId(id)).join(', ')
+    : 'any token';
+  const wdk = spending.enforcedBy === 'wdk-policy';
+  return (
+    <>
+      <h3>Spending rules</h3>
+      <div style={box} data-testid="spending-rules">
+        <div>
+          Up to <strong>{fmt(spending.paymentCap, main)}</strong> per payment
+          {spending.dailyCap && (
+            <>
+              {' '}
+              · up to <strong>{fmt(spending.dailyCap, main)}</strong> in any 24 hours
+            </>
+          )}{' '}
+          · approved tokens: <strong>{approved}</strong>
+        </div>
+        {spending.dailyCap && (
+          <div style={{ marginTop: 8 }}>
+            <div
+              aria-hidden="true"
+              style={{ height: 8, borderRadius: 4, background: 'var(--wl-c-line)', overflow: 'hidden' }}
+            >
+              <div
+                style={{
+                  width: `${share}%`,
+                  height: '100%',
+                  background: share >= 90 ? 'var(--wl-block)' : 'var(--md-primary)',
+                }}
+              />
+            </div>
+            <small style={{ color: 'var(--wl-c-muted)' }}>
+              Spent in the last 24 hours: {fmt(spent, main)} of {fmt(spending.dailyCap, main)}
+            </small>
+          </div>
+        )}
+        <p style={{ margin: '8px 0 0', fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+          {wdk
+            ? 'Enforced twice: by WiseLedger before it asks the wallet, and by the Tether WDK policy engine inside the wallet itself. A payment over a limit is refused before anything is signed, whatever the AI says.'
+            : 'Checked by WiseLedger before every payment, whatever the AI says. (On the real wallet the Tether WDK policy engine enforces them too.)'}
+        </p>
+      </div>
+    </>
   );
 }
 

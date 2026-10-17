@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type ApiClient, READY_ONBOARDING } from './api/client.js';
 import type { OnboardingStatusResponse } from './api/contracts.js';
-import { selectClient } from './api/select.js';
+import { connectServer, demoClient, demoRequested } from './api/select.js';
 import { ChatPage } from './ChatPage.js';
 import { GettingStarted } from './GettingStarted.js';
 import { InvoiceListPage } from './InvoiceListPage.js';
@@ -55,18 +55,49 @@ export function App() {
     setOnboarding(await client.onboarding().catch(() => READY_ONBOARDING));
   }, []);
 
-  useEffect(() => {
-    void selectClient().then(async (client) => {
+  const [waiting, setWaiting] = useState(0);
+  const adopt = useCallback(
+    async (client: ApiClient) => {
       await checkOnboarding(client);
       setApi(client);
-    });
-  }, [checkOnboarding]);
+    },
+    [checkOnboarding],
+  );
+
+  useEffect(() => {
+    if (demoRequested()) {
+      void adopt(demoClient());
+      return;
+    }
+    const stop = new AbortController();
+    connectServer(setWaiting, { signal: stop.signal })
+      .then(adopt)
+      .catch(() => undefined);
+    return () => stop.abort();
+  }, [adopt]);
 
   if (!api || !onboarding) {
+    if (waiting === 0) {
+      return (
+        <p role="status" style={{ padding: 24 }}>
+          Starting WiseLedger…
+        </p>
+      );
+    }
     return (
-      <p role="status" style={{ padding: 24 }}>
-        Starting WiseLedger…
-      </p>
+      <section role="status" aria-live="polite" style={{ padding: 24, maxWidth: 640 }}>
+        <h2>Server not reachable, retrying…</h2>
+        <p>
+          WiseLedger's server on this computer is not answering yet (attempt {waiting}). If you just started it, wait a
+          few seconds: it opens the wallet and the local AI first.
+        </p>
+        <p style={{ color: 'var(--wl-c-muted)' }}>
+          Not started? Run <code>pnpm dev</code> in the project folder. Nothing is paid or analysed until it answers.
+        </p>
+        <button type="button" className="wl-secondary" onClick={() => void adopt(demoClient())}>
+          Open the demo without a server (nothing is real)
+        </button>
+      </section>
     );
   }
 

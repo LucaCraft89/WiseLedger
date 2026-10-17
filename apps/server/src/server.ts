@@ -155,6 +155,11 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     llmInfo: providers.llmInfo,
     holder: providers.holder,
     walletBackend: config.walletBackend,
+    limits: {
+      paymentCap: config.paymentCap,
+      ...(config.dailyCap ? { dailyCap: config.dailyCap } : {}),
+      assetAllowlist: config.assetAllowlist,
+    },
     network: config.rgbNetwork,
     uploadMaxMb: config.uploadMaxMb,
     walletSync: () => ({

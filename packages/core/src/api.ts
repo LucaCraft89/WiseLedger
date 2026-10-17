@@ -116,6 +116,21 @@ export const WalletResponse = z.object({
   /** BTC balance in sats as a decimal string. */
   btcBalanceSats: BaseUnits.optional(),
   assets: z.array(WalletAssetDto),
+  /** The spending rules every payment must pass (WDK policy engine on the real wallet, PaymentGuard everywhere). */
+  spending: z
+    .object({
+      /** Max per payment, base units. */
+      paymentCap: BaseUnits,
+      /** Max per asset in any 24 h, base units. */
+      dailyCap: BaseUnits.optional(),
+      /** Approved asset IDs; empty = any asset. */
+      assetAllowlist: z.array(z.string()),
+      /** Sent (not failed) in the last 24 h, per asset, base units. */
+      spentLast24h: z.array(z.object({ assetId: z.string(), amount: BaseUnits })),
+      /** 'wdk-policy' when the Tether WDK policy engine also enforces the rules on the wallet itself. */
+      enforcedBy: z.enum(['wdk-policy', 'guard']),
+    })
+    .optional(),
 });
 export type WalletResponse = z.infer<typeof WalletResponse>;
 
@@ -196,6 +211,16 @@ export const ChatResponse = z.object({
     .optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
+
+/** One line of the chat stream (newline-delimited JSON). */
+export const ChatStreamLine = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('token'), text: z.string() }),
+  /** The model starts a new turn (after a tool call): drop the live text shown so far. */
+  z.object({ t: z.literal('reset') }),
+  z.object({ t: z.literal('reply'), reply: ChatResponse }),
+  z.object({ t: z.literal('error'), code: z.string(), message: z.string() }),
+]);
+export type ChatStreamLine = z.infer<typeof ChatStreamLine>;
 // ChatResponse and AgentReply must stay the same shape.
 const _chatShape: (r: AgentReply) => ChatResponse = (r) => r;
 void _chatShape;
@@ -349,6 +374,8 @@ export const API_ROUTES = {
   walletLightning: 'GET /api/wallet/lightning',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */
+  agentChatStream: 'POST /api/agent/chat/stream',
   agentTranscribe: 'POST /api/agent/transcribe',
   scheduleList: 'GET /api/schedule',
   scheduleCancel: 'POST /api/schedule/:jobId/cancel',

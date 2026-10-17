@@ -7,6 +7,7 @@ import {
   type AppEvent,
   ChatRequest,
   type ChatResponse,
+  type ChatStreamLine,
   ConfirmRequest,
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
@@ -67,6 +68,8 @@ export interface RouteDeps {
   /** Onboarding state (needs_setup / locked / ready) for /api/health. */
   holder: WalletHolder;
   walletBackend: WalletResponse['backend'];
+  /** Spend limits from the config (PAYMENT_CAP, DAILY_CAP, ASSET_ALLOWLIST), shown on the Wallet page. */
+  limits?: { paymentCap: string; dailyCap?: string; assetAllowlist: string[] };
   network: WalletResponse['network'];
   problems: () => string[];
   /** Largest accepted upload in MB. */
@@ -291,8 +294,20 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   );
 
   route(app, API_ROUTES.wallet, async (): Promise<WalletResponse> => {
-    const [assets, address] = await Promise.all([wallet.listAssets(), wallet.receiveAddress()]);
+    const [assets, address, transfers] = await Promise.all([
+      wallet.listAssets(),
+      wallet.receiveAddress(),
+      deps.limits ? wallet.listTransfers().catch(() => []) : Promise.resolve([]),
+    ]);
     const sats = btcBalanceSats(wallet);
+    // Same rolling-24 h sum the PaymentGuard checks (outgoing, not failed), per asset; local reads only.
+    const since = Date.now() - 86_400_000;
+    const spent = new Map<string, bigint>();
+    for (const t of transfers) {
+      if (t.direction !== 'outgoing' || t.status === 'Failed' || !t.assetId || Date.parse(t.createdAt) < since)
+        continue;
+      spent.set(t.assetId, (spent.get(t.assetId) ?? 0n) + BigInt(t.amount));
+    }
     return {
       backend: deps.walletBackend,
       network: deps.network,
@@ -306,6 +321,17 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         precision: a.precision,
         balance: a.balance,
       })),
+      ...(deps.limits
+        ? {
+            spending: {
+              paymentCap: deps.limits.paymentCap,
+              ...(deps.limits.dailyCap ? { dailyCap: deps.limits.dailyCap } : {}),
+              assetAllowlist: deps.limits.assetAllowlist,
+              spentLast24h: [...spent].map(([assetId, amount]) => ({ assetId, amount: amount.toString() })),
+              enforcedBy: deps.walletBackend === 'wdk-rgb' ? ('wdk-policy' as const) : ('guard' as const),
+            },
+          }
+        : {}),
     };
   });
 
@@ -378,6 +404,37 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const body = ChatRequest.parse(req.body);
     const emit = (event: AppEvent) => store.appendEvent(event);
     return treasurer.chat(body.message, body.history ?? [], emit);
+  });
+
+  // The same chat, streamed: one JSON line per event (reply text as the model writes it, then the full reply).
+  // Tokens go only to this response, never into the event store.
+  route(app, API_ROUTES.agentChatStream, async (req, reply) => {
+    const body = ChatRequest.parse(req.body);
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-cache',
+      'x-accel-buffering': 'no',
+    });
+    const line = (l: ChatStreamLine) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(l)}\n`);
+    };
+    try {
+      const out = await treasurer.chat(body.message, body.history ?? [], (e) => store.appendEvent(e), {
+        onToken: (text) => line({ t: 'token', text }),
+        onReset: () => line({ t: 'reset' }),
+      });
+      line({ t: 'reply', reply: out });
+    } catch (err) {
+      line({
+        t: 'error',
+        code: 'CHAT_FAILED',
+        message: err instanceof Error ? err.message : 'The Treasurer did not answer. Try again in a minute.',
+      });
+    } finally {
+      res.end();
+    }
   });
 
   route(app, M3_ROUTES.scheduleList, async (req): Promise<ScheduleListResponse> => {

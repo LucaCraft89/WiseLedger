@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ApiClient } from './api/client.js';
 import type { ChatResponse } from './api/contracts.js';
-import { loadChat, type StoredMessage, saveChat } from './lib/chat-store.js';
+import { chatSession } from './lib/chat-session.js';
 import {
   CHAT_SUGGESTIONS,
   type ChatTurn,
-  chatHistory,
   confirmScheduleFromChat,
   fiscalFilename,
   fiscalFromToolCall,
@@ -19,8 +18,6 @@ import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type V
 import { Markdown } from './Markdown.js';
 import { CopyButton, ErrorBox, errorText, useToast } from './ui.js';
 
-type Message = StoredMessage;
-
 const bubble = (role: ChatTurn['role']) =>
   ({
     alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
@@ -31,47 +28,28 @@ const bubble = (role: ChatTurn['role']) =>
     whiteSpace: role === 'user' ? 'pre-wrap' : 'normal',
   }) as const;
 
-let nextMsgId = 0;
-/** The last conversation from this browser (kept until "New chat"); IDs continue after it. */
-function restoredChat(): Message[] {
-  const list = loadChat();
-  nextMsgId = Math.max(nextMsgId, ...list.map((m) => m.id));
-  return list;
-}
-
 /** #/chat: ask the Treasurer (local AI with wallet tools). Spending always needs a confirmation card. */
 export function ChatPage({ api }: { api: ApiClient }) {
-  const [messages, setMessages] = useState<Message[]>(restoredChat);
+  // The conversation lives outside this page (lib/chat-session): switching section never loses an answer.
+  const { messages, busy, live, error: chatError } = useSyncExternalStore(chatSession.subscribe, chatSession.get);
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [micError, setError] = useState<unknown>(null);
+  const error =
+    micError ?? (chatError ? errorText(chatError, 'The Treasurer did not answer. Try again in a minute.') : null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [voiceHint, setVoiceHint] = useState(false);
 
-  useEffect(() => saveChat(messages), [messages]);
-
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the end when a message or "Thinking…" appears
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' });
-  }, [messages.length, busy]);
+  }, [messages.length, busy, live.length > 0]);
 
-  async function send(text: string) {
-    const message = text.trim();
-    if (!message || busy) return;
-    const history = chatHistory(messages);
-    setMessages((m) => [...m, { id: ++nextMsgId, role: 'user', text: message }]);
+  function send(text: string) {
+    if (!text.trim() || busy) return;
     setDraft('');
-    setBusy(true);
     setError(null);
-    try {
-      const reply = await api.chat({ message: message.slice(0, 2000), history });
-      setMessages((m) => [...m, { id: ++nextMsgId, role: 'assistant', text: reply.text, reply }]);
-    } catch (err) {
-      setError(errorText(err, 'The Treasurer did not answer. Try again in a minute.'));
-    } finally {
-      setBusy(false);
-    }
+    void chatSession.send(api, text);
   }
 
   return (
@@ -82,9 +60,8 @@ export function ChatPage({ api }: { api: ApiClient }) {
           <button
             type="button"
             className="wl-secondary"
-            disabled={busy}
             onClick={() => {
-              setMessages([]);
+              chatSession.clear();
               setError(null);
             }}
             title="Clear this conversation and start again (the Treasurer forgets it too)"
@@ -105,7 +82,15 @@ export function ChatPage({ api }: { api: ApiClient }) {
             {m.reply && <ReplyExtras api={api} reply={m.reply} restored={m.restored ?? false} />}
           </div>
         ))}
-        {busy && <div style={{ ...bubble('assistant'), color: 'var(--wl-c-muted)' }}>Thinking…</div>}
+        {busy &&
+          (live ? (
+            <div style={bubble('assistant')} aria-live="polite" data-testid="chat-live">
+              <Markdown text={live} />
+              <span className="wl-caret" aria-hidden="true" />
+            </div>
+          ) : (
+            <div style={{ ...bubble('assistant'), color: 'var(--wl-c-muted)' }}>Thinking…</div>
+          ))}
         <div ref={endRef} />
       </div>
       {error ? <ErrorBox error={error} /> : null}

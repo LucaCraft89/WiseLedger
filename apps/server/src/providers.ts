@@ -217,7 +217,7 @@ export class GuardedMockTreasurer implements SchedulingTreasurer {
     return this.inner.execute({ ...g.plan, executeAt: 'now' }, confirmation, emit);
   }
 
-  chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
+  chat: TreasurerAgent['chat'] = (message, history, emit, stream) => this.inner.chat(message, history, emit, stream);
 }
 
 /** Records every outcome with the guard (frees the claim when nothing was sent), then syncs after the payment. */
@@ -246,7 +246,7 @@ class GuardedTreasurer implements SchedulingTreasurer {
     }
   }
 
-  chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
+  chat: TreasurerAgent['chat'] = (message, history, emit, stream) => this.inner.chat(message, history, emit, stream);
 }
 
 /** Opens the wallet holder: mock and injected wallets are ready at once; the real backend may wait for onboarding. */
