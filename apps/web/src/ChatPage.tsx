@@ -133,7 +133,7 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
   const url = fiscal ? api.fiscalUrl(fiscal) : null;
   return (
     <span
-      title={call.error ?? ''}
+      title={`Tool: ${call.name}${call.error ? `. ${call.error}` : ''}`}
       style={{
         fontSize: '0.8em',
         borderRadius: 10,

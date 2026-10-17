@@ -96,8 +96,9 @@ describe('scheduled payments helpers', () => {
 
 describe('chat helpers', () => {
   it('shows tool calls as chips with ✓ / ✗', () => {
-    expect(toolChipText({ name: 'get_balance', ok: true })).toBe('get_balance ✓');
-    expect(toolChipText({ name: 'label_transfer', ok: false })).toBe('label_transfer ✗');
+    expect(toolChipText({ name: 'get_balance', ok: true })).toBe('Checking the balance ✓');
+    expect(toolChipText({ name: 'label_transfer', ok: false })).toBe('Labelling a payment ✗ failed');
+    expect(toolChipText({ name: 'new_tool', ok: true })).toBe('new_tool ✓');
   });
 
   it('takes executeAt from the schedule_payment call', () => {

@@ -29,7 +29,7 @@ const chip = {
 
 function amountText(t: TransferDto, assets: Assets): string {
   const a = assets.find((x) => x.assetId === t.assetId);
-  return a ? `${formatAssetAmount(t.amount, a.precision)} ${a.ticker}` : `${t.amount} (base units)`;
+  return a ? `${formatAssetAmount(t.amount, a.precision)} ${a.ticker}` : `${t.amount} smallest units (token not known)`;
 }
 
 /** Transfers table: date, Sent/Received, amount, status, labels (editable inline), transaction link. */
@@ -87,7 +87,7 @@ export function TransfersTable({
   );
 }
 
-/** Label chips; click "+ label" → type → Enter saves, Esc cancels. × removes a label. */
+/** Label chips; click "+ Add label" → type → Enter saves, Esc cancels. × removes a label. */
 function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
   const toast = useToast();
   const [labels, setLabels] = useState(initial);
@@ -130,13 +130,19 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
         </span>
       ))}
       {s.mode === 'idle' ? (
-        <button type="button" onClick={() => dispatch({ type: 'start' })} style={{ fontSize: '0.85em' }}>
-          + label
+        <button
+          type="button"
+          className="wl-secondary"
+          aria-label="Add a label to this transfer"
+          onClick={() => dispatch({ type: 'start' })}
+          style={{ fontSize: '0.85em' }}
+        >
+          + Add label
         </button>
       ) : (
         <span>
           <input
-            // biome-ignore lint/a11y/noAutofocus: the user just clicked "+ label"
+            // biome-ignore lint/a11y/noAutofocus: the user just clicked "+ Add label"
             autoFocus
             aria-label="New label"
             value={s.draft}
