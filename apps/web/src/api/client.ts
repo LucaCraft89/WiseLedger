@@ -1,18 +1,27 @@
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
+  type ChatRequest,
+  type ChatResponse,
   type ConfirmRequest,
   type ConfirmResponse,
   type CreateInvoiceResponse,
+  type FiscalQuery,
   type HealthResponse,
   type InvoiceDetailResponse,
   type InvoiceListResponse,
+  type LabelsPutRequest,
+  type LabelsPutResponse,
   type RejectResponse,
+  type ScheduleCancelResponse,
+  type ScheduleListResponse,
   SSE_EVENT_NAME,
+  type TransfersResponse,
   type WalletReceiveRequest,
   type WalletReceiveResponse,
   type WalletResponse,
 } from './contracts.js';
+import { fiscalUrl } from '../lib/ledger.js';
 
 export type InvoiceInput = { file: File } | { text: string; filename?: string };
 
@@ -32,6 +41,17 @@ export interface ApiClient {
   wallet(): Promise<WalletResponse>;
   /** New RGB receive invoice (optional asset and amount in base units). */
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
+  /** Wallet transfers with their labels. */
+  transfers(): Promise<TransfersResponse>;
+  /** Replace the labels of one transfer. */
+  setLabels(transferId: string, req: LabelsPutRequest): Promise<LabelsPutResponse>;
+  /** Talk to the Treasurer (local AI with wallet tools). */
+  chat(req: ChatRequest): Promise<ChatResponse>;
+  /** Scheduled payments. */
+  schedule(): Promise<ScheduleListResponse>;
+  cancelJob(jobId: string): Promise<ScheduleCancelResponse>;
+  /** Download URL of the fiscal report, or null in demo mode (no file to download). */
+  fiscalUrl(q: FiscalQuery): string | null;
 }
 
 /** Error with a plain-language message (from the server's ApiError body when present). */
@@ -92,5 +112,12 @@ export function createHttpClient(base = ''): ApiClient {
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
+    transfers: () => call(`${base}/api/transfers`),
+    setLabels: (transferId, req) =>
+      call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
+    chat: (req) => call(`${base}/api/agent/chat`, json(req)),
+    schedule: () => call(`${base}/api/schedule`),
+    cancelJob: (jobId) => call(`${base}/api/schedule/${encodeURIComponent(jobId)}/cancel`, json({})),
+    fiscalUrl: (q) => fiscalUrl(q, base),
   };
 }
