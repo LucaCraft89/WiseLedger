@@ -180,7 +180,10 @@ export function printedTotal(text: string): string | undefined {
 export function normalizeDecimal(v: string | null | undefined): string | undefined {
   if (!v) return undefined;
   // Keep digits and separators, then drop separators stuck to the ends ("So.30.00" → "30.00", "25.-" → "25").
-  let s = v.replace(/[^\d.,-]/g, '').replace(/^[^\d-]+|[^\d]+$/g, '').replace(/^-[^\d]+/, '-');
+  let s = v
+    .replace(/[^\d.,-]/g, '')
+    .replace(/^[^\d-]+|[^\d]+$/g, '')
+    .replace(/^-[^\d]+/, '-');
   if (!/\d/.test(s)) return undefined;
   const lastComma = s.lastIndexOf(',');
   const lastDot = s.lastIndexOf('.');
