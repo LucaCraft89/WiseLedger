@@ -96,14 +96,17 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(path, init);
   } catch {
-    throw new ApiCallError('NETWORK', 'Cannot reach the WiseLedger server. Is it running?');
+    throw new ApiCallError(
+      'NETWORK',
+      'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+    );
   }
   const body: unknown = await res.json().catch(() => undefined);
   if (!res.ok) {
     const err = (body as { error?: { code?: string; message?: string } } | undefined)?.error;
     throw new ApiCallError(
       err?.code ?? `HTTP_${res.status}`,
-      err?.message ?? `The server answered ${res.status}.`,
+      err?.message ?? `Something went wrong inside WiseLedger (error ${res.status}). Try again in a minute.`,
       res.status,
     );
   }

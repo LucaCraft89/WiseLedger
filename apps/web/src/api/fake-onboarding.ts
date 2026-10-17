@@ -82,11 +82,11 @@ export function createFakeOnboarding(initial: OnboardingState = 'ready'): Onboar
     async onboardingUnlock(req) {
       if (state !== 'locked') return { ok: true };
       if (tries >= FAKE_MAX_UNLOCK_TRIES) {
-        throw new ApiCallError('HTTP_429', 'Too many wrong tries. Wait a minute, then try again.');
+        throw new ApiCallError('TOO_MANY_TRIES', 'Too many wrong tries. Wait a minute, then try again.', 429);
       }
       if (req.passphrase !== passphrase) {
         tries += 1;
-        throw new ApiCallError('WalletLocked', 'Wrong passphrase.');
+        throw new ApiCallError('WalletLocked', 'Wrong passphrase.', 401);
       }
       tries = 0;
       state = 'ready';

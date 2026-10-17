@@ -291,6 +291,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
 
   async function analyze(r: Rec, filename: string, content: string) {
     const id = r.summary.id;
+    const started = Date.now();
     const report = await analyzerFor(filename).analyze(
       { kind: r.summary.kind, path: `fake://${filename}`, sha256: await sha256Hex(content), filename },
       { invoiceId: id },
@@ -304,7 +305,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         if (e.type === 'stage' && e.stage === 'extracting' && e.status === 'end') setState(r, 'EXTRACTED');
       },
     );
-    r.report = report;
+    // Pretend timings (the mock has none) so the Local AI panel shows numbers in demo mode.
+    const ms = Math.max(1, Date.now() - started);
+    r.report = report.timings ? report : { ...report, timings: { extractMs: ms / 2, summaryMs: ms / 2 } };
     r.summary = {
       ...r.summary,
       verdict: report.verdict,

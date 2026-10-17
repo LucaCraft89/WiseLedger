@@ -35,12 +35,21 @@ export function shortEvidence(text: string, max = EVIDENCE_MAX): string {
 export const ERROR_WORDS: Record<string, string> = {
   InsufficientFunds: 'Not enough funds in the wallet.',
   InvoiceExpired: "The supplier's payment request expired — ask for a new one.",
-  NoUtxo: 'The wallet needs a moment to prepare (no free coins); try again.',
-  TransferFailed: 'The transfer failed.',
+  NoUtxo: 'The wallet is not ready to pay yet: it needs a few minutes to prepare its coins. Wait, then try again.',
+  TransferFailed: 'The payment did not go through.',
   SubmitTimeout: 'The payment was sent but we have no answer yet. We are checking — do NOT pay again.',
   PolicyDenied: 'Your spending rules do not allow this payment.',
   UnknownAsset: 'This wallet does not hold the token the supplier asks for.',
-  InvalidInvoice: "The supplier's payment request is not valid.",
+  InvalidInvoice: "The supplier's payment request is not valid. Ask them to send it again.",
+  NetworkUnavailable:
+    'We could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
+  WalletLocked: 'Your wallet is locked. Enter your passphrase to unlock it.',
+  WALLET_NOT_READY: 'Your wallet is not set up yet. Create or restore it first, then try again.',
+  INVALID_MNEMONIC: 'These recovery words are not valid. Check the spelling and the order of each word.',
+  PASSPHRASE_TOO_SHORT: 'This passphrase is too short. Choose a longer one.',
+  ALREADY_SET_UP: 'This wallet is already set up. Reload the page to open it.',
+  TOO_MANY_TRIES: 'Too many wrong passphrases. Wait a minute, then try again.',
+  NETWORK: 'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
   unknown_plan: 'This payment was not prepared by WiseLedger, so it was not sent.',
   not_confirmed: 'You have not confirmed this payment yet, so it was not sent.',
   hash_mismatch: 'The payment details changed after you confirmed, so nothing was sent. Please check them again.',
@@ -52,6 +61,15 @@ export const ERROR_WORDS: Record<string, string> = {
   policy_denied: 'Your spending rules do not allow this payment.',
   TREASURER_PARSE: 'The AI could not start the payment. Nothing was sent.',
 };
+
+/**
+ * Server error → plain words: our copy for known codes (429 = too many tries), else the server's own message
+ * (ApiError messages are written for the user).
+ */
+export function apiErrorWords(code: string, message: string, status?: number): string {
+  const key = status === 429 ? 'TOO_MANY_TRIES' : code;
+  return ERROR_WORDS[key] ?? message;
+}
 
 export function errorWords(code: string | undefined, fallback?: string): string {
   return (code && ERROR_WORDS[code]) || fallback || 'The payment failed.';
