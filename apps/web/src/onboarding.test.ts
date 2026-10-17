@@ -279,3 +279,21 @@ describe('scheduled payment proof (PLAN §1.1)', () => {
     expect(html).toContain(`https://mutinynet.com/tx/${'ab'.repeat(32)}`);
   });
 });
+
+describe('get paid: payment requests (A m4.s1 receive side)', () => {
+  it('a request made with a note is listed as waiting, newest first; a received one shows the explorer link', async () => {
+    const api = createFakeClient();
+    const w = await api.wallet();
+    await api.receive({ amount: '7000000', note: 'Acme, refund October', expiryMinutes: 60 });
+    await api.receive({ expiryMinutes: 60 });
+    const { receives } = await api.receives();
+    expect(receives.map((r) => r.status)).toEqual(['waiting', 'waiting']);
+    expect(receives[1]?.note).toBe('Acme, refund October');
+    const { PaymentRequestRow } = await import('./WalletPage.js');
+    const r = { ...(receives[1] as (typeof receives)[number]), status: 'received' as const, txid: 'cd'.repeat(32) };
+    const html = renderToStaticMarkup(createElement(PaymentRequestRow, { r, wallet: w }));
+    expect(html).toContain('Received ✓');
+    expect(html).toContain('Acme, refund October');
+    expect(html).toContain(`/tx/${'cd'.repeat(32)}`);
+  });
+});

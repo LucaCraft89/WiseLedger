@@ -1,6 +1,7 @@
 // Pure helpers for the wallet screens: labels, transfers, scheduled payments, chat and the fiscal report.
 import type { ApiClient } from '../api/client.js';
 import type { ChatResponse, FiscalQuery, Job, TransferDto } from '../api/contracts.js';
+import { TOOL_WORDS } from './live.js';
 
 // ---------- labels ----------
 
@@ -61,16 +62,32 @@ export function labelEditReducer(s: LabelEditState, a: LabelEditAction): LabelEd
 
 export const DIRECTION_WORDS: Record<TransferDto['direction'], string> = { in: 'Received', out: 'Sent' };
 
+/** Chip colours of transfer statuses (theme tokens: readable in light and dark). */
+export const TRANSFER_STATUS_TONE: Record<TransferDto['status'], { bg: string; fg: string }> = {
+  WaitingCounterparty: { bg: 'var(--wl-c-pending-bg)', fg: 'var(--wl-c-warn-text)' },
+  WaitingConfirmations: { bg: 'var(--wl-c-running-bg)', fg: 'var(--wl-c-strong)' },
+  Settled: { bg: 'var(--wl-c-ok-bg)', fg: 'var(--wl-c-ok-text)' },
+  Failed: { bg: 'var(--wl-c-error-bg)', fg: 'var(--wl-c-error)' },
+};
+
 export const TRANSFER_STATUS_WORDS: Record<TransferDto['status'], string> = {
-  WaitingCounterparty: 'Waiting for the other side',
-  WaitingConfirmations: 'Waiting for the network',
+  WaitingCounterparty: 'Waiting for the other wallet',
+  WaitingConfirmations: 'Waiting for a block confirmation',
   Settled: 'Completed',
   Failed: 'Failed',
 };
 
 /** Newest first, at most `limit`. */
+/** An unpaid payment request: rgb-lib lists it as an incoming transfer still waiting for the payer. */
+export const isUnpaidRequest = (t: Pick<TransferDto, 'direction' | 'status'>): boolean =>
+  t.direction === 'in' && t.status === 'WaitingCounterparty';
+
+/** Newest first, money that moved only (unpaid payment requests live under Wallet → Get paid). */
 export function recentTransfers(list: readonly TransferDto[], limit = 10): TransferDto[] {
-  return [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, limit);
+  return [...list]
+    .filter((t) => !isUnpaidRequest(t))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, limit);
 }
 
 // ---------- scheduled payments ----------
@@ -84,11 +101,11 @@ export const JOB_STATUS_WORDS: Record<Job['status'], string> = {
 };
 
 export const JOB_STATUS_COLORS: Record<Job['status'], string> = {
-  pending: '#fff3cd',
-  running: '#cce5ff',
-  done: '#d4edda',
-  cancelled: '#e2e3e5',
-  failed: '#f8d7da',
+  pending: 'var(--wl-c-pending-bg)',
+  running: 'var(--wl-c-running-bg)',
+  done: 'var(--wl-c-ok-bg)',
+  cancelled: 'var(--wl-c-neutral-bg)',
+  failed: 'var(--wl-c-error-bg)',
 };
 
 export const canCancelJob = (job: Pick<Job, 'status'>): boolean => job.status === 'pending';
@@ -118,8 +135,26 @@ export const scheduledSentence = (iso: string): string => `Scheduled for ${forma
 export type ToolCall = ChatResponse['toolCalls'][number];
 export type NeedsConfirmation = NonNullable<ChatResponse['needsConfirmation']>;
 
-/** Small chip text for a tool call: "get_balance ✓" or "get_balance ✗". */
-export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string => `${c.name} ${c.ok ? '✓' : '✗'}`;
+/** Small chip text for a tool call in plain words: "Checking the balance ✓" or "… ✗ failed". */
+export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string =>
+  `${TOOL_WORDS[c.name] ?? c.name} ${c.ok ? '✓' : '✗ failed'}`;
+
+/** Where to see what a tool made or read ("See it in Wallet"); null when there is nothing to open. */
+export function toolLink(c: Pick<ToolCall, 'name' | 'ok'>): { href: string; label: string } | null {
+  if (!c.ok) return null;
+  if (c.name === 'create_receive_invoice') return { href: '#/wallet/get-paid', label: 'See it in Wallet' };
+  if (c.name === 'label_transfer' || c.name === 'list_transfers')
+    return { href: '#/transfers', label: 'See transfers' };
+  if (c.name === 'get_balance') return { href: '#/wallet', label: 'Open Wallet' };
+  return null;
+}
+
+/** The payment request a create_receive_invoice call returned, for a copy button in chat. */
+export function receiveFromToolCall(c: Pick<ToolCall, 'name' | 'ok' | 'result'>): string | undefined {
+  if (c.name !== 'create_receive_invoice' || !c.ok) return undefined;
+  const inv = (c.result as { rgbInvoice?: unknown } | undefined)?.rgbInvoice;
+  return typeof inv === 'string' ? inv : undefined;
+}
 
 /** executeAt of the schedule_payment call that asked for the confirmation (last one wins). */
 export function scheduleExecuteAt(calls: readonly ToolCall[]): string | undefined {
@@ -167,9 +202,21 @@ export interface ChatTurn {
   text: string;
 }
 
-/** The history sent with each message: the last 6 turns. */
-export const chatHistory = (turns: readonly ChatTurn[], max = 6): ChatTurn[] =>
-  turns.slice(-max).map(({ role, text }) => ({ role, text }));
+/** "(done: create_receive_invoice {"amount":"100"} ok)" — what the Treasurer did in a turn, so a follow-up can refer to it. */
+export function toolNote(calls: readonly Pick<ToolCall, 'name' | 'args' | 'ok'>[] | undefined): string {
+  if (!calls?.length) return '';
+  const parts = calls.map((c) => `${c.name} ${JSON.stringify(c.args).slice(0, 120)} ${c.ok ? 'ok' : 'failed'}`);
+  return `\n(done: ${parts.join('; ')})`;
+}
+
+/** The history sent with each message: the last 10 turns, assistant turns with what their tools did. */
+export const chatHistory = (
+  turns: readonly (ChatTurn & { reply?: Pick<ChatResponse, 'toolCalls'> })[],
+  max = 10,
+): ChatTurn[] =>
+  turns
+    .slice(-max)
+    .map(({ role, text, reply }) => ({ role, text: role === 'assistant' ? text + toolNote(reply?.toolCalls) : text }));
 
 export const CHAT_SUGGESTIONS = [
   'What is my TUSDT balance?',

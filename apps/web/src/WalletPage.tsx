@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import { formatAssetAmount, type WalletReceiveResponse, type WalletResponse } from './api/contracts.js';
+import {
+  type BtcTransactionDto,
+  formatAssetAmount,
+  type LightningStatusResponse,
+  type ReceiveRequestDto,
+  type WalletReceiveResponse,
+  type WalletResponse,
+} from './api/contracts.js';
 import { formatDate } from './lib/format.js';
 import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
+import { explorerTxUrl } from './lib/payment.js';
+import { EXPLORER_BASE } from './PaymentCards.js';
 import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
-const box = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
+const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-export function WalletPage({ api }: { api: ApiClient }) {
+export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: WalletTab }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,59 +51,288 @@ export function WalletPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <h2>Wallet</h2>
-      <p>
-        {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} · {w.ready ? 'ready' : 'not ready yet'}{' '}
-        <button type="button" onClick={() => void load()}>
+      <p style={{ color: 'var(--wl-c-muted)' }}>
+        {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} ·{' '}
+        {w.ready ? 'Ready to use' : 'Not ready yet: check again in a minute'}{' '}
+        <button type="button" className="wl-quiet" onClick={() => void load()}>
           Refresh
         </button>
       </p>
 
-      <h3>Balances</h3>
-      {w.assets.length === 0 && <Empty text="This wallet holds no RGB assets yet." />}
-      {w.assets.map((a) => (
-        <div key={a.assetId} style={box} data-testid="asset-balance">
-          <div style={{ fontSize: '1.3em' }}>
-            <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
-            <small style={{ color: '#555' }}>{a.name}</small>
-          </div>
-          <div>
-            Available to spend: {formatAssetAmount(a.balance.spendable, a.precision)} · Confirmed:{' '}
-            {formatAssetAmount(a.balance.settled, a.precision)}
-            {a.balance.future !== a.balance.settled && (
-              <> · Incoming included: {formatAssetAmount(a.balance.future, a.precision)}</>
-            )}
-          </div>
-          <div style={{ fontSize: '0.9em', color: '#555' }}>
-            Asset ID: <code title={a.assetId}>{shortId(a.assetId)}</code>{' '}
-            <CopyButton value={a.assetId} what="Asset ID" />
-          </div>
-        </div>
-      ))}
-      {w.btcBalanceSats !== undefined && (
-        <p>
-          Bitcoin for network fees: <strong>{formatAssetAmount(w.btcBalanceSats, 8)} BTC</strong> (
-          {Number(w.btcBalanceSats).toLocaleString()} sats)
-        </p>
-      )}
+      <nav aria-label="Wallet sections" className="wl-tabs">
+        {WALLET_TABS.map((t) => (
+          <a key={t.id} href={t.href} aria-current={tab === t.id ? 'page' : undefined}>
+            {t.label}
+          </a>
+        ))}
+      </nav>
 
-      <RecentTransfers api={api} assets={w.assets} />
-
-      {w.address && (
+      {tab === 'overview' && (
         <>
-          <h3>Bitcoin address</h3>
-          <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
-            <div style={{ minWidth: 0 }}>
-              <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
-              <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
-              <CopyButton value={w.address} what="Address" />
+          {w.assets.length === 0 && (
+            <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
+          )}
+          {w.assets.map((a) => (
+            <div key={a.assetId} style={box} data-testid="asset-balance">
+              <div style={{ fontSize: '1.6em' }}>
+                <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
+                <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
+              </div>
+              <div style={{ color: 'var(--wl-c-muted)' }}>
+                Available to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
+                {a.balance.future !== a.balance.settled && (
+                  <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
+                )}
+              </div>
             </div>
-          </div>
+          ))}
+          {w.btcBalanceSats !== undefined && <BitcoinBalance sats={w.btcBalanceSats} />}
+          {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
+          <RecentTransfers api={api} assets={w.assets} />
         </>
       )}
 
-      <ReceiveForm api={api} wallet={w} />
+      {tab === 'get-paid' && <ReceiveForm api={api} wallet={w} />}
+
+      {tab === 'details' && (
+        <>
+          <h3>Tokens</h3>
+          {w.assets.map((a) => (
+            <div key={a.assetId} style={box}>
+              <strong>{a.ticker}</strong> {a.name}
+              <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+                Token ID (the unique code of this token, used in every payment):{' '}
+                <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
+              </div>
+            </div>
+          ))}
+          {w.btcBalanceSats !== undefined && (
+            <>
+              <BitcoinBalance sats={w.btcBalanceSats} />
+              <BtcTransactions api={api} />
+            </>
+          )}
+          {w.address && (
+            <>
+              <h3>Bitcoin address</h3>
+              <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
+                  <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
+                  <CopyButton value={w.address} what="Address" />
+                </div>
+              </div>
+            </>
+          )}
+          <LightningPanel api={api} assets={w.assets} />
+        </>
+      )}
     </section>
+  );
+}
+
+export type WalletTab = 'overview' | 'get-paid' | 'details';
+export const WALLET_TABS: readonly { id: WalletTab; href: string; label: string }[] = [
+  { id: 'overview', href: '#/wallet', label: 'Overview' },
+  { id: 'get-paid', href: '#/wallet/get-paid', label: 'Get paid' },
+  { id: 'details', href: '#/wallet/details', label: 'Details' },
+];
+/** "#/wallet/get-paid" → "get-paid"; anything else under #/wallet → overview. */
+export const walletTab = (hash: string): WalletTab =>
+  WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview';
+
+/** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
+export function SpendingRules({
+  spending,
+  assets,
+}: {
+  spending: NonNullable<WalletResponse['spending']>;
+  assets: WalletResponse['assets'];
+}) {
+  const asset = (id?: string) => assets.find((a) => a.assetId === id) ?? assets[0];
+  const fmt = (v: string, id?: string) => {
+    const a = asset(id);
+    return a ? `${formatAssetAmount(v, a.precision)} ${a.ticker}` : `${v} smallest units`;
+  };
+  const main = spending.assetAllowlist[0] ?? assets[0]?.assetId;
+  const spent = spending.spentLast24h.find((s) => s.assetId === main)?.amount ?? '0';
+  const share = spending.dailyCap ? Math.min(100, Number((BigInt(spent) * 100n) / BigInt(spending.dailyCap))) : 0;
+  const approved = spending.assetAllowlist.length
+    ? spending.assetAllowlist.map((id) => asset(id)?.ticker ?? shortId(id)).join(', ')
+    : 'any token';
+  const wdk = spending.enforcedBy === 'wdk-policy';
+  return (
+    <>
+      <h3>Spending rules</h3>
+      <div style={box} data-testid="spending-rules">
+        <div>
+          Up to <strong>{fmt(spending.paymentCap, main)}</strong> per payment
+          {spending.dailyCap && (
+            <>
+              {' '}
+              · up to <strong>{fmt(spending.dailyCap, main)}</strong> in any 24 hours
+            </>
+          )}{' '}
+          · approved tokens: <strong>{approved}</strong>
+        </div>
+        {spending.dailyCap && (
+          <div style={{ marginTop: 8 }}>
+            <div
+              aria-hidden="true"
+              style={{ height: 8, borderRadius: 4, background: 'var(--wl-c-line)', overflow: 'hidden' }}
+            >
+              <div
+                style={{
+                  width: `${share}%`,
+                  height: '100%',
+                  background: share >= 90 ? 'var(--wl-block)' : 'var(--md-primary)',
+                }}
+              />
+            </div>
+            <small style={{ color: 'var(--wl-c-muted)' }}>
+              Spent in the last 24 hours: {fmt(spent, main)} of {fmt(spending.dailyCap, main)}
+            </small>
+          </div>
+        )}
+        <p style={{ margin: '8px 0 0', fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+          {wdk
+            ? 'Enforced twice: by WiseLedger before it asks the wallet, and by the Tether WDK policy engine inside the wallet itself. A payment over a limit is refused before anything is signed, whatever the AI says.'
+            : 'Checked by WiseLedger before every payment, whatever the AI says. (On the real wallet the Tether WDK policy engine enforces them too.)'}
+        </p>
+      </div>
+    </>
+  );
+}
+
+/** Spendable and receivable over Lightning, per asset, summed over usable channels. */
+export function lightningTotals(ln: LightningStatusResponse): { assetId?: string; send: bigint; receive: bigint }[] {
+  const by = new Map<string, { assetId?: string; send: bigint; receive: bigint }>();
+  for (const c of ln.channels) {
+    if (!c.usable) continue;
+    const key = c.assetId ?? '';
+    const row = by.get(key) ?? { ...(c.assetId ? { assetId: c.assetId } : {}), send: 0n, receive: 0n };
+    row.send += BigInt(c.localAsset);
+    row.receive += BigInt(c.remoteAsset);
+    by.set(key, row);
+  }
+  return [...by.values()];
+}
+
+/** Lightning panel from GET /api/wallet/lightning. Hidden while loading; "off" when the server has no Lightning. */
+export function LightningPanel({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
+  const [ln, setLn] = useState<LightningStatusResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .lightning()
+      .then((r) => live && setLn(r))
+      .catch((err: unknown) => live && setError(errorText(err, 'Could not read the Lightning status.')));
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  if (error) return <p style={{ color: 'var(--wl-c-muted)' }}>Lightning: {error}</p>;
+  if (!ln) return null;
+  if (!ln.enabled) {
+    return (
+      <p data-testid="lightning-off" style={{ color: 'var(--wl-c-muted)' }}>
+        Lightning (instant payments) is off in this wallet. Invoices that ask for Lightning will be stopped.
+      </p>
+    );
+  }
+  const usable = ln.channels.filter((c) => c.usable).length;
+  const fmt = (assetId: string | undefined, v: bigint) => {
+    const a = assets.find((x) => x.assetId === assetId);
+    return a ? `${formatAssetAmount(v.toString(), a.precision)} ${a.ticker}` : `${v.toString()} smallest units`;
+  };
+  return (
+    <>
+      <h3>Lightning (instant payments)</h3>
+      <div style={box} data-testid="lightning-panel">
+        <div>
+          {usable === 0
+            ? 'No Lightning channel is ready yet, so payments go on-chain. A channel opens on first start; check back in a few minutes.'
+            : `${usable} channel${usable === 1 ? '' : 's'} ready.`}
+        </div>
+        {ln.problem && <div style={{ color: 'var(--wl-c-warn-text)' }}>{ln.problem}</div>}
+        {lightningTotals(ln).map((t) => (
+          <div key={t.assetId ?? 'unknown'}>
+            Can send now: <strong>{fmt(t.assetId, t.send)}</strong> · Can receive: {fmt(t.assetId, t.receive)}
+          </div>
+        ))}
+        {ln.nodePubkey && (
+          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+            Your Lightning node: <code title={ln.nodePubkey}>{shortId(ln.nodePubkey)}</code>{' '}
+            <CopyButton value={ln.nodePubkey} what="Node ID" />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** Below this many sats a token payment may fail: the wallet cannot pay the network fee. */
+export const LOW_SATS = 5_000;
+
+const BTC_PURPOSE_WORDS: Record<BtcTransactionDto['purpose'], string> = {
+  token_payment: 'Network fee for a token payment',
+  utxo_setup: 'Preparing the wallet to hold tokens',
+  drain: 'Wallet emptied to another address',
+  bitcoin: 'Test bitcoin',
+};
+
+function BitcoinBalance({ sats }: { sats: string }) {
+  const low = Number(sats) < LOW_SATS;
+  return (
+    <div style={box} data-testid="sats-balance">
+      <div style={{ fontSize: '1.3em' }}>
+        <strong>{Number(sats).toLocaleString()}</strong> sats{' '}
+        <small style={{ color: 'var(--wl-c-muted)' }}>
+          Bitcoin for network fees ({formatAssetAmount(sats, 8)} BTC)
+        </small>
+      </div>
+      <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+        Sats are not your tokens. Every token payment needs a few sats to pay the network, so keep some in the wallet.
+      </div>
+      {low && (
+        <p role="alert" style={{ color: 'var(--wl-c-danger, #b00020)', marginBottom: 0 }}>
+          Low on sats: a token payment may fail. Send test bitcoin to the address below.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BtcTransactions({ api }: { api: ApiClient }) {
+  const load = useCallback(async () => (await api.btcTransactions()).transactions.slice(0, 10), [api]);
+  const { data, error, loading, reload } = useLoad(load);
+  return (
+    <>
+      <h3>Bitcoin (sats) activity</h3>
+      {error ? <ErrorBox error={error} retry={reload} /> : null}
+      {loading && !data ? <Loading text="Loading Bitcoin activity…" /> : null}
+      {data && data.length === 0 && <Empty text="No Bitcoin activity yet." />}
+      {data?.map((t) => (
+        <div key={t.txid} style={{ ...box, marginBottom: 8 }} data-testid="btc-row">
+          <strong>
+            {t.direction === 'received' ? '+' : t.direction === 'sent' ? '−' : ''}
+            {Number(t.amountSats).toLocaleString()} sats
+          </strong>
+          {Number(t.feeSats) > 0 && <> · fee {Number(t.feeSats).toLocaleString()} sats</>}
+          {' · '}
+          {t.direction === 'received' ? 'Received' : BTC_PURPOSE_WORDS[t.purpose]}
+          <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+            {t.confirmed && t.createdAt ? formatDate(t.createdAt) : 'Waiting for a block'}
+            {' · '}
+            <a href={explorerTxUrl(t.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
+              View on the block explorer
+            </a>
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -120,6 +358,8 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
   const [assetId, setAssetId] = useState(wallet.assets[0]?.assetId ?? '');
   const [amount, setAmount] = useState('');
   const [expiry, setExpiry] = useState('60');
+  const [note, setNote] = useState('');
+  const [listTick, setListTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<WalletReceiveResponse | null>(null);
@@ -141,11 +381,14 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         ...(assetId ? { assetId } : {}),
         ...(base.value ? { amount: base.value } : {}),
         expiryMinutes: minutes,
+        ...(note.trim() ? { note: note.trim() } : {}),
       });
       setCreated(res);
-      toast('Receive invoice created', 'success');
+      setNote('');
+      setListTick((t) => t + 1);
+      toast('Payment request created', 'success');
     } catch (err) {
-      const msg = errorText(err, 'Could not create the receive invoice.');
+      const msg = errorText(err, 'Could not create the payment request.');
       setFormError(msg);
       toast(msg, 'error');
     } finally {
@@ -163,7 +406,10 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           void submit();
         }}
       >
-        <p style={{ marginTop: 0 }}>Create an RGB invoice and give it to the person who pays you.</p>
+        <p style={{ marginTop: 0 }}>
+          Create a payment request (an “RGB invoice”) and send it to the person who will pay you. They paste it into
+          their wallet.
+        </p>
         <label style={{ display: 'block', marginBottom: 8 }}>
           Asset{' '}
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
@@ -186,24 +432,33 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           />
         </label>
         <label style={{ display: 'block', marginBottom: 8 }}>
+          Who pays, or what for (optional){' '}
+          <input
+            maxLength={120}
+            placeholder="e.g. Acme, refund October"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <label style={{ display: 'block', marginBottom: 8 }}>
           Valid for{' '}
           <input inputMode="numeric" value={expiry} onChange={(e) => setExpiry(e.target.value)} style={{ width: 80 }} />{' '}
           minutes
         </label>
-        {formError && <p style={{ color: '#b00020' }}>{formError}</p>}
+        {formError && <p style={{ color: 'var(--wl-c-error)' }}>{formError}</p>}
         <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create receive invoice'}
+          {busy ? 'Creating…' : 'Create payment request'}
         </button>
       </form>
 
       {created && (
-        <div style={{ ...box, background: '#f8f9fa' }} data-testid="receive-invoice">
-          <strong>Your receive invoice</strong>
+        <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
+          <strong>Your payment request</strong>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
-            <Qr value={created.rgbInvoice} size={200} alt="QR code of the RGB receive invoice" />
+            <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
             <div style={{ minWidth: 0, flex: 1 }}>
               <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
-              <CopyButton value={created.rgbInvoice} what="Invoice" label="Copy invoice" />
+              <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
               {created.amount && asset && (
                 <p>
                   Amount: {formatAssetAmount(created.amount, asset.precision)} {asset.ticker}
@@ -214,6 +469,83 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           </div>
         </div>
       )}
+      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
     </>
+  );
+}
+
+export const RECEIVE_STATUS_WORDS: Record<ReceiveRequestDto['status'], string> = {
+  waiting: 'Waiting for payment',
+  incoming: 'Payment on its way (waiting for a block)',
+  received: 'Received ✓',
+  expired: 'Expired: create a new request',
+  failed: 'The payment failed: ask them to try again',
+};
+
+/** Payment requests handed out, refreshed every 10 s while one is still open. */
+export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet: WalletResponse; tick: number }) {
+  const [list, setList] = useState<ReceiveRequestDto[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    void tick;
+    void refresh;
+    let live = true;
+    api.receives().then(
+      (r) => {
+        if (!live) return;
+        setList(r.receives);
+        setError(null);
+      },
+      (e: unknown) => {
+        if (live) setError(e);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, tick, refresh]);
+  const open = list?.some((r) => r.status === 'waiting' || r.status === 'incoming');
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => setRefresh((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  if (error) return <ErrorBox error={error} retry={() => setRefresh((n) => n + 1)} />;
+  if (!list || list.length === 0) return null;
+  return (
+    <>
+      <h3>Payment requests you sent</h3>
+      <div aria-live="polite">
+        {list.slice(0, 10).map((r) => (
+          <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function PaymentRequestRow({ r, wallet }: { r: ReceiveRequestDto; wallet: WalletResponse }) {
+  const asset = wallet.assets.find((a) => a.assetId === r.assetId);
+  const amount = r.receivedAmount ?? r.amount;
+  return (
+    <div style={{ ...box, marginBottom: 8 }} data-testid="receive-row">
+      <strong>{RECEIVE_STATUS_WORDS[r.status]}</strong>
+      {' · '}
+      {amount && asset ? `${formatAssetAmount(amount, asset.precision)} ${asset.ticker}` : 'any amount'}
+      {r.note ? ` · ${r.note}` : ''}
+      <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+        Created {formatDate(r.createdAt)}
+        {r.txid && (
+          <>
+            {' · '}
+            <a href={explorerTxUrl(r.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
+              View on the block explorer
+            </a>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

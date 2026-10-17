@@ -61,10 +61,10 @@ export function stateTone(state: InvoiceState): 'good' | 'attention' | 'bad' | '
 
 /** Brand functional colours (docs/BRAND.md): ok green, review amber, block red, neutral grey. */
 export const TONE_COLORS = {
-  good: '#e3f3e8',
-  attention: '#fff1c7',
-  bad: '#fbe3e1',
-  neutral: '#eef1f4',
+  good: 'var(--wl-c-good-bg)',
+  attention: 'var(--wl-c-review-bg)',
+  bad: 'var(--wl-c-block-bg)',
+  neutral: 'var(--wl-c-info-bg)',
 } as const;
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
@@ -79,10 +79,18 @@ export const VERDICT_EXPLAIN: Record<Verdict, string> = {
   block: 'This invoice looks dangerous. We will not pay it.',
 };
 
-export const VERDICT_COLORS: Record<Verdict, string> = { ok: '#e3f3e8', review: '#fff1c7', block: '#fbe3e1' };
+export const VERDICT_COLORS: Record<Verdict, string> = {
+  ok: 'var(--wl-c-good-bg)',
+  review: 'var(--wl-c-review-bg)',
+  block: 'var(--wl-c-block-bg)',
+};
 
 /** Solid border/badge colour per verdict (white text on it is AA). */
-export const VERDICT_ACCENT: Record<Verdict, string> = { ok: '#1e7b45', review: '#8a5a00', block: '#b3261e' };
+export const VERDICT_ACCENT: Record<Verdict, string> = {
+  ok: 'var(--wl-c-ok)',
+  review: 'var(--wl-c-review)',
+  block: 'var(--wl-c-block)',
+};
 
 /** Icon next to the verdict word, so colour is never the only signal. */
 export const VERDICT_ICON: Record<Verdict, string> = { ok: '✓', review: '!', block: '✕' };
@@ -91,9 +99,9 @@ export const SEVERITY_WORDS: Record<Severity, string> = { info: 'Note', warn: 'W
 
 /** info grey, warn amber, block red: background and left border. */
 export const SEVERITY_COLORS: Record<Severity, { bg: string; border: string }> = {
-  info: { bg: '#eef1f4', border: '#52606d' },
-  warn: { bg: '#fff1c7', border: '#8a5a00' },
-  block: { bg: '#fbe3e1', border: '#b3261e' },
+  info: { bg: 'var(--wl-c-info-bg)', border: 'var(--wl-c-info)' },
+  warn: { bg: 'var(--wl-c-review-bg)', border: 'var(--wl-c-review)' },
+  block: { bg: 'var(--wl-c-block-bg)', border: 'var(--wl-c-block)' },
 };
 
 const LLM_STATE_WORDS = { unloaded: 'not loaded', loading: 'loading…', ready: 'ready', error: 'not working' } as const;
@@ -158,6 +166,19 @@ export function stateHistory(events: readonly AppEvent[]): { at: string; label: 
 }
 
 /** ISO date → short local date and time. */
+/** "17 Oct, 16:46" in tables (the year only when it is not this year). */
+export function shortDate(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+  });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${day}, ${time}`;
+}
+
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });

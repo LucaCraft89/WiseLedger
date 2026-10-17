@@ -2,8 +2,11 @@ import { fiscalUrl } from '../lib/ledger.js';
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
+  type BtcTransactionsResponse,
   type ChatRequest,
   type ChatResponse,
+  type ChatStreamHooks,
+  ChatStreamLine,
   type ConfirmRequest,
   type ConfirmResponse,
   type CreateInvoiceResponse,
@@ -13,6 +16,7 @@ import {
   type InvoiceListResponse,
   type LabelsPutRequest,
   type LabelsPutResponse,
+  type LightningStatusResponse,
   type OnboardingCreateRequest,
   type OnboardingCreateResponse,
   type OnboardingOkResponse,
@@ -20,10 +24,12 @@ import {
   type OnboardingRestoreResponse,
   type OnboardingStatusResponse,
   type OnboardingUnlockRequest,
+  type ReceivesListResponse,
   type RejectResponse,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
   SSE_EVENT_NAME,
+  type TranscribeResponse,
   type TransfersResponse,
   type WalletReceiveRequest,
   type WalletReceiveResponse,
@@ -48,12 +54,22 @@ export interface ApiClient {
   wallet(): Promise<WalletResponse>;
   /** New RGB receive invoice (optional asset and amount in base units). */
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
+  /** Payment requests handed out, newest first, with the status of the payment that answers each. */
+  receives(): Promise<ReceivesListResponse>;
+  /** Lightning node and channels. A server without the route (404) counts as Lightning off. */
+  lightning(): Promise<LightningStatusResponse>;
+  /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
+  btcTransactions(): Promise<BtcTransactionsResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** Replace the labels of one transfer. */
   setLabels(transferId: string, req: LabelsPutRequest): Promise<LabelsPutResponse>;
   /** Talk to the Treasurer (local AI with wallet tools). */
   chat(req: ChatRequest): Promise<ChatResponse>;
+  /** The same, with the reply text as the model writes it (onReset: a new model turn starts, drop the live text). */
+  chatStream(req: ChatRequest, hooks: ChatStreamHooks): Promise<ChatResponse>;
+  /** Speech to text on this computer (QVAC Parakeet). Audio: 16 kHz mono WAV. The text only fills the chat box. */
+  transcribe(audio: Blob): Promise<TranscribeResponse>;
   /** Scheduled payments. */
   schedule(): Promise<ScheduleListResponse>;
   cancelJob(jobId: string): Promise<ScheduleCancelResponse>;
@@ -70,6 +86,9 @@ export interface ApiClient {
 }
 
 /** Answer used when the server has no onboarding route (older server): the wallet is simply ready. */
+/** What a server without Lightning (or without the route) means. */
+export const LIGHTNING_OFF: LightningStatusResponse = { enabled: false, channels: [] };
+
 export const READY_ONBOARDING: OnboardingStatusResponse = {
   state: 'ready',
   seedShown: true,
@@ -88,6 +107,40 @@ export class ApiCallError extends Error {
   ) {
     super(message);
     this.name = 'ApiCallError';
+  }
+}
+
+/** Reads NDJSON ChatStreamLine lines until the reply (or an error line). */
+export async function readChatStream(body: ReadableStream<Uint8Array>, hooks: ChatStreamHooks): Promise<ChatResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  const handle = (raw: string): ChatResponse | undefined => {
+    if (!raw.trim()) return undefined;
+    const parsed = ChatStreamLine.safeParse(JSON.parse(raw));
+    if (!parsed.success) return undefined;
+    const l = parsed.data;
+    if (l.t === 'token') hooks.onToken(l.text);
+    else if (l.t === 'reset') hooks.onReset?.();
+    else if (l.t === 'error') throw new ApiCallError(l.code, l.message);
+    else return l.reply;
+    return undefined;
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buf += decoder.decode(value, { stream: true });
+    let nl = buf.indexOf('\n');
+    while (nl >= 0) {
+      const reply = handle(buf.slice(0, nl));
+      if (reply) return reply;
+      buf = buf.slice(nl + 1);
+      nl = buf.indexOf('\n');
+    }
+    if (done) {
+      const reply = handle(buf);
+      if (reply) return reply;
+      throw new ApiCallError('NO_REPLY', 'The Treasurer stopped without an answer. Try again in a minute.');
+    }
   }
 }
 
@@ -145,10 +198,61 @@ export function createHttpClient(base = ''): ApiClient {
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
+    receives: () => call(`${base}/api/wallet/receives`),
+    async lightning() {
+      try {
+        return await call<LightningStatusResponse>(`${base}/api/wallet/lightning`);
+      } catch (err) {
+        if (err instanceof ApiCallError && err.status === 404) return LIGHTNING_OFF;
+        throw err;
+      }
+    },
+    btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
     chat: (req) => call(`${base}/api/agent/chat`, json(req)),
+    async chatStream(req, hooks) {
+      let res: Response;
+      try {
+        res = await fetch(`${base}/api/agent/chat/stream`, json(req));
+      } catch {
+        throw new ApiCallError(
+          'NETWORK',
+          'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+        );
+      }
+      // An older server without the stream route: the plain JSON chat still works.
+      if (res.status === 404) return call(`${base}/api/agent/chat`, json(req));
+      if (!res.ok || !res.body) {
+        const err = ((await res.json().catch(() => undefined)) as { error?: { code?: string; message?: string } })
+          ?.error;
+        throw new ApiCallError(
+          err?.code ?? `HTTP_${res.status}`,
+          err?.message ?? 'The Treasurer did not answer. Try again in a minute.',
+          res.status,
+        );
+      }
+      return readChatStream(res.body, hooks);
+    },
+    async transcribe(audio) {
+      try {
+        return await call<TranscribeResponse>(`${base}/api/agent/transcribe`, {
+          method: 'POST',
+          headers: { 'content-type': audio.type || 'audio/wav' },
+          body: audio,
+        });
+      } catch (err) {
+        if (err instanceof ApiCallError && err.status === 404) {
+          throw new ApiCallError(
+            'VOICE_UNAVAILABLE',
+            'Voice input is not available on this WiseLedger yet. Please type your request.',
+            404,
+          );
+        }
+        throw err;
+      }
+    },
     schedule: () => call(`${base}/api/schedule`),
     cancelJob: (jobId) => call(`${base}/api/schedule/${encodeURIComponent(jobId)}/cancel`, json({})),
     fiscalUrl: (q) => fiscalUrl(q, base),

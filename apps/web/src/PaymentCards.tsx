@@ -5,12 +5,33 @@ import { CopyButton, errorText } from './ui.js';
 /** From the root .env (RGB_EXPLORER_URL) via vite.config.ts; Mutinynet by default. */
 export const EXPLORER_BASE: string = import.meta.env.VITE_RGB_EXPLORER_URL || DEFAULT_EXPLORER_URL;
 
-/** Paid: what was paid, the transfer ID and the Bitcoin transaction with a link to the explorer. */
-export function ResultCard({ sentence, transferId, txid }: { sentence?: string; transferId?: string; txid?: string }) {
+/**
+ * Paid: what was paid, the transfer ID and the Bitcoin transaction with a link to the explorer. A Lightning payment
+ * has no Bitcoin transaction: the card shows its payment hash instead.
+ */
+export function ResultCard({
+  sentence,
+  transferId,
+  txid,
+  paymentHash,
+  lightning = false,
+}: {
+  sentence?: string;
+  transferId?: string;
+  txid?: string;
+  paymentHash?: string;
+  lightning?: boolean;
+}) {
   return (
     <div
       data-testid="paid-card"
-      style={{ background: '#d4edda', borderLeft: '6px solid #28a745', borderRadius: 4, padding: 12, marginTop: 16 }}
+      style={{
+        background: 'var(--wl-c-ok-bg)',
+        borderLeft: '6px solid var(--wl-c-ok-line)',
+        borderRadius: 4,
+        padding: 12,
+        marginTop: 16,
+      }}
     >
       <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
       {sentence && <div>You paid {sentence}.</div>}
@@ -20,7 +41,21 @@ export function ResultCard({ sentence, transferId, txid }: { sentence?: string; 
           <CopyButton value={transferId} what="Transfer ID" />
         </div>
       )}
-      {txid ? (
+      {lightning ? (
+        paymentHash ? (
+          <div style={{ marginTop: 6 }} data-testid="payment-hash">
+            Lightning payment hash: <code title={paymentHash}>{shortId(paymentHash)}</code>{' '}
+            <CopyButton value={paymentHash} what="Payment hash" />
+            <div style={{ fontSize: '0.9em' }}>
+              Paid over Lightning: no Bitcoin transaction is needed, the supplier received it at once.
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 6, fontSize: '0.9em' }}>
+            Paid over Lightning: the payment hash will appear here once known.
+          </div>
+        )
+      ) : txid ? (
         <div style={{ marginTop: 6 }}>
           Bitcoin transaction: <code title={txid}>{shortId(txid)}</code>{' '}
           <CopyButton value={txid} what="Transaction ID" />{' '}
@@ -58,12 +93,18 @@ export function FailureCard({
     <div
       data-testid="failure-card"
       role="alert"
-      style={{ background: '#f8d7da', borderLeft: '6px solid #c82333', borderRadius: 4, padding: 12, marginTop: 16 }}
+      style={{
+        background: 'var(--wl-c-error-bg)',
+        borderLeft: '6px solid var(--wl-c-danger)',
+        borderRadius: 4,
+        padding: 12,
+        marginTop: 16,
+      }}
     >
       <strong style={{ fontSize: '1.2em' }}>{unsure ? 'We are not sure the payment went through' : 'Not paid'}</strong>
       <div>{errorWords(code, message)}</div>
       {message && message !== errorWords(code, message) && (
-        <div style={{ fontSize: '0.85em', color: '#555' }}>Details: {message}</div>
+        <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>Details: {message}</div>
       )}
       {transferId && (
         <div style={{ fontSize: '0.9em', marginTop: 4 }}>
@@ -100,7 +141,7 @@ export function FailureCard({
             : 'Nothing is retried automatically.'}
         </div>
       )}
-      {error && <p style={{ color: '#b00020', margin: '8px 0 0' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--wl-c-error)', margin: '8px 0 0' }}>{error}</p>}
     </div>
   );
 }

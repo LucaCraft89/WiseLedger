@@ -97,7 +97,7 @@ export function SettingsPage({ api }: { api: ApiClient }) {
               </ul>
             )}
             <p style={{ fontSize: 14, color: 'var(--wl-muted)' }}>Last checked: {formatDate(health.time)}</p>
-            <button type="button" onClick={() => void load()}>
+            <button className="wl-quiet" type="button" onClick={() => void load()}>
               Check again
             </button>
           </section>

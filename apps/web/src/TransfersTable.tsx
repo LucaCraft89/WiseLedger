@@ -1,13 +1,15 @@
 import { useReducer, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { formatAssetAmount, type TransferDto, type WalletResponse } from './api/contracts.js';
-import { formatDate } from './lib/format.js';
+import { shortDate } from './lib/format.js';
 import {
   addLabel,
   DIRECTION_WORDS,
+  isUnpaidRequest,
   LABEL_MAX_LEN,
   labelEditReducer,
   removeLabel,
+  TRANSFER_STATUS_TONE,
   TRANSFER_STATUS_WORDS,
 } from './lib/ledger.js';
 import { explorerTxUrl, shortId } from './lib/payment.js';
@@ -15,12 +17,12 @@ import { errorText, useToast } from './ui.js';
 
 type Assets = WalletResponse['assets'];
 
-const cell = { padding: '6px 8px', borderBottom: '1px solid #eee', verticalAlign: 'top' } as const;
+const cell = { padding: '6px 8px', borderBottom: '1px solid var(--wl-c-line-soft)', verticalAlign: 'top' } as const;
 const chip = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  background: '#e7f1ff',
+  background: 'var(--wl-c-bubble-user)',
   borderRadius: 12,
   padding: '0 8px',
   margin: '0 4px 4px 0',
@@ -29,7 +31,7 @@ const chip = {
 
 function amountText(t: TransferDto, assets: Assets): string {
   const a = assets.find((x) => x.assetId === t.assetId);
-  return a ? `${formatAssetAmount(t.amount, a.precision)} ${a.ticker}` : `${t.amount} (base units)`;
+  return a ? `${formatAssetAmount(t.amount, a.precision)} ${a.ticker}` : `${t.amount} smallest units (token not known)`;
 }
 
 /** Transfers table: date, Sent/Received, amount, status, labels (editable inline), transaction link. */
@@ -49,7 +51,7 @@ export function TransfersTable({
           <tr style={{ textAlign: 'left' }}>
             <th style={cell}>Date</th>
             <th style={cell}>Type</th>
-            <th style={cell}>Amount</th>
+            <th style={{ ...cell, textAlign: 'right' }}>Amount</th>
             <th style={cell}>Status</th>
             <th style={cell}>Labels</th>
             <th style={cell}>Transaction</th>
@@ -58,10 +60,26 @@ export function TransfersTable({
         <tbody>
           {transfers.map((t) => (
             <tr key={t.transferId}>
-              <td style={cell}>{formatDate(t.createdAt)}</td>
-              <td style={cell}>{DIRECTION_WORDS[t.direction]}</td>
-              <td style={{ ...cell, whiteSpace: 'nowrap' }}>{amountText(t, assets)}</td>
-              <td style={cell}>{TRANSFER_STATUS_WORDS[t.status]}</td>
+              <td style={{ ...cell, whiteSpace: 'nowrap' }} title={new Date(t.createdAt).toLocaleString()}>
+                {shortDate(t.createdAt)}
+              </td>
+              <td style={cell}>{isUnpaidRequest(t) ? 'Payment request' : DIRECTION_WORDS[t.direction]}</td>
+              <td style={{ ...cell, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {isUnpaidRequest(t) ? '' : t.direction === 'out' ? '− ' : '+ '}
+                {amountText(t, assets)}
+              </td>
+              <td style={cell}>
+                <span
+                  style={{
+                    ...chip,
+                    background: TRANSFER_STATUS_TONE[t.status].bg,
+                    color: TRANSFER_STATUS_TONE[t.status].fg,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {isUnpaidRequest(t) ? 'Not paid yet' : TRANSFER_STATUS_WORDS[t.status]}
+                </span>
+              </td>
               <td style={cell}>
                 <LabelCell api={api} transferId={t.transferId} initial={t.labels} />
               </td>
@@ -70,6 +88,8 @@ export function TransfersTable({
                   <a href={t.explorerUrl ?? explorerTxUrl(t.txid)} target="_blank" rel="noreferrer" title={t.txid}>
                     {shortId(t.txid, 6)}
                   </a>
+                ) : t.paymentHash ? (
+                  <span title={`Lightning payment hash ${t.paymentHash}`}>Lightning · {shortId(t.paymentHash, 6)}</span>
                 ) : (
                   '—'
                 )}
@@ -87,7 +107,7 @@ export function TransfersTable({
   );
 }
 
-/** Label chips; click "+ label" → type → Enter saves, Esc cancels. × removes a label. */
+/** Label chips; click "+ Add label" → type → Enter saves, Esc cancels. × removes a label. */
 function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
   const toast = useToast();
   const [labels, setLabels] = useState(initial);
@@ -130,13 +150,19 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
         </span>
       ))}
       {s.mode === 'idle' ? (
-        <button type="button" onClick={() => dispatch({ type: 'start' })} style={{ fontSize: '0.85em' }}>
-          + label
+        <button
+          type="button"
+          className="wl-secondary"
+          aria-label="Add a label to this transfer"
+          onClick={() => dispatch({ type: 'start' })}
+          style={{ fontSize: '0.85em' }}
+        >
+          + Add label
         </button>
       ) : (
         <span>
           <input
-            // biome-ignore lint/a11y/noAutofocus: the user just clicked "+ label"
+            // biome-ignore lint/a11y/noAutofocus: the user just clicked "+ Add label"
             autoFocus
             aria-label="New label"
             value={s.draft}
@@ -153,8 +179,10 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
             onBlur={() => s.mode === 'editing' && !s.draft.trim() && dispatch({ type: 'cancel' })}
             style={{ width: 110 }}
           />
-          <small style={{ color: '#555' }}> Enter to save, Esc to cancel</small>
-          {s.mode === 'editing' && s.error && <div style={{ color: '#b00020', fontSize: '0.85em' }}>{s.error}</div>}
+          <small style={{ color: 'var(--wl-c-muted)' }}> Enter to save, Esc to cancel</small>
+          {s.mode === 'editing' && s.error && (
+            <div style={{ color: 'var(--wl-c-error)', fontSize: '0.85em' }}>{s.error}</div>
+          )}
         </span>
       )}
     </div>
