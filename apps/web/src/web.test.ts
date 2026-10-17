@@ -393,15 +393,15 @@ describe('failure card', () => {
   it('allows retry only when nothing can have been sent', () => {
     expect(canRetry('NoUtxo')).toBe(true);
     expect(canRetry('TREASURER_PARSE')).toBe(true);
-    expect(canRetry('TransferFailed')).toBe(true);
-    expect(canRetry('TransferFailed', 'tr_1')).toBe(false);
+    expect(canRetry('TransferFailed')).toBe(false);
+    expect(canRetry('InsufficientFunds')).toBe(true);
+    expect(canRetry('InsufficientFunds', 'tr_1')).toBe(false);
     expect(canRetry('NoUtxo', 'tr_1')).toBe(false);
     expect(canRetry('SubmitTimeout')).toBe(false);
     expect(canRetry('already_executed')).toBe(false);
+    expect(canRetry('InvoiceExpired')).toBe(true);
+    expect(canRetry('PolicyDenied')).toBe(true);
     for (const code of [
-      'InsufficientFunds',
-      'InvoiceExpired',
-      'PolicyDenied',
       'unknown_plan',
       'not_confirmed',
       'hash_mismatch',
@@ -425,7 +425,7 @@ describe('failure card', () => {
     for (const [code, words] of Object.entries(ERROR_WORDS)) expect(words, code).not.toMatch(/_/);
   });
 
-  it('fake: a *fail* invoice ends in a failed payment with a retry-safe code', async () => {
+  it('fake: a *fail* invoice ends in TransferFailed, which is not retried (it may have been signed)', async () => {
     const api = fast();
     const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'fail.txt' });
     const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
@@ -435,7 +435,7 @@ describe('failure card', () => {
     const p = paymentProgress(f.invoice.state, f.events, f.execution);
     expect(p.failed).toBe(true);
     expect(p.errorCode).toBe('TransferFailed');
-    expect(canRetry(p.errorCode, p.transferId)).toBe(true);
+    expect(canRetry(p.errorCode, p.transferId)).toBe(false);
   });
 
   it('fake: a *timeout* invoice fails with SubmitTimeout and no retry', async () => {

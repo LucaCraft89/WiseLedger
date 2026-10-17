@@ -174,7 +174,8 @@ export class Treasurer implements TreasurerAgent {
     const tool = this.tools({ invoiceId, emit }).find((t) => t.name === 'execute_plan') as AnyTool;
     const facts = [
       `Confirmed payment plan: planId=${plan.planId}`,
-      `Pay ${plan.amount} base units of asset ${plan.assetId} to ${plan.payee.name.slice(0, 60)}, now.`,
+      // No payee name or other invoice text here: the tool-calling prompt sees only IDs and numbers.
+      `Pay ${plan.amount} base units of asset ${plan.assetId}, now.`,
     ].join('\n');
 
     const maxRetries = this.deps.maxRetries ?? 2;
@@ -260,8 +261,14 @@ export class Treasurer implements TreasurerAgent {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = (err as { code?: unknown })?.code;
+      // SubmitTimeout: the send may have gone out. Never retried: report it as submitted so nobody offers a retry,
+      // and let the wallet sync settle it.
+      if (code === 'SubmitTimeout') {
+        const tid = (err as { transferId?: unknown }).transferId;
+        emit({ type: 'toolCall', ...base, at: at(), status: 'ok', message });
+        return { planId, status: 'submitted', ...(typeof tid === 'string' ? { transferId: tid } : {}) };
+      }
       emit({ type: 'toolCall', ...base, at: at(), status: 'error', message });
-      // SubmitTimeout: never retried here; the caller syncs and checks the transfer state.
       return fail(planId, typeof code === 'string' ? code : 'TransferFailed', message);
     }
     emit({ type: 'toolCall', ...base, at: at(), status: 'ok' });

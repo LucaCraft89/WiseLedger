@@ -57,7 +57,16 @@ export function errorWords(code: string | undefined, fallback?: string): string 
   return (code && ERROR_WORDS[code]) || fallback || 'The payment failed.';
 }
 
-const RETRY_SAFE = new Set(['NoUtxo', 'TREASURER_PARSE', 'TransferFailed']);
+/** Failures before signing (the wallet's RELEASE_ON_FAILURE list) plus TREASURER_PARSE (nothing was sent). */
+const RETRY_SAFE = new Set([
+  'InsufficientFunds',
+  'InvoiceExpired',
+  'NoUtxo',
+  'UnknownAsset',
+  'InvalidInvoice',
+  'PolicyDenied',
+  'TREASURER_PARSE',
+]);
 
 /**
  * True only when trying again cannot pay twice: the error says nothing left the wallet

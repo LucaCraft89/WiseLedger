@@ -66,6 +66,26 @@ describe('Treasurer skeleton', () => {
     expect(again.error?.code).toBe('already_executed');
   });
 
+  it('SubmitTimeout is reported as submitted with the transfer id, never failed', async () => {
+    const { plan, confirmation, guard, wallet } = await setup('13140000'); // MockWallet timeout amount
+    const r = await new Treasurer({
+      llm: new MockLlm({ fallback: callWith(plan.planId) }),
+      wallet,
+      guard,
+      pollMs: 0,
+      follow: false,
+    }).execute(plan, confirmation, () => {});
+    expect(r.status).toBe('submitted');
+    expect(r.error).toBeUndefined();
+  });
+
+  it('the tool prompt carries no payee name', async () => {
+    const { plan, confirmation, guard, wallet } = await setup();
+    const llm = new MockLlm({ fallback: callWith(plan.planId) });
+    await new Treasurer({ llm, wallet, guard, pollMs: 0 }).execute(plan, confirmation, () => {});
+    expect(JSON.stringify(llm.calls[0]?.messages)).not.toContain('Acme');
+  });
+
   it('a wallet failure becomes a failed result with the typed code', async () => {
     const { plan, confirmation, guard, wallet } = await setup('13130000'); // MockWallet failure amount
     const r = await new Treasurer({
