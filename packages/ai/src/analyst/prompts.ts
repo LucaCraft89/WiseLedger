@@ -9,10 +9,10 @@ export const EXTRACT_SYSTEM = [
   '- Copy values exactly as printed. Use null when a field is not on the invoice. Do not guess.',
   '- total: the amount due as printed, digits with a dot for decimals, no currency (e.g. "1250.00").',
   '- currency: code or ticker printed next to the total (e.g. "EUR", "TUSDT").',
-  '- rgbInvoice: the full string starting with "rgb:" given as the payment destination, copied character by character (count repeated digits carefully).',
-  '- paymentMethod: "rgb" if an rgb: invoice is given, else "iban", "btc", "ln" or "unknown".',
+  '- rgbInvoice: the full string starting with "rgb:" (or the Lightning invoice starting with "ln") given as the payment destination, copied character by character (count repeated digits carefully).',
+  '- paymentMethod: "rgb" if an rgb: invoice is given, "ln" for a Lightning invoice, else "iban", "btc" or "unknown".',
   '- pressureLanguage: true if the invoice pushes urgency, threatens suspension, or says payment or bank details changed; pressureQuote: the shortest quote proving it.',
-  '- lineItems: at most 10 rows; amount = the number printed at the end of the row (e.g. "30.00"), quantity = the Qty column.',
+  '- lineItems: at most 10 rows; amount = the number printed at the end of the row (e.g. "30.00").',
   '- confidence: 0..1, how sure you are that the fields are right.',
 ].join('\n');
 
@@ -27,7 +27,11 @@ export function repairPrompt(error: string): string {
   return `Your previous answer was not valid: ${error.slice(0, 300)}. Return only the JSON object, following the schema.`;
 }
 
-/** JSON schema for call 1. Compact on purpose (speed on small models) and every key required (b-001: optional keys get dropped). */
+/**
+ * JSON schema for call 1. Compact on purpose (speed on small models) and every key required (b-001: optional keys get
+ * dropped). M4.S1: generation dominates call 1, so fields no rule or screen reads (e-mail, IBAN, BTC address, quantity)
+ * are not asked for.
+ */
 const str = { type: ['string', 'null'] } as const;
 export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -35,7 +39,6 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
   properties: {
     issuerName: str,
     issuerVatId: str,
-    issuerEmail: str,
     invoiceNumber: str,
     issueDate: str,
     dueDate: str,
@@ -47,14 +50,12 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        properties: { description: { type: 'string' }, quantity: { type: ['number', 'null'] }, amount: str },
-        required: ['description', 'quantity', 'amount'],
+        properties: { description: { type: 'string' }, amount: str },
+        required: ['description', 'amount'],
       },
     },
     paymentMethod: { type: 'string', enum: ['rgb', 'iban', 'btc', 'ln', 'unknown'] },
     rgbInvoice: str,
-    iban: str,
-    btcAddress: str,
     pressureLanguage: { type: 'boolean' },
     pressureQuote: str,
     confidence: { type: 'number' },
@@ -62,7 +63,6 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
   required: [
     'issuerName',
     'issuerVatId',
-    'issuerEmail',
     'invoiceNumber',
     'issueDate',
     'dueDate',
@@ -71,8 +71,6 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
     'lineItems',
     'paymentMethod',
     'rgbInvoice',
-    'iban',
-    'btcAddress',
     'pressureLanguage',
     'pressureQuote',
     'confidence',

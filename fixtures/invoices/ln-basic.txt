@@ -1,0 +1,19 @@
+PIXEL PRINT SRL
+Corso Vittorio Emanuele II 48, 10123 Torino (TO) - P.IVA IT05566778899
+orders@pixelprint.example
+
+INVOICE No. PP-2026-118
+Issue date: 2026-10-16
+Due date: 2026-10-31
+
+Bill to: Coin Cube Studio, Torino
+
+Description                      Qty   Unit price   Amount
+Business cards, 500 pcs            1        12.50    12.50
+Flyers A5, 100 pcs                 1         6.00     6.00
+
+TOTAL DUE: 18.50 TUSDT
+
+Payment: RGB over Lightning (instant)
+Lightning invoice: lnrgb:mock/rgb:mock-tusdt/18500000/1900000000
+Thank you for your business.

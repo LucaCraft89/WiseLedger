@@ -49,7 +49,8 @@ export const ERROR_WORDS: Record<string, string> = {
   NoUtxo: 'The wallet is not ready to pay yet: it needs a few minutes to prepare its coins. Wait, then try again.',
   TransferFailed: 'The payment did not go through.',
   SubmitTimeout: 'The payment was sent but we have no answer yet. We are checking — do NOT pay again.',
-  PolicyDenied: 'Your spending rules do not allow this payment.',
+  PolicyDenied:
+    'Your spending rules do not allow this payment: the Tether WDK policy engine in the wallet refused it. Nothing was sent.',
   UnknownAsset: 'This wallet does not hold the token the supplier asks for.',
   InvalidInvoice: "The supplier's payment request is not valid. Ask them to send it again.",
   NetworkUnavailable:

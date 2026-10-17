@@ -61,10 +61,12 @@ export class MockTreasurer implements TreasurerAgent {
     emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'called' });
     let transferId: string;
     let txid: string | undefined;
+    let paymentHash: string | undefined;
     try {
       const sent = await this.wallet.pay({ rgbInvoice: plan.rgbInvoice, assetId: plan.assetId, amount: plan.amount });
       transferId = sent.transferId;
       txid = sent.txid;
+      paymentHash = sent.paymentHash;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = (err as { code?: unknown })?.code;
@@ -85,9 +87,9 @@ export class MockTreasurer implements TreasurerAgent {
       };
     }
     emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'ok' });
-    emit({ type: 'transfer', invoiceId, at: at(), transferId, status: 'WaitingCounterparty', txid });
+    emit({ type: 'transfer', invoiceId, at: at(), transferId, status: 'WaitingCounterparty', txid, paymentHash });
 
-    if (this.opts.follow === false) return { planId: plan.planId, status: 'submitted', transferId, txid };
+    if (this.opts.follow === false) return { planId: plan.planId, status: 'submitted', transferId, txid, paymentHash };
 
     const deadline = Date.now() + (this.opts.followTimeoutMs ?? 60_000);
     let last: TransferStatus = 'WaitingCounterparty';
@@ -96,13 +98,14 @@ export class MockTreasurer implements TreasurerAgent {
       const t = await this.wallet.getTransfer(transferId);
       if (!t) continue;
       txid = t.txid ?? txid;
+      paymentHash = t.paymentHash ?? paymentHash;
       if (t.status !== last) {
         last = t.status;
-        emit({ type: 'transfer', invoiceId, at: at(), transferId, status: last, txid });
+        emit({ type: 'transfer', invoiceId, at: at(), transferId, status: last, txid, paymentHash });
       }
       if (TERMINAL.includes(last)) break;
     }
-    if (last === 'Settled') return { planId: plan.planId, status: 'settled', transferId, txid };
+    if (last === 'Settled') return { planId: plan.planId, status: 'settled', transferId, txid, paymentHash };
     if (last === 'Failed')
       return {
         planId: plan.planId,

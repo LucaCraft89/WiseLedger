@@ -6,6 +6,7 @@ import {
   type AgentToolCallRecord,
   buildConfirmationSentence,
   type ChatMessage,
+  type ChatStreamHooks,
   type Confirmation,
   type EmitFn,
   type ExecutionResult,
@@ -16,6 +17,7 @@ import {
   type NeedsConfirmation,
   type PaymentGuard,
   type PaymentPlan,
+  type ReceiveInvoice,
   type ToolDef,
   type TransferStatus,
   type TreasurerAgent,
@@ -24,6 +26,81 @@ import {
 } from 'core';
 import { z } from 'zod';
 import { findInjection } from '../rules/r7-injection.js';
+import { toBaseUnits } from '../rules/types.js';
+
+/**
+ * Asset and base-unit amount for a payment request from chat. The asset must be one this wallet holds, matched by
+ * asset ID (never by ticker); with an amount and no asset, the wallet's only asset is used. Amounts come in tokens and
+ * are converted here, because small models misread base units. Throws plain-language errors the model can relay.
+ */
+export async function receiveTarget(
+  wallet: Pick<WalletPort, 'listAssets'>,
+  args: { assetId?: string | undefined; amount?: string | undefined },
+): Promise<{ assetId?: string; amount?: string }> {
+  const assets = await wallet.listAssets();
+  const held = assets.map((a) => `${a.ticker} (assetId=${a.assetId})`).join(', ') || 'no tokens yet';
+  // Asset ID first. A small model often passes the ticker it read ("TUSDT"): for a payment request (money coming in)
+  // a ticker that names exactly one held token is accepted. Payments themselves are always matched by asset ID.
+  const byTicker = (t: string) => {
+    const hits = assets.filter((a) => a.ticker.toUpperCase() === t.trim().toUpperCase());
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+  let asset = args.assetId ? (assets.find((a) => a.assetId === args.assetId) ?? byTicker(args.assetId)) : undefined;
+  if (args.assetId && !asset) throw new Error(`This wallet can only ask for tokens it holds: ${held}.`);
+  if (!asset && args.amount) {
+    if (assets.length !== 1) throw new Error(`Which token should the request be in? This wallet holds: ${held}.`);
+    asset = assets[0];
+  }
+  if (!asset) return {};
+  if (!args.amount) return { assetId: asset.assetId };
+  const amount = toBaseUnits(args.amount, asset.precision);
+  if (!amount || amount === '0')
+    throw new Error(`${args.amount} is not a valid amount of ${asset.ticker} (at most ${asset.precision} decimals).`);
+  return { assetId: asset.assetId, amount };
+}
+
+/**
+ * One chat turn through llm.stream(): reply text goes to the screen as it comes. A turn whose text starts like a
+ * tool call ("{", "<tool", a code fence) is held back, so raw JSON never flashes in the chat.
+ */
+async function streamTurn(
+  llm: LlmProvider,
+  req: Parameters<LlmProvider['complete']>[0],
+  hooks: ChatStreamHooks,
+): Promise<Awaited<ReturnType<LlmProvider['complete']>>> {
+  let seen = '';
+  let live: boolean | undefined;
+  for await (const e of llm.stream(req)) {
+    if (e.type === 'token') {
+      seen += e.text;
+      if (live === undefined && seen.trim()) live = !/^\s*(\{|\[|<|```)/.test(seen);
+      if (live) hooks.onToken(e.text === seen ? e.text.trimStart() : e.text);
+    } else if (e.type === 'done') {
+      return e.result;
+    }
+  }
+  throw new Error('The local AI stopped without an answer.');
+}
+
+/**
+ * What WiseLedger is, how to do things in the app and how it is built: written by us, added to the chat prompt only
+ * when the message looks like a question about the app (it costs prompt time on a small local model).
+ */
+export const PLATFORM_GUIDE = [
+  'ABOUT WISELEDGER (use this to answer questions about the app, how to do things, or how it is built; keep answers short)',
+  '- What it is: a self-custodial wallet for small businesses that checks every invoice for fraud with an AI running on this computer, then pays it with RGB tokens on Bitcoin. Built by team Coin³ at a hackathon; test networks only (Mutinynet), test token TUSDT, no real money.',
+  '- Check and pay an invoice: "Check an invoice" → drop the PDF, photo, text or FatturaPA XML → read the verdict (Looks fine / Check before paying / Do not pay) → "Confirm and pay". A blocked invoice cannot be paid.',
+  '- Get paid: Wallet → Get paid → amount, note, how long it stays valid → share the payment request; or ask me "create an invoice for 50 TUSDT".',
+  '- Scheduled payments: ask me "pay the Acme invoice on Friday", confirm the card; see them under My invoices → Scheduled payments.',
+  '- Labels and fiscal report: Wallet → Recent transfers → "All transfers and fiscal report" (or ask me to label a payment or make a report).',
+  '- Spending rules: Wallet → Overview → Spending rules (max per payment, max per 24 h, approved tokens). Settings shows the local AI and wallet status. Dark mode: switch at the top.',
+  "- How it is built: the Analyst (local AI, no tools) reads the invoice; ten rules in code (R1–R10: payment request valid, token, amount, duplicate, new supplier, pressure, hidden orders to the AI, currency, missing fields, dates) decide the verdict; the user confirms a sentence written by code; the Treasurer (me, same model) pays only confirmed plans, through a payment guard and the wallet's spending rules. I never see the invoice text.",
+  '- Stack: QVAC by Tether runs the AI on this computer (Qwen3.5 2B; Parakeet for voice), nothing leaves the machine. Tether WDK is the wallet (keys on this computer, spend-policy engine). RGB v0.11 (rgb-lib, UTEXO packages) for the token transfers on Bitcoin (Mutinynet signet), plus RGB Lightning for instant payments. TypeScript: Fastify server, React web app, SQLite.',
+].join('\n');
+
+/** Questions about the app, its use or its stack (English and Italian). */
+export const ASKS_ABOUT_APP =
+  /\b(what|how|why|who|which|help|explain|tell me|can you|project|platform|app|wiseledger|stack|built|made|technolog\w*|qvac|rgb|wdk|tether|lightning|bitcoin|safe\w*|secur\w*|rules?|works?|features?|cosa|come|perch[eé]|aiuto|progetto|funziona)\b/i;
 
 export const TREASURER_SYSTEM = [
   'You are the Treasurer of a small business wallet. You move money only through tools.',
@@ -40,10 +117,10 @@ export const ExecutePlanArgs = z.object({
 export const GetBalanceArgs = z.object({ assetId: z.string().max(100).optional() });
 export const CreateReceiveArgs = z.object({
   assetId: z.string().max(100).optional(),
-  /** Base units as a decimal string. */
+  /** Tokens as the user says them ("100", "12.50"); code converts to base units with the asset's precision. */
   amount: z
     .string()
-    .regex(/^\d{1,20}$/)
+    .regex(/^\d{1,12}(\.\d{1,18})?$/)
     .optional(),
   expiryMinutes: z.number().int().min(1).max(10_080).optional(),
 });
@@ -78,8 +155,43 @@ export interface ChatInvoice {
   total?: string;
   currency?: string;
   state: string;
-  /** Present when a payment can be made: the code-built proposed payment. */
-  payment?: { amount: string; assetId: string };
+  /** ISO upload time: chat lists invoices newest first and marks the latest ("pay the latest invoice"). */
+  createdAt?: string;
+  /**
+   * Present when a payment can be made: the code-built proposed payment. `rgbInvoice` only picks the rail for the
+   * confirmation sentence ("via Lightning (instant)"); it never goes into a prompt.
+   */
+  payment?: { amount: string; assetId: string; rgbInvoice?: string };
+  /** The Analyst's verdict, so chat can say why an invoice was stopped or needs review. */
+  verdict?: 'ok' | 'review' | 'block';
+  /** Codes of the warn/block flags (FLAG_CODES). Shown as fixed words from CHECK_WORDS, never as flag messages. */
+  flagCodes?: string[];
+}
+
+/**
+ * Plain words for each rule, written by us. Flag messages and evidence can quote the invoice (untrusted), so the
+ * Treasurer only ever sees these fixed phrases; unknown codes are dropped.
+ */
+export const CHECK_WORDS: Record<string, string> = {
+  R1_RGB_INVOICE: 'payment request problem',
+  R2_ASSET: 'token not accepted',
+  R3_AMOUNT: 'amount problem',
+  R4_DUPLICATE: 'already received or paid',
+  R5_NEW_PAYEE: 'new or look-alike supplier',
+  R6_PRESSURE: 'pressure or changed bank details',
+  R7_INJECTION: 'hidden orders to the AI',
+  R8_CURRENCY: 'different currency',
+  R9_MISSING_FIELDS: 'missing details',
+  R10_DATES: 'strange dates',
+  AI_UNAVAILABLE: 'the local AI could not check it',
+};
+const VERDICT_WORDS = { ok: 'looks fine', review: 'check before paying', block: 'do not pay' } as const;
+
+/** " check=do not pay (already received or paid; amount problem)" — code-built, for the chat context. */
+export function checkText(i: Pick<ChatInvoice, 'verdict' | 'flagCodes'>): string {
+  if (!i.verdict) return '';
+  const reasons = [...new Set((i.flagCodes ?? []).map((c) => CHECK_WORDS[c]).filter(Boolean))];
+  return ` check="${VERDICT_WORDS[i.verdict]}"${reasons.length ? ` reasons="${reasons.join('; ')}"` : ''}`;
 }
 type AnyTool = ToolDef<Record<string, unknown>>;
 
@@ -101,6 +213,8 @@ export interface TreasurerDeps {
   invoices?: () => Promise<ChatInvoice[]>;
   /** IANA zone for dates in confirmation sentences (default: this machine's zone). */
   timeZone?: string;
+  /** Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own. */
+  onReceiveCreated?: (inv: ReceiveInvoice) => void | Promise<void>;
 }
 
 /** Guard stub: knows the confirmed plans, checks the hash and executes each plan once. */
@@ -162,15 +276,19 @@ export class Treasurer implements TreasurerAgent {
       {
         name: 'create_receive_invoice',
         description:
-          'Create an RGB invoice so someone can pay this wallet. Optional: assetId, amount (base units), expiryMinutes.',
+          'Create an invoice (payment request) so someone can pay this wallet. Needs no address. Optional: amount in tokens as the user says it (e.g. "100" or "12.50"), assetId from CONTEXT, expiryMinutes (how long it stays valid).',
         params: CreateReceiveArgs as never,
         requiresConfirmation: false,
-        handler: async (args: z.infer<typeof CreateReceiveArgs>) =>
-          wallet.createReceiveInvoice({
-            ...(args.assetId ? { assetId: args.assetId } : {}),
-            ...(args.amount ? { amount: args.amount } : {}),
+        handler: async (args: z.infer<typeof CreateReceiveArgs>) => {
+          const { assetId, amount } = await receiveTarget(wallet, args);
+          const inv = await wallet.createReceiveInvoice({
+            ...(assetId ? { assetId } : {}),
+            ...(amount ? { amount } : {}),
             expirySec: (args.expiryMinutes ?? 60) * 60,
-          }),
+          });
+          await this.deps.onReceiveCreated?.(inv);
+          return inv;
+        },
       } as ToolDef<never>,
       {
         name: 'schedule_payment',
@@ -355,7 +473,7 @@ export class Treasurer implements TreasurerAgent {
    * Plain-language wallet chat. One model call picks a tool (tool_choice auto), at most 3 tool turns. Spend tools never
    * run from chat: they come back as a NeedsConfirmation whose sentence is built by code, and the UI asks the user.
    */
-  async chat(message: string, history: AgentChatTurn[], emit: EmitFn): Promise<AgentReply> {
+  async chat(message: string, history: AgentChatTurn[], emit: EmitFn, stream?: ChatStreamHooks): Promise<AgentReply> {
     const ctx = { emit };
     const tools = this.tools(ctx);
     const specs = tools.map((t) => ({
@@ -364,21 +482,17 @@ export class Treasurer implements TreasurerAgent {
       parameters: z.toJSONSchema(t.params) as Record<string, unknown>,
     }));
     const messages: ChatMessage[] = [
-      { role: 'system', content: await this.chatSystem() },
-      ...history.slice(-6).map((h) => ({ role: h.role, content: h.text.slice(0, 500) }) as ChatMessage),
+      { role: 'system', content: await this.chatSystem(message) },
+      ...history.slice(-10).map((h) => ({ role: h.role, content: h.text.slice(0, 600) }) as ChatMessage),
       { role: 'user', content: message.slice(0, 1000) },
     ];
     const records: AgentToolCallRecord[] = [];
     for (let turn = 1; turn <= 3; turn++) {
       let r: Awaited<ReturnType<LlmProvider['complete']>>;
+      const req = { messages, tools: specs, toolChoice: 'auto' as const, temperature: 0.2, maxTokens: 300 };
       try {
-        r = await this.deps.llm.complete({
-          messages,
-          tools: specs,
-          toolChoice: 'auto',
-          temperature: 0.2,
-          maxTokens: 300,
-        });
+        if (turn > 1) stream?.onReset?.();
+        r = stream ? await streamTurn(this.deps.llm, req, stream) : await this.deps.llm.complete(req);
       } catch (err) {
         return { text: 'The local AI is not available right now. Try again in a minute.', toolCalls: records };
       }
@@ -426,10 +540,46 @@ export class Treasurer implements TreasurerAgent {
         ok: out.ok,
         ...(out.ok ? { result: out.result } : { error: out.error ?? 'failed' }),
       });
+      // A payment request is answered by code: the tool result holds base units, which small models misread
+      // ("500000000" read as 500 million TUSDT) and then contradict the request they just made.
+      if (call.name === 'create_receive_invoice') {
+        const text = await this.receiveReply(message, out);
+        stream?.onReset?.();
+        stream?.onToken(text);
+        return { text, toolCalls: records };
+      }
       // Read tools answer in one short call without tool schemas (much faster than another tool turn).
-      return { text: await this.phrase(message, call.name, out), toolCalls: records };
+      return { text: await this.phrase(message, call.name, out, stream), toolCalls: records };
     }
     return { text: 'Done.', toolCalls: records };
+  }
+
+  /** "Done: a payment request for 500.00 TUSDT, valid until 20:57 (62 minutes). …" — built by code, never by the model. */
+  private async receiveReply(message: string, out: { ok: boolean; result?: unknown; error?: string }): Promise<string> {
+    if (!out.ok) return `I could not create the payment request: ${out.error ?? 'unknown error'}`;
+    const inv = out.result as { amount?: string; assetId?: string; expiresAt?: string };
+    const asset = (await this.deps.wallet.listAssets().catch(() => [])).find((a) => a.assetId === inv.assetId);
+    const what =
+      inv.amount && asset
+        ? `${formatAssetAmount(inv.amount, asset.precision)} ${asset.ticker}`
+        : inv.amount
+          ? `${inv.amount} smallest units`
+          : asset
+            ? `any amount of ${asset.ticker}`
+            : 'any amount';
+    const now = (this.deps.now ?? (() => new Date()))().getTime();
+    const until = inv.expiresAt ? Date.parse(inv.expiresAt) : Number.NaN;
+    const valid = Number.isNaN(until)
+      ? ''
+      : `, valid until ${new Date(until).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          ...(this.deps.timeZone ? { timeZone: this.deps.timeZone } : {}),
+        })} (${Math.max(1, Math.round((until - now) / 60_000))} minutes)`;
+    const address = /\b(tb1|bc1|bcrt1)[a-z0-9]{20,}/i.test(message)
+      ? ' A payment request needs no Bitcoin address: whoever pays uses this request.'
+      : '';
+    return `Done: a payment request for ${what}${valid}. Copy it below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
   }
 
   /** One sentence in the user's language from the tool result (numbers already formatted by code). */
@@ -437,10 +587,14 @@ export class Treasurer implements TreasurerAgent {
     question: string,
     tool: string,
     out: { ok: boolean; result?: unknown; error?: string },
+    stream?: ChatStreamHooks,
   ): Promise<string> {
     const facts = JSON.stringify(out.ok ? out.result : { error: out.error }).slice(0, 1200);
     try {
-      const r = await this.deps.llm.complete({
+      stream?.onReset?.();
+      const complete = (req: Parameters<LlmProvider['complete']>[0]) =>
+        stream ? streamTurn(this.deps.llm, req, stream) : this.deps.llm.complete(req);
+      const r = await complete({
         messages: [
           {
             role: 'system',
@@ -459,7 +613,7 @@ export class Treasurer implements TreasurerAgent {
   }
 
   /** System prompt with today's date and the context the model may refer to (IDs + short validated fields). */
-  private async chatSystem(): Promise<string> {
+  private async chatSystem(message = ''): Promise<string> {
     const now = (this.deps.now ?? (() => new Date()))();
     const assets = await this.deps.wallet.listAssets().catch(() => []);
     const invoices = (await this.deps.invoices?.().catch(() => [])) ?? [];
@@ -483,15 +637,21 @@ export class Treasurer implements TreasurerAgent {
       }).join(', ')}. A payment "on <weekday>" means the next one, at 09:00.`,
       'Use IDs exactly as written in CONTEXT. Spend tools only prepare a payment; the user confirms it on screen.',
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
+      'The earlier messages of this conversation come before the last one, with "(done: …)" notes of the tools you used. Use them: "make it 50", "the same for Friday", "that one" refer to them.',
+      'Each invoice shows the safety check (check, reasons). To say why an invoice was stopped or needs review, use them; you never see the document itself.',
+      'Your tools: get_balance; create_receive_invoice ("create/make an invoice", "request a payment", "I want to get paid": a payment request someone else pays into this wallet; it needs no address); schedule_payment and execute_plan for uploaded invoices; label_transfer; list_transfers; fiscal_report. Never say you cannot do what a tool does: call it.',
+      'Only the tokens under Assets exist in this wallet. If the user names another one (e.g. USDC), say this wallet holds only those and offer them. Paying a Bitcoin address is not possible here: payments go to invoices the user uploads.',
+      'You already know every asset ID (under Assets): never ask the user for one. For a payment request call create_receive_invoice right away with the amount and expiry the user gave; if they also gave an address, create the request anyway and say in one sentence that a payment request needs no address.',
+      ...(ASKS_ABOUT_APP.test(message) ? [PLATFORM_GUIDE] : []),
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
-      'Invoices:',
+      'Invoices (newest first; the first one is the latest):',
       ...(invoices.length
-        ? invoices
+        ? newestFirst(invoices)
             .slice(0, 10)
             .map(
-              (i) =>
-                `- invoiceId=${i.invoiceId} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${i.payment ? '' : ' (cannot be paid)'}`,
+              (i, n) =>
+                `- invoiceId=${i.invoiceId}${n === 0 ? ' (latest)' : ''}${i.createdAt ? ` uploaded=${i.createdAt.slice(0, 10)}` : ''} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${checkText(i)}${i.payment ? '' : ' (cannot be paid)'}`,
             )
         : ['- none']),
       'Recent transfers (newest first):',
@@ -527,6 +687,7 @@ export class Treasurer implements TreasurerAgent {
         {
           amount: inv.payment.amount,
           assetId: inv.payment.assetId,
+          ...(inv.payment.rgbInvoice ? { rgbInvoice: inv.payment.rgbInvoice } : {}),
           payee: { name: safeName(inv.supplier) },
           executeAt: new Date(t).toISOString(),
         },
@@ -633,6 +794,12 @@ export class Treasurer implements TreasurerAgent {
 }
 
 /** Supplier names go into the tool prompt only as short, cleaned, validated fields; anything instruction-like is hidden. */
+/** Newest first by createdAt; invoices without a date keep the order the server gave (already newest first). */
+export function newestFirst(invoices: ChatInvoice[]): ChatInvoice[] {
+  if (!invoices.every((i) => i.createdAt)) return invoices;
+  return [...invoices].sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? ''));
+}
+
 export function safeName(name: string | undefined): string {
   const clean = (name ?? 'Unknown supplier')
     .replace(/["\n\r\t<>]/g, ' ')

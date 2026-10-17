@@ -8,7 +8,15 @@ import {
   WalletResponse,
 } from './api/contracts.js';
 import { createFakeClient } from './api/fake.js';
-import { confirmGate, dialogSentence, gateHint, paymentProgress } from './lib/confirm.js';
+import {
+  ASSET_ID_HINT,
+  assetIdHint,
+  confirmGate,
+  dialogSentence,
+  gateHint,
+  paidSentence,
+  paymentProgress,
+} from './lib/confirm.js';
 import {
   buildFullTimeline,
   buildTimeline,
@@ -19,7 +27,7 @@ import {
   stateTone,
   VERDICT_LABELS,
 } from './lib/format.js';
-import { LIVE_TEXT_CAP, liveAiView, mergeEvents, toBaseUnits, toolCallLine } from './lib/live.js';
+import { LIVE_TEXT_CAP, liveAiView, mergeEvents, toBaseUnits, toolCallLine, toolCallParts } from './lib/live.js';
 import {
   canRetry,
   ERROR_WORDS,
@@ -175,6 +183,19 @@ describe('confirmation dialog', () => {
     );
   });
 
+  it('explains the asset ID only when the sentence shows one', () => {
+    expect(assetIdHint(dialogSentence(plan, [tusdt]))).toBe(ASSET_ID_HINT);
+    expect(assetIdHint('Pay 25.00 TUSDT to Acme Srl, now. Confirm?')).toBeNull();
+    expect(assetIdHint(undefined)).toBeNull();
+  });
+
+  it('the paid sentence never says "base units"', () => {
+    expect(paidSentence(plan, [tusdt])).toBe('25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl');
+    expect(paidSentence(plan, [])).toBe(
+      '25000000 smallest units of an unknown token (asset rgb:mock-tusdt) to Acme Srl',
+    );
+  });
+
   it('gates confirm by verdict', () => {
     expect(confirmGate('ok', false)).toEqual({ canConfirm: true });
     expect(confirmGate('review', false)).toEqual({ canConfirm: false });
@@ -301,7 +322,21 @@ describe('live AI view', () => {
         args: { planId: 'p1' },
         status: 'ok',
       }),
-    ).toBe('Treasurer called execute_plan(planId=p1): done');
+    ).toBe('Treasurer: Sending the payment you confirmed: done (execute_plan(planId=p1))');
+  });
+
+  it('tool call lines shorten long IDs and name unknown tools plainly', () => {
+    const p = toolCallParts({
+      type: 'toolCall',
+      at,
+      agent: 'treasurer',
+      name: 'mystery_tool',
+      args: { planId: 'a'.repeat(64), n: 2 },
+      status: 'rejected',
+      message: 'over the limit',
+    });
+    expect(p.text).toBe('Treasurer: Using the tool mystery_tool: refused, over the limit');
+    expect(p.tech).toBe('mystery_tool(planId=aaaaaa…aaaaaa, n=2)');
   });
 
   it('fake analysis emits analyst tokens for each stage', async () => {

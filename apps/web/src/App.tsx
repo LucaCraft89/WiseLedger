@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type ApiClient, READY_ONBOARDING } from './api/client.js';
 import type { OnboardingStatusResponse } from './api/contracts.js';
-import { selectClient } from './api/select.js';
+import { connectServer, demoClient, demoRequested } from './api/select.js';
 import { ChatPage } from './ChatPage.js';
 import { GettingStarted } from './GettingStarted.js';
 import { InvoiceListPage } from './InvoiceListPage.js';
@@ -10,9 +10,10 @@ import { screenForOnboarding } from './lib/onboarding.js';
 import { SetupScreen, UnlockScreen } from './OnboardingScreens.js';
 import { SchedulePage } from './SchedulePage.js';
 import { SettingsPage } from './SettingsPage.js';
+import { ThemeSwitch } from './ThemeSwitch.js';
 import { TransfersPage } from './TransfersPage.js';
 import { UploadPage } from './UploadPage.js';
-import { WalletPage } from './WalletPage.js';
+import { WalletPage, walletTab } from './WalletPage.js';
 
 /**
  * Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet,
@@ -34,14 +35,15 @@ const NAV = [
   { href: '#/', label: 'Check an invoice' },
   { href: '#/invoices', label: 'My invoices' },
   { href: '#/wallet', label: 'Wallet' },
-  { href: '#/schedule', label: 'Scheduled' },
   { href: '#/chat', label: 'Ask the Treasurer' },
   { href: '#/settings', label: 'Settings' },
 ] as const;
 
 function isCurrent(href: string, hash: string): boolean {
   if (href === '#/') return hash === '' || hash === '#' || hash === '#/';
-  return hash === href || (href === '#/invoices' && hash.startsWith('#/invoice/'));
+  if (href === '#/wallet') return hash.startsWith('#/wallet');
+  // Scheduled payments live under My invoices (a tab there).
+  return hash === href || (href === '#/invoices' && (hash.startsWith('#/invoice/') || hash === '#/schedule'));
 }
 
 export function App() {
@@ -54,18 +56,49 @@ export function App() {
     setOnboarding(await client.onboarding().catch(() => READY_ONBOARDING));
   }, []);
 
-  useEffect(() => {
-    void selectClient().then(async (client) => {
+  const [waiting, setWaiting] = useState(0);
+  const adopt = useCallback(
+    async (client: ApiClient) => {
       await checkOnboarding(client);
       setApi(client);
-    });
-  }, [checkOnboarding]);
+    },
+    [checkOnboarding],
+  );
+
+  useEffect(() => {
+    if (demoRequested()) {
+      void adopt(demoClient());
+      return;
+    }
+    const stop = new AbortController();
+    connectServer(setWaiting, { signal: stop.signal })
+      .then(adopt)
+      .catch(() => undefined);
+    return () => stop.abort();
+  }, [adopt]);
 
   if (!api || !onboarding) {
+    if (waiting === 0) {
+      return (
+        <p role="status" style={{ padding: 24 }}>
+          Starting WiseLedger…
+        </p>
+      );
+    }
     return (
-      <p role="status" style={{ padding: 24 }}>
-        Starting WiseLedger…
-      </p>
+      <section role="status" aria-live="polite" style={{ padding: 24, maxWidth: 640 }}>
+        <h2>Server not reachable, retrying…</h2>
+        <p>
+          WiseLedger's server on this computer is not answering yet (attempt {waiting}). If you just started it, wait a
+          few seconds: it opens the wallet and the local AI first.
+        </p>
+        <p style={{ color: 'var(--wl-c-muted)' }}>
+          Not started? Run <code>pnpm dev</code> in the project folder. Nothing is paid or analysed until it answers.
+        </p>
+        <button type="button" className="wl-secondary" onClick={() => void adopt(demoClient())}>
+          Open the demo without a server (nothing is real)
+        </button>
+      </section>
     );
   }
 
@@ -94,6 +127,7 @@ export function App() {
               WiseLedger
             </a>
           </h1>
+          <ThemeSwitch />
           {screen === 'app' && (
             <nav aria-label="Main" className="wl-nav">
               {NAV.map((n) => (
@@ -124,10 +158,10 @@ export function App() {
               )}
               {invoiceId ? (
                 <InvoicePage key={invoiceId} api={api} invoiceId={decodeURIComponent(invoiceId)} />
-              ) : hash === '#/wallet' ? (
+              ) : hash.startsWith('#/wallet') ? (
                 <>
                   <GettingStarted api={api} />
-                  <WalletPage api={api} />
+                  <WalletPage api={api} tab={walletTab(hash)} />
                 </>
               ) : hash === '#/transfers' ? (
                 <TransfersPage api={api} />

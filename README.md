@@ -24,9 +24,10 @@ Invoice fraud (changed bank details, fake suppliers, duplicate invoices, instruc
 | QVAC | `@qvac/sdk`, model `QWEN3_5_2B_MULTIMODAL_Q4_K_M` (vision projector), on device | 0.21.1 |
 | App | TypeScript strict, Node 22, pnpm, Fastify, `node:sqlite`, React + Vite, zod, vitest, biome | Node 22.x |
 | Network | **Mutinynet** (signet; KaleidoSwap esplora + RGB proxy); local regtest (bitcoind, electrs, rgb-proxy-server) as offline fallback | — |
+| RGB over Lightning (optional extra) | `@utexo/wdk-rgb-lightning` 0.1.0-beta.15 with a small patch (`createWithStorage` signer) and `@utexo/rgb-lightning-node-nodejs` 0.1.0-beta.16 **built from source** (pinned `rln-external-signer`); loaded at runtime from `LN_MODULES`, not installed by `pnpm install`, no binary in this repo | beta |
 | Test asset | `TUSDT`, NIA, precision 6, 1000 tokens, issued by us with WDK during the hackathon: `rgb:UR2X9KDC-C4bpuWm-vYrR_~F-d8Y98h0-T6MAOXD-c8CyQG4` (no value) | — |
 
-No forks or patched packages in the product. The optional RGB-over-Lightning extra would be declared here if it lands.
+No forks or patched packages in the default product. The optional RGB-over-Lightning extra uses the patched/source-built packages in the row above. **We act as the LSP for our test asset on Mutinynet** (UTEXO's LSP is not on this network): our node A opens channels with TUSDT on its side so a new node can receive at once.
 
 ## Work done before the hackathon
 Declared as the organizers asked. Before kickoff (Saturday 17 October 2026, 09:30 CEST) we prepared the following. **No product code exists in this repository before kickoff.**
@@ -43,22 +44,83 @@ Declared as the organizers asked. Before kickoff (Saturday 17 October 2026, 09:3
 The product is written from scratch during the hackathon, and its test asset is issued again then. All product code in this repository comes from commits dated within the hackathon.
 
 ## How to run
-**Prerequisites:** Linux x64/arm64 or Apple Silicon (on Windows: WSL2 Ubuntu 24.04), glibc ≥ 2.38, **Node 22.x** (the rgb-lib binding does not build on Node 24+), pnpm, about 4 GB free RAM for the 2B model. Docker only for the offline regtest.
+Everything runs on your own machine: the AI model, the wallet and the app. Only the Bitcoin test network (Mutinynet) is reached over the internet.
 
+### 1. Prerequisites
+| Need | Why |
+|---|---|
+| Linux x64/arm64 with **glibc ≥ 2.38** (Ubuntu 24.04, Debian 13, Fedora 40+) or Apple Silicon. On Windows: **WSL2 Ubuntu 24.04** | the RGB native library (rgb-lib) ships only for these |
+| **Node 22.x** (≥ 22.17, not 24+) | the rgb-lib binding does not load on Node 24+ |
+| **pnpm** (via corepack) | monorepo workspaces |
+| `git`, `curl`, `jq`, build tools | install, scripts, the demo loop |
+| ~4 GB free RAM, ~4 GB disk | the on-device Qwen3.5 2B model (~2.6 GB download) |
+| Chromium (optional) | only to render the demo invoice PDFs |
+| Docker (optional) | only for the offline regtest fallback |
+
+### 2. Bootstrap the machine (system tools only, once)
+```bash
+bash infra/wsl-bootstrap.sh       # Ubuntu 24.04 / WSL2 / Debian 13: system packages, Node 22 via nvm, pnpm
+bash infra/fedora-bootstrap.sh    # Fedora 40+ (native or distrobox): same tools
+```
+Both ask for the sudo password once and are safe to rerun. On macOS: `brew install node@22 jq git && corepack enable`.
+
+### 3. Install and check
 ```bash
 git clone https://github.com/LucaCraft89/WiseLedger && cd WiseLedger
-nvm use                      # Node 22
+nvm use                      # Node 22 (.nvmrc)
+corepack enable              # provides the pinned pnpm
 pnpm install
-pnpm check                   # typecheck, lint, tests, secret scan
-pnpm demo:mock               # whole flow on mocks: paid, reviewed, blocked (no AI, no chain)
-cp .env.example .env         # then set WALLET_BACKEND=wdk-rgb, LLM_PROVIDER=qvac
-pnpm wallet:smoke            # creates payer + payee test wallets, prints funding addresses
-# fund both on https://faucet.mutinynet.com, then:
-pnpm -F wallet issue-asset   # issues TUSDT; put the asset ID in .env as ASSET_ALLOWLIST
-pnpm demo:prepare            # fresh RGB invoices + 4 demo invoice PDFs in .data/demo/
-pnpm -F wallet payee watch & pnpm dev   # supplier side + server and web → http://localhost:5173
+pnpm check                   # typecheck, lint, tests, secret scan: must be green
 ```
-Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sentence, watch the RGB transfer settle (explorer link). Then upload the scam, duplicate and injection invoices: each is blocked with a plain reason.
+
+### 4. Try it without AI or chain (1 minute)
+```bash
+pnpm demo:mock               # whole flow on mocks in the terminal: paid, reviewed, blocked
+```
+This is the only place mocks run; the product itself defaults to the real backends.
+
+### 5. Configure
+```bash
+cp .env.example .env         # defaults: LLM_PROVIDER=qvac, WALLET_BACKEND=wdk-rgb, RGB_NETWORK=mutinynet
+```
+The endpoints in `.env.example` (KaleidoSwap indexer and RGB proxy for Mutinynet) are required: the package defaults do not work. Seeds are created in the git-ignored `.data/` folder; never commit it.
+
+### 6. Set up the test wallets (once)
+```bash
+pnpm wallet:smoke            # creates the payer wallet (.data/wallet) and a supplier wallet (.data/payee), prints both funding addresses
+```
+Send test sats to the payer address from <https://faucet.mutinynet.com> (Mutinynet blocks every ~30 s) and give the supplier some with `pnpm wallet:smoke -- --fund-payee 30000` (or fund it from the faucet too), then:
+```bash
+pnpm wallet:smoke            # again: now creates the UTXOs RGB needs and reports balances
+pnpm -F wallet issue-asset   # issues TUSDT (NIA, precision 6) and prints its asset ID
+```
+Put the asset ID in `.env` as `ASSET_ALLOWLIST=rgb:…` (the payment limits `PAYMENT_CAP` / `DAILY_CAP` are in base units).
+
+Optional: `pnpm wallet:smoke -- --pay` makes one real 5 TUSDT transfer payer → supplier and waits until it settles.
+
+### 7. Run
+```bash
+pnpm demo:prepare            # fresh RGB invoices from the supplier wallet + 4 demo invoice PDFs in .data/demo/
+pnpm -F wallet payee watch & pnpm dev    # supplier side + server (:8787) and web → http://localhost:5173
+```
+The first start downloads the QVAC model (~2.6 GB, once) and the speech model on the first voice note. `http://localhost:8787/api/health` lists anything still missing (test sats, asset, indexer, proxy, model) in plain words; the app shows the same at the top of the page. One Ctrl+C stops both.
+
+### 8. First demo
+Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sentence, watch the RGB transfer settle (explorer link). Then upload the scam, duplicate and injection invoices: each is blocked with a plain reason. Ask the Treasurer things like "how much do I have?", "create an invoice for 5 TUSDT" or "pay the Acme invoice tomorrow at 9".
+
+- **Again from a clean state:** stop the app, `pnpm demo:reset` (wipes the app's data, keeps the wallets, new invoices, ~40 s). `bash infra/demo-loop.sh 2` runs the whole desk demo twice on the real backends (needs `jq`).
+- **Get paid:** create a payment request in the app (Wallet → Get paid, or ask the Treasurer), then `pnpm -F wallet payee pay <rgbInvoice>` (stop `payee watch` first: one wallet, one process); the app shows it as received.
+- **Lightning (optional):** with the module built (see the runbook), `pnpm -F wallet lsp` (our LSP), `LN_ENABLED=true` and `LN_LSP_URL=http://127.0.0.1:8790` in `.env`, then `pnpm -F wallet lsp-client b-receive 1` prints a supplier's Lightning invoice: put it on an invoice, upload, confirm "via Lightning (instant)".
+
+### Troubleshooting
+| Symptom | Fix |
+|---|---|
+| `EADDRINUSE` on 8787 or 5173 | an old server is still running: `pkill -f "tsx.*src/main.ts"; pkill -f vite` |
+| "wallet is in use" / `WalletInUse` | another process holds the wallet folder (e.g. `payee watch` while running `payee pay`): stop it |
+| rgb-lib fails to load / `Cannot find module …rgb-lib-linux-x64` | wrong Node (use 22.x) or glibc < 2.38; rerun `pnpm install` after `nvm use` |
+| The app says it is using demo data | the server is not reachable: start `pnpm dev` and press "Try again" |
+| New sats or a payment not visible yet | Mutinynet indexer lag: the app syncs every 15 s while something is pending, every 60 s when idle (`WALLET_SYNC_MS`, `WALLET_SYNC_IDLE_MS`); Refresh forces it |
+| Model too big for the machine | set `QVAC_MODEL=QWEN3_5_0_8B_MULTIMODAL_Q4_K_M` (0.8B), or `LLM_PROVIDER=openai` against a local `qvac serve --openai` |
 
 | Env | Values | Meaning |
 |---|---|---|
@@ -83,10 +145,16 @@ Chain details, troubleshooting and the offline regtest: [`infra/RUNBOOK-chain.md
 - **WDK spend policies on the RGB account** (max per payment, asset allowlist), refused before signing.
 - **PaymentGuard**: a payment moves only for a plan a human confirmed, unchanged (hash), under the limits, with funds, exactly once (idempotency survives restarts); a send timeout is never retried.
 - Analyst on QVAC (structured extraction, deterministic rules, summary that never sees the invoice text), Treasurer on QVAC tool calling, server with crash-safe invoice states, web UI with streaming analysis and plain-language flags.
+- Wallet hardening: optional passphrase lock (seed encrypted at rest), read retries with backoff (never on sends), hard send timeout, one process per wallet folder, restore drill on clean folders, startup self-check.
+- Receive side: invoices to get paid, matched to incoming transfers. Scheduled payments, labels and a fiscal report over the wallet's transfers.
+- Treasurer chat: answers stream word by word, keeps the conversation when you switch pages (New chat clears it), knows the wallet and the platform, creates payment requests and links to what it made; replies about money are built by code from the tool results.
+- Web app polish for first-time users: wallet tabs (Overview, Get paid, Details) with the active spending rules and what was spent in 24 h, dark mode, drag-and-drop upload, plain-language errors, a clear message when the server is not reachable (no silent demo data), faster loading (background sync slows down when idle).
+- RGB over Lightning: our own LSP for TUSDT on Mutinynet, and the app pays RGB Lightning invoices from its own node ([channel funding](https://mutinynet.com/tx/642bba27cd0552bc6687fff584f12e1dc2869bb03a1ddadcc7b9917e323c8cd7); a Lightning invoice paid through the app in under 25 s from confirmation).
 
 ## Mocked, simulated or hard-coded
 - `LLM_PROVIDER=mock` and `WALLET_BACKEND=mock` exist for tests and `pnpm demo:mock` only; the demo runs on QVAC and Mutinynet.
 - The supplier is our second test wallet (`payee`), run on the same laptop; demo invoices are generated by `pnpm demo:prepare`.
+- Lightning: the LSP (node A) and the Lightning supplier (node B) are our own test nodes on the same laptop; the channel size and asset amount the LSP offers are fixed.
 - TUSDT is a test asset we issued; amounts have no value. Test networks only.
 
 ## Repository layout

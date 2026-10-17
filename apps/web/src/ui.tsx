@@ -22,7 +22,11 @@ export const errorText = (err: unknown, fallback = 'Something went wrong. Please
   return err instanceof Error && err.message ? err.message : fallback;
 };
 
-const TOAST_COLORS: Record<ToastKind, string> = { info: '#e2e3e5', success: '#d4edda', error: '#f8d7da' };
+const TOAST_COLORS: Record<ToastKind, string> = {
+  info: 'var(--wl-c-neutral-bg)',
+  success: 'var(--wl-c-ok-bg)',
+  error: 'var(--wl-c-error-bg)',
+};
 
 let nextId = 0;
 
@@ -118,6 +122,7 @@ export function CopyButton({ value, label = 'Copy', what = 'Text' }: { value: st
   const toast = useToast();
   return (
     <button
+      className="wl-quiet"
       type="button"
       onClick={() => {
         if (!navigator.clipboard) {
@@ -148,14 +153,14 @@ export function Qr({ value, size = 200, alt }: { value: string; size?: number; a
       live = false;
     };
   }, [value, size]);
-  if (!src) return <div style={{ width: size, height: size, background: '#f1f3f5' }} />;
+  if (!src) return <div style={{ width: size, height: size, background: 'var(--wl-c-bubble)' }} />;
   return <img src={src} width={size} height={size} alt={alt} style={{ imageRendering: 'pixelated' }} />;
 }
 
 /** Small "loading" line used by every list. */
 export function Loading({ text = 'Loading…' }: { text?: string }) {
   return (
-    <p role="status" style={{ color: '#555' }}>
+    <p role="status" style={{ color: 'var(--wl-c-muted)' }}>
       {text}
     </p>
   );
@@ -163,13 +168,16 @@ export function Loading({ text = 'Loading…' }: { text?: string }) {
 
 /** Plain empty state for a list. */
 export function Empty({ text }: { text: string }) {
-  return <p style={{ color: '#555', fontStyle: 'italic' }}>{text}</p>;
+  return <p style={{ color: 'var(--wl-c-muted)', fontStyle: 'italic' }}>{text}</p>;
 }
 
 /** Error message in plain words with an optional "Try again" button. */
 export function ErrorBox({ error, retry }: { error: unknown; retry?: () => void }) {
   return (
-    <div role="alert" style={{ background: '#f8d7da', padding: '8px 12px', borderRadius: 6, marginBottom: 12 }}>
+    <div
+      role="alert"
+      style={{ background: 'var(--wl-c-error-bg)', padding: '8px 12px', borderRadius: 6, marginBottom: 12 }}
+    >
       <span>{typeof error === 'string' ? error : errorText(error)}</span>{' '}
       {retry && (
         <button type="button" onClick={retry}>

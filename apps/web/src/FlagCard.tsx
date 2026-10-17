@@ -29,7 +29,7 @@ export function FlagCard({ flag }: { flag: RiskFlag }) {
         <span
           style={{
             background: calm ? 'transparent' : c.border,
-            color: calm ? c.border : '#fff',
+            color: calm ? c.border : 'var(--wl-c-surface)',
             border: calm ? `1px solid ${c.border}` : undefined,
             fontWeight: 700,
             fontSize: '0.8em',
@@ -49,8 +49,8 @@ export function FlagCard({ flag }: { flag: RiskFlag }) {
           <q
             style={{
               fontFamily: 'ui-monospace, monospace',
-              background: '#fff',
-              border: '1px solid #ddd',
+              background: 'var(--wl-c-surface)',
+              border: '1px solid var(--wl-c-line)',
               borderRadius: 3,
               padding: '0 4px',
               wordBreak: 'break-word',

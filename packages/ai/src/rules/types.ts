@@ -34,6 +34,9 @@ export type Rule = (input: RuleInput) => RiskFlag[];
 
 export const isDecoded = (d: RuleInput['decoded']): d is DecodedInvoice => !!d && !('error' in d);
 
+/** Payment rail the wallet decoded (DecodedInvoice.rail, absent = on-chain). */
+export const railOf = (d: DecodedInvoice): 'onchain' | 'lightning' => d.rail ?? 'onchain';
+
 /** The asset this payment would use: from the RGB invoice, else the hint, else the default allowed asset. */
 export function paymentAsset(input: RuleInput): string | undefined {
   const d = isDecoded(input.decoded) ? input.decoded : undefined;

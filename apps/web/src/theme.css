@@ -1,0 +1,246 @@
+/* Light and dark themes. Light = the original colors; dark = the same roles on a dark surface (Material 3 dark
+   scheme from the brand blue). The theme follows the system unless the user picks one with the switch in the top
+   bar (html[data-theme]). Component colors that used to be inline hex values are the --wl-c-* tokens below. */
+
+:root {
+  color-scheme: light;
+  --wl-c-surface: #ffffff;
+  --wl-c-muted: #555;
+  --wl-c-error: #b00020;
+  --wl-c-error-bg: #f8d7da;
+  --wl-c-line: #ddd;
+  --wl-c-ok-bg: #d4edda;
+  --wl-c-review-bg: #fff1c7;
+  --wl-c-block-bg: #fbe3e1;
+  --wl-c-neutral-bg: #e2e3e5;
+  --wl-c-faint: #888;
+  --wl-c-strong: #333;
+  --wl-c-bubble: #f1f3f5;
+  --wl-c-info-bg: #eef1f4;
+  --wl-c-bubble-user: #e7f1ff;
+  --wl-c-good-bg: #e3f3e8;
+  --wl-c-block: #b3261e;
+  --wl-c-review: #8a5a00;
+  --wl-c-ok-text: #155724;
+  --wl-c-pending-bg: #fff3cd;
+  --wl-c-subtle-bg: #f8f9fa;
+  --wl-c-note-bg: #f0f7ff;
+  --wl-c-warn-line: #f0ad4e;
+  --wl-c-line-soft: #eee;
+  --wl-c-sched-bg: #d1ecf1;
+  --wl-c-running-bg: #cce5ff;
+  --wl-c-danger: #c82333;
+  --wl-c-note-line: #b8daff;
+  --wl-c-warn-text: #8a6d3b;
+  --wl-c-info: #52606d;
+  --wl-c-ok-line: #28a745;
+  --wl-c-ok: #1e7b45;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --wl-c-surface: #1f2022;
+  --wl-c-muted: #b4b8bf;
+  --wl-c-error: #ff8a80;
+  --wl-c-error-bg: #4a1f22;
+  --wl-c-line: #3b3f46;
+  --wl-c-ok-bg: #1f3a28;
+  --wl-c-review-bg: #3d3215;
+  --wl-c-block-bg: #45201e;
+  --wl-c-neutral-bg: #2d3036;
+  --wl-c-faint: #8b9099;
+  --wl-c-strong: #e4e6ea;
+  --wl-c-bubble: #25282d;
+  --wl-c-info-bg: #262a30;
+  --wl-c-bubble-user: #1d3352;
+  --wl-c-good-bg: #1f3a28;
+  --wl-c-block: #ff8a80;
+  --wl-c-review: #e8b44a;
+  --wl-c-ok-text: #8fd6a5;
+  --wl-c-pending-bg: #3d3215;
+  --wl-c-subtle-bg: #1f2226;
+  --wl-c-note-bg: #18263a;
+  --wl-c-warn-line: #d9963a;
+  --wl-c-line-soft: #2c2f35;
+  --wl-c-sched-bg: #173339;
+  --wl-c-running-bg: #1b3150;
+  --wl-c-danger: #ff6b6b;
+  --wl-c-note-line: #2f4d75;
+  --wl-c-warn-text: #e0c08a;
+  --wl-c-info: #a3adb8;
+  --wl-c-ok-line: #43b866;
+  --wl-c-ok: #6fcf8f;
+
+  /* brand tokens (brand.css) */
+  --wl-blue: #a4c9ff;
+  --wl-navy: #d4e3ff;
+  --wl-rust: #ffb693;
+  --wl-white: #1f2022;
+  --wl-ink: #e4e2dd;
+  --wl-muted: #b4b8bf;
+  --wl-page: #131416;
+  --wl-line: #3b3f46;
+  --wl-ok-bg: #1f3a28;
+  --wl-ok-text: #b7ebc6;
+  --wl-ok: #6fcf8f;
+  --wl-review-bg: #3d3215;
+  --wl-review-text: #f5d58a;
+  --wl-review: #e8b44a;
+  --wl-block-bg: #45201e;
+  --wl-block-text: #ffb4ab;
+  --wl-block: #ff8a80;
+  --wl-info-bg: #262a30;
+
+  /* Material 3 roles (material.css) */
+  --md-primary: #a4c9ff;
+  --md-on-primary: #00315e;
+  --md-primary-container: #00487f;
+  --md-on-primary-container: #d4e3ff;
+  --md-secondary: #a7c8f0;
+  --md-on-secondary: #0a3254;
+  --md-secondary-container: #264870;
+  --md-on-secondary-container: #d6e4f7;
+  --md-tertiary: #ffb693;
+  --md-on-tertiary: #591d00;
+  --md-tertiary-container: #7f2b00;
+  --md-on-tertiary-container: #ffdbcb;
+  --md-error: #f2b8b5;
+  --md-error-container: #8c1d18;
+  --md-on-error-container: #f9dedc;
+  --md-surface: #131416;
+  --md-surface-dim: #131416;
+  --md-surface-container-lowest: #0e0f11;
+  --md-surface-container-low: #1b1c1e;
+  --md-surface-container: #1f2022;
+  --md-surface-container-high: #2a2a2d;
+  --md-surface-container-highest: #343538;
+  --md-on-surface: #e4e2dd;
+  --md-on-surface-variant: #c5c6cf;
+  --md-outline: #8f9099;
+  --md-outline-variant: #45474e;
+}
+
+/* QR codes stay dark on white so phones can scan them in both themes. */
+:root[data-theme="dark"] img[alt^="QR code"] {
+  background: #ffffff;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+/* Dark mode switch: last item of the app bar (wraps with the navigation on narrow screens). */
+.wl-header button.wl-theme-switch {
+  order: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-full);
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.wl-header button.wl-theme-switch:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+.wl-theme-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--md-surface-container-highest);
+  border: 2px solid var(--md-outline);
+  box-sizing: border-box;
+  transition: background 0.15s var(--md-ease);
+}
+.wl-theme-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--md-outline);
+  transition: transform 0.15s var(--md-ease);
+}
+.wl-header button.wl-theme-switch[aria-checked="true"] .wl-theme-track {
+  background: var(--md-primary);
+  border-color: var(--md-primary);
+}
+.wl-header button.wl-theme-switch[aria-checked="true"] .wl-theme-thumb {
+  transform: translateX(16px);
+  background: var(--md-on-primary);
+}
+
+/* Blinking caret after the Treasurer's reply while it is still being written. */
+.wl-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: wl-blink 1s steps(2, start) infinite;
+}
+@keyframes wl-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* The chat input stays at the bottom of the window while the conversation grows. */
+.wl-chat-input {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: var(--md-surface);
+  border-top: 1px solid var(--md-outline-variant);
+  z-index: 5;
+}
+
+/* Upload: one large drop area (the file input inside stays keyboard and screen-reader reachable). */
+.wl-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 160px;
+  margin: 16px 0;
+  padding: 24px;
+  text-align: center;
+  border: 2px dashed var(--md-outline);
+  border-radius: var(--md-shape-lg);
+  background: var(--md-surface-container-low);
+  cursor: pointer;
+  transition:
+    background 0.15s var(--md-ease),
+    border-color 0.15s var(--md-ease);
+}
+.wl-dropzone:hover,
+.wl-dropzone:focus-within,
+.wl-dropzone-over {
+  border-color: var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 8%, var(--md-surface-container-low));
+}
+.wl-dropzone-ready {
+  border-style: solid;
+  border-color: var(--md-primary);
+}
+.wl-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Logo and switch share the first row; the navigation takes its own row below. */
+.wl-header .wl-nav {
+  order: 2;
+}

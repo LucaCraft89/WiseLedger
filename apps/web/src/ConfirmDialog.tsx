@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import type { RiskFlag, Verdict } from './api/contracts.js';
-import { BLOCK_EXPLANATION, confirmGate, gateHint, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
+import {
+  assetIdHint,
+  BLOCK_EXPLANATION,
+  confirmGate,
+  gateHint,
+  type PaymentProgress,
+  REVIEW_TICK_LABEL,
+} from './lib/confirm.js';
 import { splitFlags } from './lib/payment.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
- * block → confirm disabled with an explanation; review → tick box required (sends override: true).
+ * block → explanation and one "close without paying" button (no pay button); review → tick box required (sends override: true).
  */
 export function ConfirmDialog(props: {
   verdict: Verdict;
@@ -40,7 +47,7 @@ export function ConfirmDialog(props: {
     <section
       role="dialog"
       aria-labelledby="confirm-title"
-      style={{ border: '2px solid #333', borderRadius: 6, padding: 16, marginTop: 16 }}
+      style={{ border: '2px solid var(--wl-c-strong)', borderRadius: 6, padding: 16, marginTop: 16 }}
     >
       <h3 id="confirm-title" style={{ marginTop: 0 }}>
         Confirm payment
@@ -54,22 +61,33 @@ export function ConfirmDialog(props: {
         </p>
       )}
 
-      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600 }}>{props.sentence}</p>}
+      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600, marginBottom: 4 }}>{props.sentence}</p>}
+      {assetIdHint(props.sentence) && (
+        <p data-testid="asset-id-hint" style={{ fontSize: '0.9em', marginTop: 0 }}>
+          {assetIdHint(props.sentence)}
+        </p>
+      )}
 
       {props.verdict === 'block' && (
-        <p style={{ background: '#f8d7da', padding: 10 }} data-testid="block-explanation">
+        <p style={{ background: 'var(--wl-c-error-bg)', padding: 10 }} data-testid="block-explanation">
           {BLOCK_EXPLANATION}
         </p>
       )}
 
       {props.verdict === 'review' && (
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} /> {REVIEW_TICK_LABEL}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <input
+            type="checkbox"
+            checked={ticked}
+            onChange={(e) => setTicked(e.target.checked)}
+            style={{ width: 'auto', margin: 0 }}
+          />
+          {REVIEW_TICK_LABEL}
         </label>
       )}
 
       {error && (
-        <p role="alert" style={{ color: '#b00020' }}>
+        <p role="alert" style={{ color: 'var(--wl-c-error)' }}>
           {error}
         </p>
       )}
@@ -94,10 +112,20 @@ export function ConfirmDialog(props: {
           >
             Yes, do not pay
           </button>
-          <button type="button" disabled={busy} onClick={() => setRejecting(false)} style={{ padding: '8px 20px' }}>
+          <button
+            className="wl-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setRejecting(false)}
+            style={{ padding: '8px 20px' }}
+          >
             Go back
           </button>
         </div>
+      ) : props.verdict === 'block' ? (
+        <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
+          Close this invoice without paying
+        </button>
       ) : (
         <div>
           <button
@@ -108,14 +136,18 @@ export function ConfirmDialog(props: {
           >
             Confirm and pay
           </button>
-          <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
+          <button
+            className="wl-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setRejecting(true)}
+            style={{ padding: '8px 20px' }}
+          >
             Do not pay
           </button>
-          {props.verdict !== 'block' && (
-            <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
-              {gateHint(props.verdict, ticked)}
-            </p>
-          )}
+          <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
+            {gateHint(props.verdict, ticked)}
+          </p>
         </div>
       )}
     </section>
@@ -131,7 +163,11 @@ export function PaymentProgressView({ progress }: { progress: PaymentProgress })
       <h3>Payment</h3>
       <ol style={{ listStyle: 'none', padding: 0 }}>
         {progress.steps.map((s) => (
-          <li key={s.label} data-status={s.status} style={{ color: s.status === 'pending' ? '#888' : undefined }}>
+          <li
+            key={s.label}
+            data-status={s.status}
+            style={{ color: s.status === 'pending' ? 'var(--wl-c-faint)' : undefined }}
+          >
             {PROGRESS_ICON[s.status]} {s.label}
             {s.status === 'running' && <small> (in progress)</small>}
           </li>

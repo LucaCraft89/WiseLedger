@@ -260,3 +260,40 @@ describe('first-run and settings screens render', () => {
     expect(html).toContain('loaded in 4.2 s');
   });
 });
+
+describe('scheduled payment proof (PLAN §1.1)', () => {
+  it('a job that ran shows its transfer ID, txid and explorer link', async () => {
+    const { JobRow } = await import('./SchedulePage.js');
+    const job = {
+      jobId: 'job_1',
+      planId: 'plan_1',
+      invoiceId: 'inv_1',
+      runAt: '2026-10-17T18:00:00.000Z',
+      status: 'done' as const,
+      createdAt: '2026-10-17T17:00:00.000Z',
+      updatedAt: '2026-10-17T18:00:05.000Z',
+      result: { planId: 'plan_1', status: 'settled' as const, transferId: 'tr_42', txid: 'ab'.repeat(32) },
+    };
+    const html = renderToStaticMarkup(createElement(JobRow, { api: createFakeClient(), job, onChanged: () => {} }));
+    expect(html).toContain('job-proof');
+    expect(html).toContain(`https://mutinynet.com/tx/${'ab'.repeat(32)}`);
+  });
+});
+
+describe('get paid: payment requests (A m4.s1 receive side)', () => {
+  it('a request made with a note is listed as waiting, newest first; a received one shows the explorer link', async () => {
+    const api = createFakeClient();
+    const w = await api.wallet();
+    await api.receive({ amount: '7000000', note: 'Acme, refund October', expiryMinutes: 60 });
+    await api.receive({ expiryMinutes: 60 });
+    const { receives } = await api.receives();
+    expect(receives.map((r) => r.status)).toEqual(['waiting', 'waiting']);
+    expect(receives[1]?.note).toBe('Acme, refund October');
+    const { PaymentRequestRow } = await import('./WalletPage.js');
+    const r = { ...(receives[1] as (typeof receives)[number]), status: 'received' as const, txid: 'cd'.repeat(32) };
+    const html = renderToStaticMarkup(createElement(PaymentRequestRow, { r, wallet: w }));
+    expect(html).toContain('Received ✓');
+    expect(html).toContain('Acme, refund October');
+    expect(html).toContain(`/tx/${'cd'.repeat(32)}`);
+  });
+});

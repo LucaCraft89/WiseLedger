@@ -44,14 +44,32 @@ export function liveAiView(events: readonly AppEvent[]): LiveAiView {
   return view;
 }
 
-/** "Treasurer called execute_plan(planId=plan_1) — done". */
-export function toolCallLine(e: ToolCallEvent): string {
+/** Plain words for the Treasurer's tools; unknown tools fall back to their name. */
+export const TOOL_WORDS: Record<string, string> = {
+  execute_plan: 'Sending the payment you confirmed',
+  get_balance: 'Checking the balance',
+  create_receive_invoice: 'Creating a payment request',
+  schedule_payment: 'Scheduling a payment',
+  label_transfer: 'Labelling a payment',
+  list_transfers: 'Looking up past payments',
+  fiscal_report: 'Preparing the report',
+};
+
+/** Plain words first, then the technical call (long IDs shortened, so the line wraps on a narrow window). */
+export function toolCallParts(e: ToolCallEvent): { text: string; tech: string } {
   const who = e.agent === 'treasurer' ? 'Treasurer' : 'Analyst';
   const args = Object.entries(e.args)
-    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? shortId(v, 6) : JSON.stringify(v)}`)
     .join(', ');
   const status = { called: 'started', ok: 'done', rejected: 'refused', error: 'failed' }[e.status];
-  return `${who} called ${e.name}(${args}): ${status}${e.message ? `, ${e.message}` : ''}`;
+  const what = TOOL_WORDS[e.name] ?? `Using the tool ${e.name}`;
+  return { text: `${who}: ${what}: ${status}${e.message ? `, ${e.message}` : ''}`, tech: `${e.name}(${args})` };
+}
+
+/** "Treasurer: Sending the payment you confirmed: done (execute_plan(planId=plan_1))". */
+export function toolCallLine(e: ToolCallEvent): string {
+  const p = toolCallParts(e);
+  return `${p.text} (${p.tech})`;
 }
 
 /**
@@ -100,7 +118,7 @@ export function shortId(id: string, keep = 10): string {
 
 export const BACKEND_WORDS = {
   mock: 'pretend wallet for testing, no real payments',
-  'wdk-rgb': 'WDK wallet with RGB',
+  'wdk-rgb': 'Tether WDK wallet with RGB (self-custodial: your keys stay on this computer)',
   'rgb-lib': 'rgb-lib wallet',
 } as const;
 

@@ -12,6 +12,7 @@ function fake(opts: {
   expiry?: number;
   transfer?: () => Promise<{ hash: string; fee: bigint }>;
   noUtxoFirst?: boolean;
+  sendTimeoutMs?: number;
 }) {
   let noUtxo = opts.noUtxoFirst ?? false;
   const transfers: SdkTransfer[] = [];
@@ -56,7 +57,8 @@ function fake(opts: {
     quoteTransfer: vi.fn(async () => ({ fee: 155n })),
     transfer,
   } as unknown as RgbAccount;
-  const wallet = new WdkRgbWallet(walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' }), {
+  const cfg = walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' });
+  const wallet = new WdkRgbWallet(opts.sendTimeoutMs ? { ...cfg, sendTimeoutMs: opts.sendTimeoutMs } : cfg, {
     account,
   });
   return { wallet, transfer, sdk };
@@ -70,6 +72,17 @@ describe('WdkRgbWallet.pay', () => {
     const r = await wallet.pay(req);
     expect(r).toEqual({ transferId: '7', txid: 'ab'.repeat(32) });
     expect(transfer).toHaveBeenCalledWith({ token: ASSET, recipient: req.rgbInvoice, amount: 5000000, feeRate: 2 });
+  });
+
+  it('a send that hangs after signing → SubmitTimeout after WALLET_SEND_TIMEOUT_MS, with the transfer found', async () => {
+    const { wallet, transfer, sdk } = fake({ transfer: () => new Promise(() => undefined), sendTimeoutMs: 1000 });
+    const t = Date.now();
+    const err = await wallet.pay(req).catch((e: unknown) => e);
+    expect(Date.now() - t).toBeLessThan(3000);
+    expect(err).toBeInstanceOf(SubmitTimeout);
+    expect((err as SubmitTimeout).transferId).toBe('7');
+    expect(transfer).toHaveBeenCalledTimes(1);
+    expect(sdk.syncWallet).toHaveBeenCalled();
   });
 
   it('after a timeout: no second send, one sync, SubmitTimeout carries the transfer found', async () => {
@@ -132,5 +145,39 @@ describe('mapWalletError', () => {
     ['something else', 'TransferFailed'],
   ])('%s → %s', (msg, code) => {
     expect(mapWalletError(new Error(msg)).code).toBe(code);
+  });
+});
+
+describe('WdkRgbWallet.btcBalance', () => {
+  const bal = (n: number) => ({ settled: n, future: n, spendable: n });
+  function withSdk(sdk: Record<string, unknown>) {
+    const account = { getRgbWallet: () => sdk, getAddress: () => 'bcrt1qx' } as unknown as RgbAccount;
+    const cfg = walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' });
+    return new WdkRgbWallet(cfg, { account });
+  }
+
+  it('reads the last synced state (skip_sync) instead of syncing on every call', () => {
+    const libGet = vi.fn(() => ({ vanilla: bal(1000), colored: bal(0) }));
+    const sdkGet = vi.fn(() => ({ vanilla: bal(5), colored: bal(0) }));
+    const w = withSdk({ client: { wallet: { getBtcBalance: libGet } }, getBtcBalance: sdkGet });
+    expect(w.btcBalance().vanilla.spendable).toBe(1000);
+    expect(libGet).toHaveBeenCalledWith(null, true);
+    expect(sdkGet).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the SDK call when the rgb-lib client is not reachable or fails', () => {
+    const sdkGet = vi.fn(() => ({ vanilla: bal(5), colored: bal(0) }));
+    expect(withSdk({ getBtcBalance: sdkGet }).btcBalance().vanilla.spendable).toBe(5);
+    const failing = withSdk({
+      client: {
+        wallet: {
+          getBtcBalance: () => {
+            throw new Error('x');
+          },
+        },
+      },
+      getBtcBalance: sdkGet,
+    });
+    expect(failing.btcBalance().vanilla.spendable).toBe(5);
   });
 });

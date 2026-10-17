@@ -30,6 +30,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { type ReadRetryOptions, withReadRetry } from '../retry.js';
 import { loadOrCreateMnemonic, readSeed } from '../seed.js';
@@ -39,7 +40,11 @@ export interface RgbSdkWallet {
   registerWallet(): { address: string; btcBalance?: unknown };
   getBtcBalance(): { vanilla: SdkBalance; colored: SdkBalance };
   getAddress(): string;
+  /** Plain BTC send (scripts only: test sats between our own wallets; RGB payments go through pay()). */
+  sendBtc(p: { address: string; amount: number; feeRate: number; skipSync?: boolean }): Promise<string>;
   listUnspents(): { utxo: { colorable: boolean; btcAmount: number }; rgbAllocations: unknown[] }[];
+  /** On-chain movements (BDK): `sent` = the wallet's inputs, `received` = outputs back to the wallet. */
+  listTransactions(): SdkTransaction[];
   listAssets(): { nia?: SdkAsset[] };
   getAssetBalance(assetId: string): Partial<SdkBalance>;
   issueAssetNia(p: { ticker: string; name: string; amounts: number[]; precision: number }): SdkAsset;
@@ -64,6 +69,16 @@ export interface RgbSdkWallet {
   createBackup(p: { backupPath: string; password: string }): { message: string; backupPath: string };
 }
 
+/** rgb-sdk TransactionType: 0 RGB_SEND, 1 DRAIN, 2 CREATE_UTXOS, 3 USER. */
+export interface SdkTransaction {
+  transactionType: number;
+  txid: string;
+  received: number;
+  sent: number;
+  fee: number;
+  confirmationTime?: { height: number; timestamp: number };
+}
+
 interface SdkBalance {
   settled: number;
   future: number;
@@ -82,6 +97,8 @@ interface SdkAsset {
 interface RgbLibClient {
   transportEndpoint: string;
   wallet: {
+    /** rgb-lib: `online` may be null when `skipSync` is true (a local read of the last synced state). */
+    getBtcBalance?(online: null, skipSync: boolean): { vanilla: SdkBalance; colored: SdkBalance };
     blindReceive(
       assetId: string | null,
       assignment: string,
@@ -192,6 +209,18 @@ export function mapWalletError(e: unknown): WalletError {
   return new TransferFailed(msg, { cause: e });
 }
 
+/** Rejects with SubmitTimeout after `ms` (the send may be out: callers never retry it). */
+export function withSendTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SubmitTimeout(`The wallet did not answer within ${Math.round(ms / 1000)} s after sending.`)),
+      ms,
+    );
+  });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+}
+
 export class WdkRgbWallet implements WalletPort {
   private wdk: WDK | null = null;
   private account: RgbAccount | null = null;
@@ -239,6 +268,7 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
+      lockWalletDir(this.cfg.dataDir);
       const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir, { passphrase: this.passphrase });
       this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
@@ -274,8 +304,27 @@ export class WdkRgbWallet implements WalletPort {
     return this.rgb.getAddress();
   }
 
+  /**
+   * BTC balance as of the last sync. rgb-sdk's getBtcBalance() runs a full indexer sync on every call (skip_sync =
+   * false), a blocking native call of ~3 s on Mutinynet that froze the whole server on each /api/health and
+   * /api/wallet. The background sync loop (and the kick after a payment) keep the local state fresh, so read it
+   * with skip_sync = true; fall back to the SDK call only if the rgb-lib client is not reachable.
+   */
   btcBalance(): { vanilla: SdkBalance; colored: SdkBalance } {
+    const lib = (this.rgb as unknown as { client?: RgbLibClient }).client?.wallet;
+    if (lib?.getBtcBalance) {
+      try {
+        return lib.getBtcBalance(null, true);
+      } catch {
+        // fall through to the syncing call
+      }
+    }
     return this.rgb.getBtcBalance();
+  }
+
+  /** On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). */
+  btcTransactions(): SdkTransaction[] {
+    return this.rgb.listTransactions();
   }
 
   async listAssets(): Promise<AssetInfo[]> {
@@ -415,8 +464,13 @@ export class WdkRgbWallet implements WalletPort {
     await this.precheck(req);
     const before = new Set(this.rgb.listTransfers(req.assetId).map((t) => t.batchTransferIdx));
     let hash: string;
+    // The library call can hang after signing (seen on Mutinynet with a slow proxy): cap it. The call keeps running
+    // in the background; the transfer it created is found by the sync below and settled by the sync loop.
     const send = () =>
-      this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate });
+      withSendTimeout(
+        this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate }),
+        this.cfg.sendTimeoutMs ?? 120_000,
+      );
     try {
       try {
         ({ hash } = await send());
@@ -490,6 +544,7 @@ export class WdkRgbWallet implements WalletPort {
   close(): void {
     this.account = null;
     this.wdk = null;
+    unlockWalletDir(this.cfg.dataDir);
   }
 
   private acct(): RgbAccount {

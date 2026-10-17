@@ -1,10 +1,15 @@
 // REST + SSE routes from core API_ROUTES. Requests are validated with the core zod DTOs.
+
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, TranscribeError, type Transcriber } from 'ai';
 import {
   API_ROUTES,
   type ApiError,
   type AppEvent,
+  type BtcTransactionDto,
+  type BtcTransactionsResponse,
   ChatRequest,
   type ChatResponse,
+  type ChatStreamLine,
   ConfirmRequest,
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
@@ -15,10 +20,13 @@ import {
   InvoiceStateSchema,
   type InvoiceSummaryDto,
   isWalletError,
+  type LightningStatusResponse,
   type LlmInfo,
+  type ReceivesListResponse,
   RejectRequest,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  type TranscribeResponse,
   type TransferDto,
   type TransferInfo,
   type TransfersResponse,
@@ -44,6 +52,7 @@ import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
 import { healthHints, type WalletHolder } from './onboarding.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
+import type { SqliteReceiveStore } from './receives.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 import { checkUpload, tooLarge } from './uploads.js';
@@ -55,17 +64,22 @@ export interface RouteDeps {
   treasurer: TreasurerAgent;
   labels: SqliteLabelStore;
   jobs: SqliteJobStore;
+  receives: SqliteReceiveStore;
   fiscal: WalletFiscalService;
   llmInfo: () => LlmInfo & { warmUpMs?: number };
   /** Onboarding state (needs_setup / locked / ready) for /api/health. */
   holder: WalletHolder;
   walletBackend: WalletResponse['backend'];
+  /** Spend limits from the config (PAYMENT_CAP, DAILY_CAP, ASSET_ALLOWLIST), shown on the Wallet page. */
+  limits?: { paymentCap: string; dailyCap?: string; assetAllowlist: string[] };
   network: WalletResponse['network'];
   problems: () => string[];
   /** Largest accepted upload in MB. */
   uploadMaxMb: number;
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
+  /** B's on-device speech-to-text (Parakeet); the text only fills the chat box. */
+  transcriber?: Transcriber;
 }
 
 /** Wallet errors caused by the request (400); the rest are the wallet's own failures (502). */
@@ -103,6 +117,41 @@ function btcBalanceSats(wallet: WalletPort): string | undefined {
   }
 }
 
+const BTC_PURPOSE = ['token_payment', 'drain', 'utxo_setup', 'bitcoin'] as const; // rgb-sdk TransactionType order
+
+interface RawBtcTx {
+  transactionType?: number;
+  txid?: string;
+  received?: number;
+  sent?: number;
+  fee?: number;
+  confirmationTime?: { timestamp?: number };
+}
+
+/** On-chain movements, newest first (unconfirmed on top). BDK: sent − received = amount out + fee. */
+export function toBtcTransactions(raw: unknown): BtcTransactionDto[] {
+  if (!Array.isArray(raw)) return [];
+  const out: (BtcTransactionDto & { at: number })[] = [];
+  for (const t of raw as RawBtcTx[]) {
+    const { txid, received = 0, sent = 0, fee = 0 } = t;
+    if (!txid || ![received, sent, fee].every((n) => Number.isSafeInteger(n) && n >= 0)) continue;
+    const ours = sent > 0;
+    const amount = ours ? Math.max(0, sent - received - fee) : received;
+    const ts = t.confirmationTime?.timestamp;
+    out.push({
+      txid,
+      direction: !ours ? 'received' : amount > 0 ? 'sent' : 'internal',
+      purpose: BTC_PURPOSE[t.transactionType ?? 3] ?? 'bitcoin',
+      amountSats: String(amount),
+      feeSats: String(ours ? fee : 0),
+      confirmed: ts !== undefined,
+      ...(ts !== undefined ? { createdAt: new Date(ts * 1000).toISOString() } : {}),
+      at: ts !== undefined ? ts : Number.MAX_SAFE_INTEGER,
+    });
+  }
+  return out.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto);
+}
+
 function isTooLarge(err: unknown): boolean {
   const e = err as { statusCode?: number; code?: string };
   return e.statusCode === 413 || e.code === 'FST_REQ_FILE_TOO_LARGE' || e.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
@@ -115,6 +164,8 @@ function route(app: FastifyInstance, spec: string, handler: Handler): void {
   const [method, url] = spec.split(' ') as [Method, string];
   app.route({ method, url, handler });
 }
+
+const url = (spec: string): string => spec.split(' ')[1] as string;
 
 function apiError(code: string, message: string): ApiError {
   return { error: { code, message } };
@@ -151,6 +202,7 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     ...(t.txid ? { txid: t.txid } : {}),
+    ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
     ...(invoiceId ? { invoiceId } : {}),
   };
 }
@@ -158,8 +210,14 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   const { store, orchestrator, wallet, treasurer } = deps;
 
-  app.setErrorHandler((err, _req, reply) => {
+  app.setErrorHandler((err, req, reply) => {
     if (err instanceof ApiFailure) return reply.status(err.status).send(apiError(err.code, err.message));
+    if (err instanceof TranscribeError) return reply.status(err.status).send(apiError(err.code, err.message));
+    if (isTooLarge(err) && req.url.startsWith(url(API_ROUTES.agentTranscribe))) {
+      return reply
+        .status(413)
+        .send(apiError('AUDIO_TOO_LONG', `The recording is too long. Keep it under ${MAX_AUDIO_SECONDS} seconds.`));
+    }
     if (err instanceof IllegalTransition) {
       const f = invalidTransition(err.from, err.to);
       return reply.status(f.status).send(apiError(f.code, f.message));
@@ -273,8 +331,20 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   );
 
   route(app, API_ROUTES.wallet, async (): Promise<WalletResponse> => {
-    const [assets, address] = await Promise.all([wallet.listAssets(), wallet.receiveAddress()]);
+    const [assets, address, transfers] = await Promise.all([
+      wallet.listAssets(),
+      wallet.receiveAddress(),
+      deps.limits ? wallet.listTransfers().catch(() => []) : Promise.resolve([]),
+    ]);
     const sats = btcBalanceSats(wallet);
+    // Same rolling-24 h sum the PaymentGuard checks (outgoing, not failed), per asset; local reads only.
+    const since = Date.now() - 86_400_000;
+    const spent = new Map<string, bigint>();
+    for (const t of transfers) {
+      if (t.direction !== 'outgoing' || t.status === 'Failed' || !t.assetId || Date.parse(t.createdAt) < since)
+        continue;
+      spent.set(t.assetId, (spent.get(t.assetId) ?? 0n) + BigInt(t.amount));
+    }
     return {
       backend: deps.walletBackend,
       network: deps.network,
@@ -288,7 +358,29 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         precision: a.precision,
         balance: a.balance,
       })),
+      ...(deps.limits
+        ? {
+            spending: {
+              paymentCap: deps.limits.paymentCap,
+              ...(deps.limits.dailyCap ? { dailyCap: deps.limits.dailyCap } : {}),
+              assetAllowlist: deps.limits.assetAllowlist,
+              spentLast24h: [...spent].map(([assetId, amount]) => ({ assetId, amount: amount.toString() })),
+              enforcedBy: deps.walletBackend === 'wdk-rgb' ? ('wdk-policy' as const) : ('guard' as const),
+            },
+          }
+        : {}),
     };
+  });
+
+  route(app, API_ROUTES.walletBtc, async (): Promise<BtcTransactionsResponse> => {
+    const w = wallet as { btcTransactions?: () => unknown };
+    let raw: unknown;
+    try {
+      raw = w.btcTransactions?.();
+    } catch {
+      raw = undefined; // the Bitcoin list is a read-only extra: never fail the wallet screen over it
+    }
+    return { transactions: toBtcTransactions(raw) };
   });
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
@@ -299,6 +391,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(body.assetId ? { assetId: body.assetId } : {}),
       ...(body.amount ? { amount: body.amount } : {}),
     });
+    // Remembered so the app can tell when it is paid (matched after each wallet sync).
+    deps.receives.add(inv, body.note);
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
@@ -306,6 +400,37 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(inv.amount ? { amount: inv.amount } : {}),
     };
   });
+
+  // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
+  // Voice: raw audio (audio/wav from the browser) → text for the chat box. Never executes anything by itself.
+  app.addContentTypeParser(/^audio\//, { parseAs: 'buffer', bodyLimit: MAX_AUDIO_BYTES }, (_req, body, done) =>
+    done(null, body),
+  );
+  route(app, API_ROUTES.agentTranscribe, async (req): Promise<TranscribeResponse> => {
+    if (!deps.transcriber)
+      throw new ApiFailure(503, 'STT_UNAVAILABLE', 'Voice input is not available on this computer.');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw new ApiFailure(
+        400,
+        'AUDIO_EMPTY',
+        'No recording arrived. Hold the button while you speak, then try again.',
+      );
+    }
+    return deps.transcriber.transcribe(req.body, req.headers['content-type']);
+  });
+
+  route(app, API_ROUTES.walletReceives, async (): Promise<ReceivesListResponse> => {
+    deps.receives.reconcile(await wallet.listTransfers());
+    return { receives: deps.receives.list() };
+  });
+
+  // Lightning node and channels (Wallet page panel); off when the backend has no Lightning rail.
+  route(
+    app,
+    API_ROUTES.walletLightning,
+    async (): Promise<LightningStatusResponse> =>
+      wallet.lightningStatus ? wallet.lightningStatus() : { enabled: false, channels: [] },
+  );
 
   route(app, API_ROUTES.transfers, async (): Promise<TransfersResponse> => {
     const transfers = await wallet.listTransfers();
@@ -327,6 +452,37 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const body = ChatRequest.parse(req.body);
     const emit = (event: AppEvent) => store.appendEvent(event);
     return treasurer.chat(body.message, body.history ?? [], emit);
+  });
+
+  // The same chat, streamed: one JSON line per event (reply text as the model writes it, then the full reply).
+  // Tokens go only to this response, never into the event store.
+  route(app, API_ROUTES.agentChatStream, async (req, reply) => {
+    const body = ChatRequest.parse(req.body);
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-cache',
+      'x-accel-buffering': 'no',
+    });
+    const line = (l: ChatStreamLine) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(l)}\n`);
+    };
+    try {
+      const out = await treasurer.chat(body.message, body.history ?? [], (e) => store.appendEvent(e), {
+        onToken: (text) => line({ t: 'token', text }),
+        onReset: () => line({ t: 'reset' }),
+      });
+      line({ t: 'reply', reply: out });
+    } catch (err) {
+      line({
+        t: 'error',
+        code: 'CHAT_FAILED',
+        message: err instanceof Error ? err.message : 'The Treasurer did not answer. Try again in a minute.',
+      });
+    } finally {
+      res.end();
+    }
   });
 
   route(app, M3_ROUTES.scheduleList, async (req): Promise<ScheduleListResponse> => {

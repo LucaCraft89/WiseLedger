@@ -96,8 +96,9 @@ describe('scheduled payments helpers', () => {
 
 describe('chat helpers', () => {
   it('shows tool calls as chips with ✓ / ✗', () => {
-    expect(toolChipText({ name: 'get_balance', ok: true })).toBe('get_balance ✓');
-    expect(toolChipText({ name: 'label_transfer', ok: false })).toBe('label_transfer ✗');
+    expect(toolChipText({ name: 'get_balance', ok: true })).toBe('Checking the balance ✓');
+    expect(toolChipText({ name: 'label_transfer', ok: false })).toBe('Labelling a payment ✗ failed');
+    expect(toolChipText({ name: 'new_tool', ok: true })).toBe('new_tool ✓');
   });
 
   it('takes executeAt from the schedule_payment call', () => {
@@ -127,9 +128,33 @@ describe('chat helpers', () => {
     expect(fiscalFromToolCall({ ...call, ok: false })).toBeUndefined();
   });
 
-  it('sends only the last 6 turns', () => {
-    const turns = Array.from({ length: 9 }, (_, i) => ({ role: 'user' as const, text: `m${i}` }));
-    expect(chatHistory(turns).map((t) => t.text)).toEqual(['m3', 'm4', 'm5', 'm6', 'm7', 'm8']);
+  it('sends the last 10 turns; assistant turns carry what their tools did', () => {
+    const turns = Array.from({ length: 12 }, (_, i) => ({ role: 'user' as const, text: `m${i}` }));
+    expect(chatHistory(turns).map((t) => t.text)).toEqual([
+      'm2',
+      'm3',
+      'm4',
+      'm5',
+      'm6',
+      'm7',
+      'm8',
+      'm9',
+      'm10',
+      'm11',
+    ]);
+    const withTool = chatHistory([
+      { role: 'user', text: 'request 100 TUSDT for 30 minutes' },
+      {
+        role: 'assistant',
+        text: 'Here is your payment request.',
+        reply: {
+          toolCalls: [{ name: 'create_receive_invoice', args: { amount: '100', expiryMinutes: 30 }, ok: true }],
+        },
+      },
+    ]);
+    expect(withTool[1]?.text).toBe(
+      'Here is your payment request.\n(done: create_receive_invoice {"amount":"100","expiryMinutes":30} ok)',
+    );
   });
 });
 
@@ -209,5 +234,29 @@ describe('fake wallet tools', () => {
     expect(await api.cancelJob(jobs[0]?.jobId ?? '')).toEqual({ ok: false });
     expect((await api.schedule()).jobs[0]?.status).toBe('cancelled');
     expect((await api.getInvoice(invoiceId)).invoice.state).toBe('AWAITING_CONFIRMATION');
+  });
+});
+
+describe('unpaid payment requests', () => {
+  it('are not recent transfers (they live under Get paid)', async () => {
+    const { recentTransfers, isUnpaidRequest } = await import('./lib/ledger.js');
+    const base = { assetId: 'a', labels: [], createdAt: '2026-10-17T10:00:00Z' };
+    const list = [
+      { ...base, transferId: '1', amount: '1', direction: 'in' as const, status: 'WaitingCounterparty' as const },
+      { ...base, transferId: '2', amount: '1', direction: 'in' as const, status: 'Settled' as const },
+      { ...base, transferId: '3', amount: '1', direction: 'out' as const, status: 'WaitingCounterparty' as const },
+    ];
+    expect(recentTransfers(list).map((t) => t.transferId)).toEqual(['2', '3']);
+    expect(isUnpaidRequest(list[0] as (typeof list)[number])).toBe(true);
+  });
+});
+
+describe('table dates', () => {
+  it('short: day, month and 24 h time; the year only when it differs', async () => {
+    const { shortDate } = await import('./lib/format.js');
+    const now = new Date('2026-10-17T12:00:00');
+    expect(shortDate('2026-10-17T16:46:00', now)).toBe('17 Oct, 16:46');
+    expect(shortDate('2025-03-02T09:05:00', now)).toBe('2 Mar 2025, 09:05');
+    expect(shortDate('not a date', now)).toBe('not a date');
   });
 });

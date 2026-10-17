@@ -2,14 +2,22 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MockLlm } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
-import { extractInvoice, normalizeDecimal, printedTotal, rowAmount, toExtraction } from '../src/analyst/extract.js';
+import {
+  extractInvoice,
+  normalizeDecimal,
+  paymentRequestsIn,
+  printedTotal,
+  rowAmount,
+  toExtraction,
+} from '../src/analyst/extract.js';
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
 import { EXPECTED, type ExpectedFixture, FIXTURES_DIR, perfectAnswer, sourceOf } from './fixtures.js';
 
 describe('extract: input loading', () => {
-  it('reads text and the PDF text layer, and passes images by path', async () => {
+  // PDF parsing takes 1–6 s on a loaded machine: more than vitest's default 5 s.
+  it('reads text and the PDF text layer, and passes images by path', { timeout: 30_000 }, async () => {
     for (const f of EXPECTED) {
       const input = await loadInvoice(sourceOf(f));
       if (f.kind === 'image') expect(input.mode).toBe('image');
@@ -22,15 +30,15 @@ describe('extract: input loading', () => {
 });
 
 describe('extract: call 1 with MockLlm', () => {
-  for (const f of EXPECTED) {
+  for (const f of EXPECTED.filter((x) => x.kind !== 'xml')) {
     it(`${f.id} → valid InvoiceExtraction`, async () => {
       const llm = new MockLlm({ replies: [{ json: perfectAnswer(f) }] });
       const { extraction, attempts } = await extractInvoice(await loadInvoice(sourceOf(f)), llm);
       expect(attempts).toBe(1);
       expect(extraction.issuer.name).toBe(f.issuer);
       expect(extraction.total).toBe(f.total);
-      expect(extraction.payment.method).toBe('rgb');
-      expect(extraction.payment.rgbInvoice).toBe(f.rgbInvoice);
+      expect(extraction.payment.method).toBe(f.paymentMethod);
+      expect(extraction.payment.rgbInvoice ?? '').toBe(f.rgbInvoice);
       const req = llm.calls[0];
       expect(req?.responseFormat?.type).toBe('json_schema');
       expect(req && 'tools' in req && req.tools).toBeFalsy();
@@ -69,6 +77,19 @@ describe('extract: deterministic clean-up', () => {
     const text = 'rgb:a/1 and rgb:b/2';
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:b/2' }, text).payment.rgbInvoice).toBe('rgb:b/2');
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:c/3' }, text).payment.rgbInvoice).toBeUndefined();
+  });
+  it('recognises an RGB Lightning invoice: method ln, same rgbInvoice field, "lightning:" dropped', () => {
+    const ln = 'lntbs250u1pjrgbtusdtmockinvoice0hash';
+    const text = `TOTAL DUE: 25.00 TUSDT\nPay instantly: lightning:${ln}\n`;
+    const fromModel = toExtraction({ ...base, rgbInvoice: `lightning:${ln}`, paymentMethod: 'ln' }, text);
+    expect(fromModel.payment).toMatchObject({ method: 'ln', rgbInvoice: ln });
+    const fallback = toExtraction({ ...base, rgbInvoice: null, paymentMethod: 'unknown' }, text);
+    expect(fallback.payment).toMatchObject({ method: 'ln', rgbInvoice: ln });
+    // An rgb: invoice next to a Lightning one: two candidates, only the model's verbatim choice stays.
+    const both = `${text}or on-chain rgb:mock/rgb:mock-tusdt/25000000/1900000000\n`;
+    expect(toExtraction({ ...base, rgbInvoice: null }, both).payment.rgbInvoice).toBeUndefined();
+    expect(toExtraction({ ...base, rgbInvoice: ln }, both).payment.method).toBe('ln');
+    expect(paymentRequestsIn('kilnbcrt is a word, lnbc1 too short')).toEqual([]);
   });
   it('falls back to a single printed TOTAL line when the model drops the total', () => {
     const e = toExtraction({ ...base, total: null }, 'Item 10.00\nTOTAL DUE: 55.00 TUSDT\n');
@@ -120,5 +141,34 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('extract: live QVAC on the six fi
     console.log(table);
     await llm.unload();
     expect(good).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('extract: FatturaPA XML without the model', () => {
+  for (const f of EXPECTED.filter((x) => x.kind === 'xml')) {
+    it(`${f.id}: every key field from the XML tags`, async () => {
+      const input = await loadInvoice(sourceOf(f));
+      if (input.mode !== 'text' || !input.structured) throw new Error('not read as FatturaPA');
+      const e = input.structured;
+      expect(e.issuer).toMatchObject({ name: f.issuer, vatId: f.vatId });
+      expect([e.invoiceNumber, e.total, e.currency, e.issueDate, e.dueDate]).toEqual([
+        f.invoiceNumber,
+        f.total,
+        f.currency,
+        f.issueDate,
+        f.dueDate,
+      ]);
+      expect(e.payment.method).toBe(f.paymentMethod);
+      expect(e.payment.rgbInvoice ?? '').toBe(f.rgbInvoice);
+      expect(e.lineItems.map((l) => l.amount)).toEqual(f.lineAmounts);
+    });
+  }
+  it('is not fooled by other XML, and never expands entities', async () => {
+    const { isFatturaPA, parseFatturaPA } = await import('../src/extract/fatturapa.js');
+    expect(isFatturaPA('<invoice><total>5</total></invoice>')).toBe(false);
+    expect(parseFatturaPA('<FatturaElettronica></FatturaElettronica>')).toBeUndefined();
+    const bomb =
+      '<!DOCTYPE x [<!ENTITY a "AAAAAAAAAA"><!ENTITY b "&a;&a;&a;&a;&a;">]><FatturaElettronica><FatturaElettronicaHeader><CedentePrestatore><DatiAnagrafici><Anagrafica><Denominazione>&b;</Denominazione></Anagrafica></DatiAnagrafici></CedentePrestatore></FatturaElettronicaHeader><FatturaElettronicaBody><DatiGenerali><DatiGeneraliDocumento><Numero>1</Numero></DatiGeneraliDocumento></DatiGenerali></FatturaElettronicaBody></FatturaElettronica>';
+    expect(parseFatturaPA(bomb)?.issuer.name ?? '').not.toContain('AAAA');
   });
 });

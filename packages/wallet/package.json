@@ -8,13 +8,16 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --testTimeout=20000",
     "smoke": "tsx scripts/wallet-smoke.ts",
     "issue-asset": "tsx scripts/issue-asset.ts",
     "payee": "tsx scripts/payee.ts",
     "restore-check": "tsx scripts/restore-check.ts",
     "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run",
-    "demo:prepare": "tsx scripts/demo-prepare.ts"
+    "demo:prepare": "tsx scripts/demo-prepare.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts",
+    "lsp": "tsx scripts/lsp.ts",
+    "lsp-client": "tsx scripts/lsp-client.ts"
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",

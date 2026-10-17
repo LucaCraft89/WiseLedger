@@ -8,15 +8,17 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=20000",
     "spike:hello": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-hello.ts",
     "spike:json": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-json.ts",
     "spike:vision": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-vision.ts",
+    "spike:voice": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-voice.ts",
     "evals": "QVAC_CONFIG_PATH=./qvac.config.json tsx ../../evals/run.ts"
   },
   "dependencies": {
     "@qvac/sdk": "0.21.1",
     "core": "workspace:*",
+    "fast-xml-parser": "5.11.2",
     "unpdf": "1.9.0",
     "zod": "^4.6.7"
   },

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { AppEvent, InvoiceDetailResponse, PaymentPlan, Stage } from './api/contracts.js';
+import {
+  type AppEvent,
+  type InvoiceDetailResponse,
+  isLightningInvoice,
+  type PaymentPlan,
+  type Stage,
+} from './api/contracts.js';
 import { ConfirmDialog, PaymentProgressView } from './ConfirmDialog.js';
 import { StatusChip } from './InvoiceListPage.js';
 import { aiRunStats, recordAiRun } from './lib/ai-stats.js';
@@ -14,7 +20,7 @@ import {
   showsProgress,
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
-import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallLine } from './lib/live.js';
+import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallParts } from './lib/live.js';
 import { FailureCard, ResultCard } from './PaymentCards.js';
 import { ReportView } from './ReportView.js';
 import { errorText, useToast } from './ui.js';
@@ -78,7 +84,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   if (error && !detail) {
     return (
       <section>
-        <p style={{ color: '#b00020' }}>{error}</p>
+        <p style={{ color: 'var(--wl-c-error)' }}>{error}</p>
         <a href="#/">Check another invoice</a>
       </section>
     );
@@ -88,26 +94,26 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const { invoice, plan, confirmationSentence, execution } = detail;
   const timeline = buildFullTimeline(events);
   const history = stateHistory(events);
-  const progress = paymentProgress(invoice.state, events, execution);
+  const progress = paymentProgress(invoice.state, events, execution, isLightningInvoice(plan?.rgbInvoice));
   // A failed payment gets its own card with the error in plain words.
   const errors = progress.failed ? [] : events.filter((e) => e.type === 'error');
   const live = liveAiView(events);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
 
-  return (
-    <section>
-      <h2>{invoice.filename}</h2>
-      <p>
-        Status: <StatusChip state={invoice.state} />
-      </p>
-
+  // Analysis steps, live AI text, tool calls and status history: on top while the check runs, folded away at the
+  // bottom once the report is there (the answer comes first).
+  const steps = (
+    <>
       <h3>Progress</h3>
       <ol>
         {timeline.map((s) => (
           <li
             key={s.stage}
             data-status={s.status}
-            style={{ color: s.status === 'pending' ? '#888' : s.status === 'error' ? '#b00020' : undefined }}
+            style={{
+              color:
+                s.status === 'pending' ? 'var(--wl-c-faint)' : s.status === 'error' ? 'var(--wl-c-error)' : undefined,
+            }}
           >
             {STEP_ICON[s.status]} {s.label} <small>({STEP_WORD[s.status]})</small>
             {s.message && <div style={{ fontSize: '0.9em' }}>{s.message}</div>}
@@ -120,8 +126,19 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       {toolCalls.length > 0 && (
         <div data-testid="tool-calls">
           <h3>What the Treasurer did</h3>
-          <ul style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.9em' }}>
-            {toolCalls.map((e) => (e.type === 'toolCall' ? <li key={eventKey(e)}>{toolCallLine(e)}</li> : null))}
+          <ul style={{ overflowWrap: 'anywhere' }}>
+            {toolCalls.map((e) => {
+              if (e.type !== 'toolCall') return null;
+              const p = toolCallParts(e);
+              return (
+                <li key={eventKey(e)}>
+                  {p.text}{' '}
+                  <small>
+                    (tool: <code>{p.tech}</code>)
+                  </small>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -138,6 +155,17 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           </ul>
         </details>
       )}
+    </>
+  );
+
+  return (
+    <section>
+      <h2>{invoice.filename}</h2>
+      <p>
+        Status: <StatusChip state={invoice.state} />
+      </p>
+
+      {!report && steps}
 
       {report && <ReportView report={report} />}
 
@@ -162,7 +190,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       )}
 
       {invoice.state === 'BLOCKED' && (
-        <p style={{ background: '#f8d7da', padding: 12 }}>
+        <p style={{ background: 'var(--wl-c-error-bg)', padding: 12 }}>
           We stopped this payment. You do not need to do anything. If you think this is a mistake, contact the supplier
           using a phone number you already know, not the one on the invoice.
         </p>
@@ -184,6 +212,13 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
         }}
       />
 
+      {report && (
+        <details style={{ marginTop: 24 }} data-testid="how-we-checked">
+          <summary>How we checked it (steps, AI activity, status history)</summary>
+          {steps}
+        </details>
+      )}
+
       <p style={{ marginTop: 32 }}>
         <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>
       </p>
@@ -199,11 +234,17 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
     <div
       data-testid="live-ai"
       aria-live="polite"
-      style={{ border: '1px solid #b8daff', background: '#f0f7ff', borderRadius: 6, padding: 12, margin: '12px 0' }}
+      style={{
+        border: '1px solid var(--wl-c-note-line)',
+        background: 'var(--wl-c-note-bg)',
+        borderRadius: 6,
+        padding: 12,
+        margin: '12px 0',
+      }}
     >
       <strong>{info.title}</strong>
       <div>{info.detail}</div>
-      <div style={{ fontSize: '0.85em', color: '#555' }}>
+      <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>
         AI running on this computer: your invoice never leaves it.
       </div>
       <pre
@@ -212,8 +253,8 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
           fontSize: '0.85em',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          background: '#fff',
-          border: '1px solid #ddd',
+          background: 'var(--wl-c-surface)',
+          border: '1px solid var(--wl-c-line)',
           padding: 8,
           margin: '8px 0 0',
           minHeight: '3em',
@@ -228,7 +269,7 @@ function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
 }
 
 function ErrorLine({ message }: { message: string }) {
-  return <p style={{ color: '#b00020' }}>{message}</p>;
+  return <p style={{ color: 'var(--wl-c-error)' }}>{message}</p>;
 }
 
 /** Prefer the sentence built here by code; fall back to the server's only when the asset is unknown. */
@@ -256,6 +297,8 @@ function FinalStatus({
         sentence={plan ? paidSentence(plan, assets) : undefined}
         transferId={progress.transferId}
         txid={progress.txid}
+        {...(progress.paymentHash ? { paymentHash: progress.paymentHash } : {})}
+        lightning={isLightningInvoice(plan?.rgbInvoice)}
       />
     );
   }
@@ -269,8 +312,13 @@ function FinalStatus({
       />
     );
   }
-  if (state === 'SCHEDULED') return <p style={{ background: '#d1ecf1', padding: 12 }}>The payment is scheduled.</p>;
+  if (state === 'SCHEDULED')
+    return <p style={{ background: 'var(--wl-c-sched-bg)', padding: 12 }}>The payment is scheduled.</p>;
   if (state === 'REJECTED')
-    return <p style={{ background: '#e2e3e5', padding: 12 }}>You chose not to pay this invoice. Nothing was sent.</p>;
+    return (
+      <p style={{ background: 'var(--wl-c-neutral-bg)', padding: 12 }}>
+        You chose not to pay this invoice. Nothing was sent.
+      </p>
+    );
   return null;
 }

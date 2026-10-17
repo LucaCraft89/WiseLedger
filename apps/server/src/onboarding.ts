@@ -37,6 +37,7 @@ export type ManagedWallet = WalletPort & {
   unlock?(passphrase: string): Promise<unknown>;
   close?(): void;
   btcBalance?(): unknown;
+  btcTransactions?(): unknown;
 };
 
 /** How the holder opens, creates and restores wallets (the real one uses the `wallet` package; tests inject fakes). */
@@ -325,6 +326,7 @@ export class WalletHolder {
       sync: async () => ready().sync(),
       // Duck-typed by routes (BTC balance in /api/wallet and the faucet hint); undefined while not ready.
       btcBalance: () => this.wallet?.btcBalance?.(),
+      btcTransactions: () => this.wallet?.btcTransactions?.(),
     };
   }
 }

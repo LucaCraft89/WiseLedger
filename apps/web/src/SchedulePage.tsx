@@ -1,11 +1,14 @@
 import { useCallback, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import type { Job } from './api/contracts.js';
+import { InvoiceTabs } from './InvoiceListPage.js';
 import { formatDate } from './lib/format.js';
 import { canCancelJob, JOB_STATUS_COLORS, JOB_STATUS_WORDS, sortJobs } from './lib/ledger.js';
+import { explorerTxUrl, shortId } from './lib/payment.js';
+import { EXPLORER_BASE } from './PaymentCards.js';
 import { Empty, ErrorBox, errorText, Loading, useLoad, useToast } from './ui.js';
 
-const row = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 8 } as const;
+const row = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 8 } as const;
 
 /** #/schedule: scheduled payments, with Cancel for the ones still waiting. */
 export function SchedulePage({ api }: { api: ApiClient }) {
@@ -14,10 +17,11 @@ export function SchedulePage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Scheduled payments</h2>
+      <h2>Your invoices</h2>
+      <InvoiceTabs current="schedule" />
       <p>
         Payments you confirmed for a later date. They run on this computer, so keep WiseLedger open.{' '}
-        <button type="button" onClick={reload} disabled={loading}>
+        <button className="wl-quiet" type="button" onClick={reload} disabled={loading}>
           Refresh
         </button>
       </p>
@@ -33,7 +37,7 @@ export function SchedulePage({ api }: { api: ApiClient }) {
   );
 }
 
-function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onChanged: () => void }) {
+export function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onChanged: () => void }) {
   const toast = useToast();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +66,20 @@ function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onChanged: 
         </span>
         <a href={`#/invoice/${encodeURIComponent(job.invoiceId)}`}>Open the invoice</a>
       </div>
-      {job.lastError && <p style={{ color: '#b00020', margin: '4px 0 0' }}>Problem: {job.lastError}</p>}
+      {job.result?.transferId && (
+        <p style={{ margin: '4px 0 0' }} data-testid="job-proof">
+          Transfer ID: <code title={job.result.transferId}>{shortId(job.result.transferId)}</code>
+          {job.result.txid && (
+            <>
+              {' · '}Bitcoin transaction: <code title={job.result.txid}>{shortId(job.result.txid)}</code>{' '}
+              <a href={explorerTxUrl(job.result.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
+                View on the block explorer
+              </a>
+            </>
+          )}
+        </p>
+      )}
+      {job.lastError && <p style={{ color: 'var(--wl-c-error)', margin: '4px 0 0' }}>Problem: {job.lastError}</p>}
       {canCancelJob(job) &&
         (asking ? (
           <p style={{ margin: '8px 0 0' }}>
@@ -70,13 +87,13 @@ function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onChanged: 
             <button type="button" onClick={() => void cancel()} disabled={busy}>
               {busy ? 'Cancelling…' : 'Yes, cancel it'}
             </button>{' '}
-            <button type="button" onClick={() => setAsking(false)} disabled={busy}>
+            <button className="wl-secondary" type="button" onClick={() => setAsking(false)} disabled={busy}>
               Keep it
             </button>
           </p>
         ) : (
           <p style={{ margin: '8px 0 0' }}>
-            <button type="button" onClick={() => setAsking(true)}>
+            <button className="wl-secondary" type="button" onClick={() => setAsking(true)}>
               Cancel
             </button>
           </p>

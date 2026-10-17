@@ -3,7 +3,7 @@
 // Payment outcome by file name: *fail* → TransferFailed, *timeout* → SubmitTimeout (MockWallet amounts).
 
 import type { ApiClient, InvoiceInput } from './client.js';
-import { ApiCallError } from './client.js';
+import { ApiCallError, LIGHTNING_OFF } from './client.js';
 import {
   type AnalysisReport,
   type AppEvent,
@@ -27,6 +27,7 @@ import {
   mockInvoice,
   type OnboardingState,
   type PaymentPlan,
+  type ReceiveRequestDto,
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
@@ -77,7 +78,6 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
 export const FAKE_HINTS = [
   'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
   'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
-  'Confirm the payment sentence and watch it reach Settled on the invoice page.',
 ];
 
 export interface FakeOptions {
@@ -117,6 +117,9 @@ function kindOf(name: string): InvoiceSourceKind {
   return 'text';
 }
 
+/** What the demo-mode microphone always "hears". */
+export const FAKE_TRANSCRIPT = 'pay the latest invoice on Friday';
+
 export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const wallet = new MockWallet({ stepMs: opts.transferStepMs ?? 1500 });
   const { state: onboardingState, ...onboarding } = createFakeOnboarding(opts.onboarding);
@@ -135,6 +138,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const jobs = new MemoryJobStore();
   const labels = new MemoryLabelStore();
   const transferInvoice = new Map<string, string>();
+  const receiveList: ReceiveRequestDto[] = [];
   let jobSeq = 0;
 
   // Two past payments, so the transfers table, labels and "my last payment" have something to work with.
@@ -160,6 +164,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         direction: t.direction === 'outgoing' ? ('out' as const) : ('in' as const),
         status: t.status,
         ...(t.txid ? { txid: t.txid } : {}),
+        ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
         ...(transferInvoice.has(t.transferId) ? { invoiceId: transferInvoice.get(t.transferId) } : {}),
         labels: (await labels.get(t.transferId))?.labels ?? [],
         createdAt: t.createdAt,
@@ -464,6 +469,21 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
           precision: a.precision,
           balance: a.balance,
         })),
+        // The server's defaults (PAYMENT_CAP 100 TUSDT, DAILY_CAP 5×); the demo backend has no WDK policy engine.
+        spending: {
+          paymentCap: '100000000',
+          dailyCap: '500000000',
+          assetAllowlist: [MOCK_ASSET_ID],
+          spentLast24h: (await wallet.listTransfers())
+            .filter((t) => t.direction === 'outgoing' && t.status !== 'Failed' && t.assetId)
+            .reduce<{ assetId: string; amount: string }[]>((acc, t) => {
+              const row = acc.find((r) => r.assetId === t.assetId);
+              if (row) row.amount = (BigInt(row.amount) + BigInt(t.amount)).toString();
+              else acc.push({ assetId: t.assetId as string, amount: t.amount });
+              return acc;
+            }, []),
+          enforcedBy: 'guard' as const,
+        },
       };
     },
     async receive(req) {
@@ -475,11 +495,67 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         ...(req.amount ? { amount: req.amount } : {}),
         expirySec: (req.expiryMinutes ?? 60) * 60,
       });
+      const at = new Date().toISOString();
+      receiveList.unshift({
+        receiveId: `rcv_fake_${receiveList.length + 1}`,
+        rgbInvoice: inv.rgbInvoice,
+        recipientId: inv.recipientId,
+        status: 'waiting',
+        createdAt: at,
+        updatedAt: at,
+        expiresAt: inv.expiresAt,
+        ...(inv.assetId ? { assetId: inv.assetId } : {}),
+        ...(inv.amount ? { amount: inv.amount } : {}),
+        ...(req.note ? { note: req.note } : {}),
+      });
       return {
         rgbInvoice: inv.rgbInvoice,
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
+      };
+    },
+    async receives() {
+      return { receives: receiveList.map((r) => ({ ...r })) };
+    },
+    async lightning() {
+      // Only what the mock wallet itself reports; a wallet without Lightning means off.
+      return wallet.lightningStatus ? wallet.lightningStatus() : LIGHTNING_OFF;
+    },
+    async btcTransactions() {
+      // Demo mode only: sample on-chain history so the screen can be tried without a wallet.
+      const day = 86_400_000;
+      const at = (ago: number) => new Date(Date.now() - ago * day).toISOString();
+      return {
+        transactions: [
+          {
+            txid: 'f'.repeat(64),
+            direction: 'sent' as const,
+            purpose: 'token_payment' as const,
+            amountSats: '0',
+            feeSats: '300',
+            confirmed: true,
+            createdAt: at(1),
+          },
+          {
+            txid: 'e'.repeat(64),
+            direction: 'internal' as const,
+            purpose: 'utxo_setup' as const,
+            amountSats: '0',
+            feeSats: '420',
+            confirmed: true,
+            createdAt: at(2),
+          },
+          {
+            txid: 'd'.repeat(64),
+            direction: 'received' as const,
+            purpose: 'bitcoin' as const,
+            amountSats: '150000',
+            feeSats: '0',
+            confirmed: true,
+            createdAt: at(3),
+          },
+        ],
       };
     },
     async transfers() {
@@ -495,6 +571,21 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       return labels.set(transferId, clean);
     },
     chat: (req) => fakeChat(req.message),
+    async chatStream(req, hooks) {
+      const reply = await fakeChat(req.message);
+      // Demo backend only: replay the canned reply word by word so the live typing can be seen without a model.
+      for (const piece of reply.text.match(/\S+\s*/g) ?? []) {
+        hooks.onToken(piece);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return reply;
+    },
+    async transcribe(audio) {
+      if (!audio.size) {
+        throw new ApiCallError('AUDIO_EMPTY', 'We did not hear anything. Hold the button and speak, then try again.');
+      }
+      return { text: FAKE_TRANSCRIPT, ms: 0 };
+    },
     async schedule() {
       return { jobs: await jobs.list() };
     },

@@ -6,7 +6,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Analyst } from '../packages/ai/src/analyst/analyze.js';
 import { createLlm, type LlmProviderKind } from '../packages/ai/src/llm/index.js';
-import { EXPECTED, type ExpectedFixture, PAYEE_BOOK, perfectAnswer, sourceOf } from '../packages/ai/test/fixtures.js';
+import { analysisReplies, EXPECTED, type ExpectedFixture, PAYEE_BOOK, sourceOf } from '../packages/ai/test/fixtures.js';
 import { CONFIG, historyOf } from '../packages/ai/test/helpers.js';
 import type { AnalysisReport, AppEvent, LlmProvider } from '../packages/core/src/index.js';
 import { MockLlm, MockWallet } from '../packages/core/src/mocks/index.js';
@@ -31,10 +31,7 @@ const BLOCK_WORDS =
 function llmFor(f: ExpectedFixture, shared: LlmProvider | undefined): LlmProvider {
   if (shared) return shared;
   return new MockLlm({
-    replies: [
-      { json: perfectAnswer(f) },
-      { json: { summary: `${f.issuer} asks for ${f.total} ${f.currency}.`, questionsForUser: [] } },
-    ],
+    replies: analysisReplies(f, { summary: `${f.issuer} asks for ${f.total} ${f.currency}.`, questionsForUser: [] }),
   });
 }
 
@@ -50,7 +47,7 @@ function fieldScores(f: ExpectedFixture, r: AnalysisReport): Record<Field, boole
     total: e.total !== undefined && Number(e.total) === Number(f.total),
     currency: (e.currency ?? '').toUpperCase() === f.currency,
     method: e.payment.method === f.paymentMethod,
-    rgbInvoice: e.payment.rgbInvoice === f.rgbInvoice,
+    rgbInvoice: (e.payment.rgbInvoice ?? '') === f.rgbInvoice,
   };
 }
 
