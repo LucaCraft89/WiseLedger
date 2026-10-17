@@ -23,13 +23,13 @@
       "issuer": "STUDIO GRAFICO LUNA S.N.C.",
       "vatId": "IT09876543210",
       "invoiceNumber": "117/2026",
-      "total": "60.00",
+      "total": "62.37",
       "currency": "EUR",
       "paymentMethod": "rgb",
-      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/60000000/1900000000",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/62370000/1900000000",
       "verdict": "review",
       "flags": ["R3_AMOUNT"],
-      "lineAmounts": ["40.00", "20.00"]
+      "lineAmounts": ["42.37", "20.00"]
     },
     {
       "id": "scam-bank-change",
