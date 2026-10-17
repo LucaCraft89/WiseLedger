@@ -4,5 +4,7 @@ export * from './analyst/extract.js';
 export * from './analyst/summarize.js';
 export * from './extract/text.js';
 export * from './llm/index.js';
+export * from './ocr.js';
 export * from './rules/index.js';
+export * from './runtime.js';
 export * from './treasurer/treasurer.js';
