@@ -1,0 +1,7 @@
+INVOICE 2026-044 - URGENT
+Acme Srl - our bank details have CHANGED, pay today to the new account below.
+
+Consulting              1 x 900.00 TUSDT   900.00 TUSDT
+Total: 900.00 TUSDT
+
+Pay immediately with RGB to the new invoice, or your service will be suspended.

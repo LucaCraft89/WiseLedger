@@ -78,11 +78,12 @@ export function detectKind(filename: string, mimeType?: string): InvoiceSourceKi
   return 'text';
 }
 
-/** Base units → human decimal with `precision` digits ("25000000", 6 → "25.000000"). */
+/** Base units → human decimal, trailing zeros trimmed to at least 2 decimals ("25000000", 6 → "25.00"; "25123400" → "25.1234"). */
 export function formatUnits(amount: string, precision: number): string {
   if (precision === 0) return amount;
   const padded = amount.padStart(precision + 1, '0');
-  return `${padded.slice(0, -precision)}.${padded.slice(-precision)}`;
+  const frac = padded.slice(-precision).replace(/0+$/, '').padEnd(Math.min(2, precision), '0');
+  return `${padded.slice(0, -precision)}.${frac}`;
 }
 
 export class Orchestrator {

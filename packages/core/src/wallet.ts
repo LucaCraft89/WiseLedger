@@ -176,8 +176,14 @@ export class TransferFailed extends WalletError {
 }
 /** The send may or may not have gone out: sync and check the transfer state, never retry blindly. */
 export class SubmitTimeout extends WalletError {
-  constructor(message = 'The payment was submitted but no answer came back in time. Checking its state.') {
+  /** Set when the post-timeout sync found the transfer the send created (it may still settle). */
+  readonly transferId: string | undefined;
+  constructor(
+    message = 'The payment was submitted but no answer came back in time. Checking its state.',
+    transferId?: string,
+  ) {
     super('SubmitTimeout', message);
+    this.transferId = transferId;
   }
 }
 
