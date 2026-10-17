@@ -27,6 +27,7 @@ import {
   type WalletPort,
 } from 'core';
 import type { FastifyBaseLogger } from 'fastify';
+import { RETRY_SAFE } from 'wallet';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 
 /** Error with an HTTP status and a stable code; message is plain language for the user. */
@@ -354,7 +355,16 @@ export class Orchestrator {
         'This invoice has no RGB payment we can make. Check it yourself, then reject it or ask the supplier for an RGB invoice.',
       );
     }
-    if (inv.state !== 'AWAITING_CONFIRMATION' || !report || !inv.plan) {
+    // Retry after a failure: only when nothing can have been sent (wallet RETRY_SAFE codes).
+    const retry = inv.state === 'FAILED';
+    if (retry && !RETRY_SAFE.has(inv.result?.error?.code ?? '')) {
+      throw new ApiFailure(
+        409,
+        'RETRY_NOT_SAFE',
+        'This payment may already have left the wallet, so it cannot be retried. Check the transfer list first.',
+      );
+    }
+    if ((!retry && inv.state !== 'AWAITING_CONFIRMATION') || !report || !inv.plan) {
       throw new ApiFailure(409, 'INVALID_TRANSITION', `This invoice cannot be confirmed now (state ${inv.state}).`);
     }
     if (report.verdict === 'review' && req.override !== true) {

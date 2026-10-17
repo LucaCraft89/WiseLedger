@@ -41,6 +41,22 @@ export const RELEASE_ON_FAILURE: ReadonlySet<string> = new Set([
   'PolicyDenied',
 ]);
 
+/**
+ * Error codes after which the user may confirm the same plan again: the wallet failures above, plus every guard
+ * refusal except already_executed (the guard refused before anything was sent).
+ */
+export const RETRY_SAFE: ReadonlySet<string> = new Set([
+  ...RELEASE_ON_FAILURE,
+  'unknown_plan',
+  'not_confirmed',
+  'hash_mismatch',
+  'over_cap',
+  'asset_not_allowed',
+  'insufficient_funds',
+  'invoice_expired',
+  'policy_denied',
+]);
+
 const EXECUTABLE: ReadonlySet<InvoiceState> = new Set(['CONFIRMED', 'EXECUTING']);
 
 export class WalletGuard implements PaymentGuard {

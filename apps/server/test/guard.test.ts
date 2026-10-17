@@ -212,6 +212,34 @@ describe('SubmitTimeout', () => {
     wallet.listTransfers = async () => [failed as never];
     expect((await orch.settleFromTransfers()).failed).toEqual([inv.id]);
     expect(store.get(inv.id)?.state).toBe('FAILED');
+    await expect(orch.confirm(inv.id, { planId: store.get(inv.id)?.plan?.planId as string })).rejects.toMatchObject({
+      code: 'RETRY_NOT_SAFE',
+    });
+    store.close();
+  });
+
+  it('after a failure where nothing was sent (insufficient funds) the same plan can be confirmed again', async () => {
+    const store = new InvoiceStore(':memory:');
+    const wallet = new MockWallet({ stepMs: 0, balance: '1000' });
+    await wallet.init();
+    const guard = new LiveGuard({ store: new SqliteGuardStore(store), wallet, config: loadConfig({}) });
+    const treasurer = new GuardedMockTreasurer(new MockTreasurer(wallet, { follow: false }), guard);
+    const orch = new Orchestrator({
+      store,
+      analyzer: new MockAnalyzer({ stageDelayMs: 0 }),
+      treasurer,
+      wallet,
+      uploadDir: dir,
+    });
+    const inv = await orch.createInvoice({ filename: 'ok.txt', data: Buffer.from('Invoice') });
+    await orch.idle();
+    const planId = store.get(inv.id)?.plan?.planId as string;
+    await orch.confirm(inv.id, { planId });
+    await orch.idle();
+    expect(store.get(inv.id)?.state).toBe('FAILED');
+    expect(store.get(inv.id)?.result?.error?.code).toBe('insufficient_funds');
+    await expect(orch.confirm(inv.id, { planId })).resolves.toMatchObject({ state: 'EXECUTING' });
+    await orch.idle();
     store.close();
   });
 });
