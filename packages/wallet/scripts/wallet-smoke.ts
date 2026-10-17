@@ -2,7 +2,7 @@
 // With --pay [amount]: payee creates a blind invoice, payer pays TUSDT (explicit feeRate), both refresh until
 // Settled (or --timeout seconds, default 600). Prints transfer ID, txid and explorer link. No retry after a timeout.
 import { SubmitTimeout } from 'core';
-import { log, openWallet, readAssetId, sleep, tokens } from './common.js';
+import { fundRegtest, log, mine, openWallet, readAssetId, sleep, tokens } from './common.js';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const payIdx = args.indexOf('--pay');
@@ -12,6 +12,11 @@ const timeoutSec = tIdx >= 0 ? Number(args[tIdx + 1]) : 600;
 
 const payer = await openWallet('payer');
 const payee = await openWallet('payee');
+if (args.includes('--fund-regtest')) {
+  fundRegtest(await payer.receiveAddress(), 1);
+  fundRegtest(await payee.receiveAddress(), 0.1);
+  log('both', 'funded from the local regtest miner');
+}
 await Promise.all([payer.sync(), payee.sync()]);
 for (const [role, w] of [['payer', payer], ['payee', payee]] as const) {
   const b = w.btcBalance();
@@ -23,7 +28,8 @@ for (const [role, w] of [['payer', payer], ['payee', payee]] as const) {
 if (payIdx >= 0) {
   const assetId = readAssetId();
   if (!assetId) throw new Error('No TUSDT asset ID: run `pnpm -F wallet issue-asset` first (or set TUSDT_ASSET_ID).');
-  const explorer = process.env.RGB_EXPLORER_URL || 'https://mutinynet.com';
+  const explorer =
+    process.env.RGB_EXPLORER_URL || (process.env.RGB_NETWORK === 'regtest' ? 'regtest' : 'https://mutinynet.com');
   await payee.createUtxosIfNeeded();
   const inv = await payee.createReceiveInvoice({ amount, expirySec: 3600 });
   log('payee', `invoice for ${tokens(amount)} TUSDT: ${inv.rgbInvoice.slice(0, 48)}…`);
@@ -41,16 +47,18 @@ if (payIdx >= 0) {
   const deadline = Date.now() + timeoutSec * 1000;
   let done = false;
   while (!done && Date.now() < deadline) {
-    await Promise.all([payee.sync(), payer.sync()]);
+    await payee.sync();
+    await payer.sync();
+    mine(1);
     const out = (await payer.listTransfers(assetId)).filter((t) => t.direction === 'outgoing');
-    const mine = transferId ? out.find((t) => t.transferId === transferId) : out.at(-1);
+    const ours = transferId ? out.find((t) => t.transferId === transferId) : out.at(-1);
     const inc = (await payee.listTransfers()).filter((t) => t.direction === 'incoming').at(-1);
-    log('both', `payer ${mine?.status ?? '?'} · payee ${inc?.status ?? '?'}`);
-    if (mine?.status === 'Failed') throw new Error(`Transfer ${mine.transferId} failed.`);
-    if (mine?.status === 'Settled' && inc?.status === 'Settled') {
+    log('both', `payer ${ours?.status ?? '?'} · payee ${inc?.status ?? '?'}`);
+    if (ours?.status === 'Failed') throw new Error(`Transfer ${ours.transferId} failed.`);
+    if (ours?.status === 'Settled' && inc?.status === 'Settled') {
       done = true;
-      log('payer', `SETTLED transfer ${mine.transferId} txid ${mine.txid} → ${explorer}/tx/${mine.txid}`);
-    } else await sleep(10_000);
+      log('payer', `SETTLED transfer ${ours.transferId} txid ${ours.txid} → ${explorer}/tx/${ours.txid}`);
+    } else await sleep(process.env.RGB_NETWORK === 'regtest' ? 2_000 : 10_000);
   }
   if (!done) {
     console.error(`Not settled within ${timeoutSec}s. Run again without --pay to inspect; do not resend.`);

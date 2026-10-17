@@ -1,7 +1,7 @@
 // Issues the test asset TUSDT (NIA, precision 6, 1000 tokens) on the payer wallet. Idempotent: if a TUSDT
 // issued by this wallet exists, it prints that asset ID. Writes .data/tusdt.json (git-ignored).
 import fs from 'node:fs';
-import { assetFile, log, openWallet, tokens } from './common.js';
+import { assetFile, log, mine, openWallet, tokens } from './common.js';
 
 const TICKER = 'TUSDT';
 const w = await openWallet('payer');
@@ -15,6 +15,8 @@ if (existing) {
   log('payer', `BTC vanilla spendable ${btc.vanilla.spendable} sats · colored ${btc.colored.spendable} sats`);
   const { created } = await w.createUtxosIfNeeded();
   if (created) log('payer', `created ${created} colorable UTXOs`);
+  mine(1);
+  await w.sync();
   asset = await w.issueAssetNia({
     ticker: TICKER,
     name: 'Test USDT (hackathon, no value)',
