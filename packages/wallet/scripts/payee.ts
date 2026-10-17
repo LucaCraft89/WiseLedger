@@ -60,7 +60,10 @@ switch (cmd) {
       mine(1);
       await w.sync().catch(() => undefined);
       const t = await w.getTransfer(transferId);
-      if (t && t.status !== last) log('payee', `transfer ${transferId}: ${(last = t.status)}`);
+      if (t && t.status !== last) {
+        last = t.status;
+        log('payee', `transfer ${transferId}: ${last}`);
+      }
       if (t?.status === 'Settled' || t?.status === 'Failed') break;
       await sleep(10_000);
     }
