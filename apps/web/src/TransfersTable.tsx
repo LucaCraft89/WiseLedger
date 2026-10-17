@@ -5,6 +5,7 @@ import { shortDate } from './lib/format.js';
 import {
   addLabel,
   DIRECTION_WORDS,
+  isUnpaidRequest,
   LABEL_MAX_LEN,
   labelEditReducer,
   removeLabel,
@@ -62,9 +63,9 @@ export function TransfersTable({
               <td style={{ ...cell, whiteSpace: 'nowrap' }} title={new Date(t.createdAt).toLocaleString()}>
                 {shortDate(t.createdAt)}
               </td>
-              <td style={cell}>{DIRECTION_WORDS[t.direction]}</td>
+              <td style={cell}>{isUnpaidRequest(t) ? 'Payment request' : DIRECTION_WORDS[t.direction]}</td>
               <td style={{ ...cell, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {t.direction === 'out' ? '− ' : '+ '}
+                {isUnpaidRequest(t) ? '' : t.direction === 'out' ? '− ' : '+ '}
                 {amountText(t, assets)}
               </td>
               <td style={cell}>
@@ -76,7 +77,7 @@ export function TransfersTable({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {TRANSFER_STATUS_WORDS[t.status]}
+                  {isUnpaidRequest(t) ? 'Not paid yet' : TRANSFER_STATUS_WORDS[t.status]}
                 </span>
               </td>
               <td style={cell}>

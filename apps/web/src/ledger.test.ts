@@ -237,6 +237,20 @@ describe('fake wallet tools', () => {
   });
 });
 
+describe('unpaid payment requests', () => {
+  it('are not recent transfers (they live under Get paid)', async () => {
+    const { recentTransfers, isUnpaidRequest } = await import('./lib/ledger.js');
+    const base = { assetId: 'a', labels: [], createdAt: '2026-10-17T10:00:00Z' };
+    const list = [
+      { ...base, transferId: '1', amount: '1', direction: 'in' as const, status: 'WaitingCounterparty' as const },
+      { ...base, transferId: '2', amount: '1', direction: 'in' as const, status: 'Settled' as const },
+      { ...base, transferId: '3', amount: '1', direction: 'out' as const, status: 'WaitingCounterparty' as const },
+    ];
+    expect(recentTransfers(list).map((t) => t.transferId)).toEqual(['2', '3']);
+    expect(isUnpaidRequest(list[0] as (typeof list)[number])).toBe(true);
+  });
+});
+
 describe('table dates', () => {
   it('short: day, month and 24 h time; the year only when it differs', async () => {
     const { shortDate } = await import('./lib/format.js');

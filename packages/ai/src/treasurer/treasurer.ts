@@ -540,10 +540,46 @@ export class Treasurer implements TreasurerAgent {
         ok: out.ok,
         ...(out.ok ? { result: out.result } : { error: out.error ?? 'failed' }),
       });
+      // A payment request is answered by code: the tool result holds base units, which small models misread
+      // ("500000000" read as 500 million TUSDT) and then contradict the request they just made.
+      if (call.name === 'create_receive_invoice') {
+        const text = await this.receiveReply(message, out);
+        stream?.onReset?.();
+        stream?.onToken(text);
+        return { text, toolCalls: records };
+      }
       // Read tools answer in one short call without tool schemas (much faster than another tool turn).
       return { text: await this.phrase(message, call.name, out, stream), toolCalls: records };
     }
     return { text: 'Done.', toolCalls: records };
+  }
+
+  /** "Done: a payment request for 500.00 TUSDT, valid until 20:57 (62 minutes). …" — built by code, never by the model. */
+  private async receiveReply(message: string, out: { ok: boolean; result?: unknown; error?: string }): Promise<string> {
+    if (!out.ok) return `I could not create the payment request: ${out.error ?? 'unknown error'}`;
+    const inv = out.result as { amount?: string; assetId?: string; expiresAt?: string };
+    const asset = (await this.deps.wallet.listAssets().catch(() => [])).find((a) => a.assetId === inv.assetId);
+    const what =
+      inv.amount && asset
+        ? `${formatAssetAmount(inv.amount, asset.precision)} ${asset.ticker}`
+        : inv.amount
+          ? `${inv.amount} smallest units`
+          : asset
+            ? `any amount of ${asset.ticker}`
+            : 'any amount';
+    const now = (this.deps.now ?? (() => new Date()))().getTime();
+    const until = inv.expiresAt ? Date.parse(inv.expiresAt) : Number.NaN;
+    const valid = Number.isNaN(until)
+      ? ''
+      : `, valid until ${new Date(until).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          ...(this.deps.timeZone ? { timeZone: this.deps.timeZone } : {}),
+        })} (${Math.max(1, Math.round((until - now) / 60_000))} minutes)`;
+    const address = /\b(tb1|bc1|bcrt1)[a-z0-9]{20,}/i.test(message)
+      ? ' A payment request needs no Bitcoin address: whoever pays uses this request.'
+      : '';
+    return `Done: a payment request for ${what}${valid}. Copy it below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
   }
 
   /** One sentence in the user's language from the tool result (numbers already formatted by code). */
