@@ -2,6 +2,7 @@ import { fiscalUrl } from '../lib/ledger.js';
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
+  type BtcTransactionsResponse,
   type ChatRequest,
   type ChatResponse,
   type ChatStreamHooks,
@@ -57,6 +58,8 @@ export interface ApiClient {
   receives(): Promise<ReceivesListResponse>;
   /** Lightning node and channels. A server without the route (404) counts as Lightning off. */
   lightning(): Promise<LightningStatusResponse>;
+  /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
+  btcTransactions(): Promise<BtcTransactionsResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** Replace the labels of one transfer. */
@@ -204,6 +207,7 @@ export function createHttpClient(base = ''): ApiClient {
         throw err;
       }
     },
+    btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),

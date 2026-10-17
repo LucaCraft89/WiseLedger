@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import {
+  type BtcTransactionDto,
   formatAssetAmount,
   type LightningStatusResponse,
   type ReceiveRequestDto,
@@ -82,12 +83,10 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
                 {a.balance.future !== a.balance.settled && (
                   <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
                 )}
-                {w.btcBalanceSats !== undefined && (
-                  <> · {Number(w.btcBalanceSats).toLocaleString()} sats for network fees</>
-                )}
               </div>
             </div>
           ))}
+          {w.btcBalanceSats !== undefined && <BitcoinBalance sats={w.btcBalanceSats} />}
           {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
           <RecentTransfers api={api} assets={w.assets} />
         </>
@@ -108,10 +107,10 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
             </div>
           ))}
           {w.btcBalanceSats !== undefined && (
-            <p>
-              Bitcoin for network fees: <strong>{formatAssetAmount(w.btcBalanceSats, 8)} BTC</strong> (
-              {Number(w.btcBalanceSats).toLocaleString()} sats)
-            </p>
+            <>
+              <BitcoinBalance sats={w.btcBalanceSats} />
+              <BtcTransactions api={api} />
+            </>
           )}
           {w.address && (
             <>
@@ -270,6 +269,69 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+/** Below this many sats a token payment may fail: the wallet cannot pay the network fee. */
+export const LOW_SATS = 5_000;
+
+const BTC_PURPOSE_WORDS: Record<BtcTransactionDto['purpose'], string> = {
+  token_payment: 'Network fee for a token payment',
+  utxo_setup: 'Preparing the wallet to hold tokens',
+  drain: 'Wallet emptied to another address',
+  bitcoin: 'Test bitcoin',
+};
+
+function BitcoinBalance({ sats }: { sats: string }) {
+  const low = Number(sats) < LOW_SATS;
+  return (
+    <div style={box} data-testid="sats-balance">
+      <div style={{ fontSize: '1.3em' }}>
+        <strong>{Number(sats).toLocaleString()}</strong> sats{' '}
+        <small style={{ color: 'var(--wl-c-muted)' }}>
+          Bitcoin for network fees ({formatAssetAmount(sats, 8)} BTC)
+        </small>
+      </div>
+      <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+        Sats are not your tokens. Every token payment needs a few sats to pay the network, so keep some in the wallet.
+      </div>
+      {low && (
+        <p role="alert" style={{ color: 'var(--wl-c-danger, #b00020)', marginBottom: 0 }}>
+          Low on sats: a token payment may fail. Send test bitcoin to the address below.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BtcTransactions({ api }: { api: ApiClient }) {
+  const load = useCallback(async () => (await api.btcTransactions()).transactions.slice(0, 10), [api]);
+  const { data, error, loading, reload } = useLoad(load);
+  return (
+    <>
+      <h3>Bitcoin (sats) activity</h3>
+      {error ? <ErrorBox error={error} retry={reload} /> : null}
+      {loading && !data ? <Loading text="Loading Bitcoin activity…" /> : null}
+      {data && data.length === 0 && <Empty text="No Bitcoin activity yet." />}
+      {data?.map((t) => (
+        <div key={t.txid} style={{ ...box, marginBottom: 8 }} data-testid="btc-row">
+          <strong>
+            {t.direction === 'received' ? '+' : t.direction === 'sent' ? '−' : ''}
+            {Number(t.amountSats).toLocaleString()} sats
+          </strong>
+          {Number(t.feeSats) > 0 && <> · fee {Number(t.feeSats).toLocaleString()} sats</>}
+          {' · '}
+          {t.direction === 'received' ? 'Received' : BTC_PURPOSE_WORDS[t.purpose]}
+          <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+            {t.confirmed && t.createdAt ? formatDate(t.createdAt) : 'Waiting for a block'}
+            {' · '}
+            <a href={explorerTxUrl(t.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
+              View on the block explorer
+            </a>
+          </div>
+        </div>
+      ))}
     </>
   );
 }
