@@ -1,7 +1,7 @@
 // Wires config → providers (LLM, wallet, sync loop) → orchestrator → Fastify app. main.ts and the demo script
 // both start the server from here.
 import multipart from '@fastify/multipart';
-import { Scheduler } from 'ai';
+import { createTranscriber, Scheduler } from 'ai';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { walletConfigFromEnv } from 'wallet';
 import { loadConfig, type ServerConfig } from './config.js';
@@ -83,6 +83,8 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     config.walletBackend === 'mock'
       ? undefined
       : walletConfigFromEnv({ ...process.env, WALLET_BACKEND: config.walletBackend, RGB_NETWORK: config.rgbNetwork });
+  // Loaded on the first recording (Parakeet, ~0.6B): the chat model stays the only one loaded until then.
+  const transcriber = createTranscriber({ provider: config.llmProvider });
   const selfCheck = new SelfCheck({
     wallet: () => (providers.holder.state === 'ready' ? (providers.holder.current ?? undefined) : undefined),
     network: config.walletBackend === 'mock' ? 'mock' : config.rgbNetwork,
@@ -135,6 +137,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     labels,
     jobs,
     receives,
+    transcriber,
     fiscal: fiscalService,
     llmInfo: providers.llmInfo,
     holder: providers.holder,
@@ -160,6 +163,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   app.addHook('onClose', async () => {
     scheduler.stop();
     selfCheck.stop();
+    await transcriber.unload().catch(() => undefined);
     if (mockSettle) clearInterval(mockSettle);
     if (!(await orchestrator.idle(10_000))) {
       app.log.warn('Stopping with a payment still in progress: it is not sent again; the next start checks its state.');
