@@ -78,8 +78,16 @@ export const TRANSFER_STATUS_WORDS: Record<TransferDto['status'], string> = {
 };
 
 /** Newest first, at most `limit`. */
+/** An unpaid payment request: rgb-lib lists it as an incoming transfer still waiting for the payer. */
+export const isUnpaidRequest = (t: Pick<TransferDto, 'direction' | 'status'>): boolean =>
+  t.direction === 'in' && t.status === 'WaitingCounterparty';
+
+/** Newest first, money that moved only (unpaid payment requests live under Wallet → Get paid). */
 export function recentTransfers(list: readonly TransferDto[], limit = 10): TransferDto[] {
-  return [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, limit);
+  return [...list]
+    .filter((t) => !isUnpaidRequest(t))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, limit);
 }
 
 // ---------- scheduled payments ----------
