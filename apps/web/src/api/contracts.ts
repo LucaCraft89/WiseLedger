@@ -1,3 +1,3 @@
 // Single import point for the shared contracts.
 export * from 'core';
-export { MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
+export { MOCK_FAIL_AMOUNT, MOCK_TIMEOUT_AMOUNT, MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
