@@ -78,11 +78,25 @@ interface SdkTransfer {
   createdAt: number;
   updatedAt: number;
   status: number | string;
+  /** Older rgb-sdk shape; 1.0.3 reports requestedAssignment + assignments instead. */
   amount?: number;
+  requestedAssignment?: Record<string, unknown> | null;
+  assignments?: Record<string, unknown>[];
   kind: number | string;
   txid: string | null;
-  recipientId?: string;
-  expiration?: number;
+  recipientId?: string | null;
+  invoiceString?: string | null;
+  expiration?: number | null;
+}
+
+/** Sent: the requested amount (assignments are our change). Issued/received: what was assigned to us. */
+function transferAmount(t: SdkTransfer): string {
+  if (typeof t.amount === 'number') return str(t.amount);
+  const fungible = (a: Record<string, unknown> | null | undefined) =>
+    typeof a?.Fungible === 'number' ? a.Fungible : typeof a?.fungible === 'number' ? a.fungible : 0;
+  if (toDirection(t.kind) === 'outgoing') return str(fungible(t.requestedAssignment));
+  const assigned = (t.assignments ?? []).reduce((sum, a) => sum + fungible(a), 0);
+  return str(assigned || fungible(t.requestedAssignment));
 }
 
 /** The WDK account surface we use (WalletAccountRgb from wdk-wallet-rgb). */
@@ -147,7 +161,7 @@ export function mapWalletError(e: unknown): WalletError {
   if (/InsufficientSpendableAssets|InsufficientTotalAssets|InsufficientAssignments/i.test(msg))
     return new InsufficientFunds();
   if (/InsufficientBitcoins|InsufficientAllocationSlots|NoAvailableUtxos|InsufficientFunds/i.test(msg))
-    return new NoUtxo('The wallet needs more bitcoin or free UTXOs to make this RGB payment.');
+    return new NoUtxo('The wallet needs more bitcoin or a free UTXO for this RGB operation.');
   if (/AssetNotFound|UnknownRgbSchema/i.test(msg)) return new UnknownAsset(/rgb:[\w-]+/.exec(msg)?.[0] ?? 'requested');
   if (/InvoiceExpired|expired/i.test(msg)) return new InvoiceExpired();
   if (/InvalidInvoice|InvalidRecipient|invalid.*invoice/i.test(msg)) return new InvalidInvoice();
@@ -345,10 +359,11 @@ export class WdkRgbWallet implements WalletPort {
         out.push({
           transferId: String(t.batchTransferIdx),
           assetId: id,
-          amount: str(t.amount),
+          amount: transferAmount(t),
           direction: toDirection(t.kind),
           status: toStatus(t.status),
           ...(t.txid ? { txid: t.txid } : {}),
+          ...(t.invoiceString ? { rgbInvoice: t.invoiceString } : {}),
           createdAt: iso(t.createdAt),
           updatedAt: iso(t.updatedAt),
         });

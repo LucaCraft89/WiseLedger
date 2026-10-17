@@ -1,7 +1,7 @@
 // Smoke test on the real chain. Without flags: both wallets' BTC, assets and UTXOs.
 // With --pay [amount]: payee creates a blind invoice, payer pays TUSDT (explicit feeRate), both refresh until
 // Settled (or --timeout seconds, default 600). Prints transfer ID, txid and explorer link. No retry after a timeout.
-import { SubmitTimeout } from 'core';
+import { NoUtxo, SubmitTimeout } from 'core';
 import { fundRegtest, log, mine, openWallet, readAssetId, sleep, tokens } from './common.js';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
@@ -31,6 +31,22 @@ for (const [role, w] of [
       role,
       `${a.ticker} ${a.assetId} settled ${tokens(a.balance.settled, a.precision)} spendable ${tokens(a.balance.spendable, a.precision)}`,
     );
+}
+
+if (payIdx < 0) {
+  // Receive side check: blind invoice without asset (the payer names it), then decode it back.
+  try {
+    const inv = await payer.createReceiveInvoice({ amount: '5000000', expirySec: 600 });
+    const d = await payer.decodeInvoice(inv.rgbInvoice);
+    log('payer', `receive invoice ${inv.rgbInvoice.slice(0, 40)}… expires ${inv.expiresAt}`);
+    log(
+      'payer',
+      `decoded: network ${d.network} · amount ${d.amount ?? 'any'} · asset ${d.assetId ?? 'payer chooses'} · recipient ${d.recipientId.slice(0, 24)}…`,
+    );
+  } catch (e) {
+    if (!(e instanceof NoUtxo)) throw e;
+    log('payer', 'cannot create a receive invoice yet: no free UTXO. Fund the funding address above, then run again.');
+  }
 }
 
 if (payIdx >= 0) {
