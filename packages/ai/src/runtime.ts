@@ -3,7 +3,7 @@ import type { HistoryPort, LlmInfo, LlmProvider, PaymentGuard, WalletPort } from
 import { Analyst } from './analyst/analyze.js';
 import { createLlm, type LlmProviderKind } from './llm/index.js';
 import type { RuleConfig } from './rules/types.js';
-import { Treasurer } from './treasurer/treasurer.js';
+import { Treasurer, type TreasurerWallet } from './treasurer/treasurer.js';
 
 export interface AiRuntimeOptions {
   /** qvac | openai | mock (default from LLM_PROVIDER, else mock). */
@@ -27,7 +27,7 @@ export interface AiRuntime {
     history: HistoryPort;
     config: RuleConfig;
   }): Analyst;
-  treasurer(deps: { wallet: Pick<WalletPort, 'pay' | 'getTransfer'>; guard: PaymentGuard }): Treasurer;
+  treasurer(deps: { wallet: TreasurerWallet; guard: PaymentGuard }): Treasurer;
   close(): Promise<void>;
 }
 

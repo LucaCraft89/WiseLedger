@@ -8,7 +8,7 @@ import {
   WalletResponse,
 } from './api/contracts.js';
 import { createFakeClient } from './api/fake.js';
-import { confirmGate, dialogSentence, paymentProgress } from './lib/confirm.js';
+import { confirmGate, dialogSentence, gateHint, paymentProgress } from './lib/confirm.js';
 import {
   buildFullTimeline,
   buildTimeline,
@@ -20,6 +20,17 @@ import {
   VERDICT_LABELS,
 } from './lib/format.js';
 import { LIVE_TEXT_CAP, liveAiView, mergeEvents, toBaseUnits, toolCallLine } from './lib/live.js';
+import {
+  canRetry,
+  ERROR_WORDS,
+  errorWords,
+  explorerTxUrl,
+  FLAG_TITLES,
+  filterInvoices,
+  flagTitle,
+  SEVERITY_ICON_WORD,
+  shortEvidence,
+} from './lib/payment.js';
 
 const fast = () => createFakeClient({ stageDelayMs: 0, transferStepMs: 0, pollMs: 1 });
 
@@ -336,5 +347,149 @@ describe('receive form', () => {
     expect(expires).toBeGreaterThan(before + 29 * 60_000);
     expect(expires).toBeLessThan(before + 31 * 60_000);
     await expect(api.receive({ assetId: 'rgb:nope' })).rejects.toThrow('does not hold');
+  });
+});
+
+describe('flag cards', () => {
+  it('has a plain title for every rule code', () => {
+    const codes = [
+      'R1_RGB_INVOICE',
+      'R2_ASSET',
+      'R3_AMOUNT',
+      'R4_DUPLICATE',
+      'R5_NEW_PAYEE',
+      'R6_PRESSURE',
+      'R7_INJECTION',
+      'R8_CURRENCY',
+      'R9_MISSING_FIELDS',
+      'R10_DATES',
+      'AI_UNAVAILABLE',
+    ];
+    for (const c of codes) expect(FLAG_TITLES[c], c).toBeTruthy();
+    expect(flagTitle('R4_DUPLICATE')).toBe('Already received');
+    expect(flagTitle('R7_INJECTION')).toBe('Hidden orders to the AI');
+    expect(flagTitle('R3_AMOUNT')).toBe('Amount problem');
+    expect(flagTitle('R1_RGB_INVOICE')).toBe('Payment request problem');
+    expect(flagTitle('AI_UNAVAILABLE')).toBe('The AI could not read this invoice');
+    expect(flagTitle('R99_NEW')).toBe('Something to check');
+    expect(SEVERITY_ICON_WORD).toEqual({ block: 'Stop', warn: 'Check', info: 'Info' });
+  });
+
+  it('cuts evidence to one line of about 80 characters', () => {
+    expect(shortEvidence('our bank\n details  changed')).toBe('our bank details changed');
+    const long = shortEvidence('x'.repeat(200));
+    expect(long.length).toBe(80);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('states the override rule next to the button', () => {
+    expect(gateHint('block', true)).toMatch(/cannot pay/);
+    expect(gateHint('review', false)).toMatch(/Tick the box/);
+    expect(gateHint('review', true)).toMatch(/can pay now/);
+  });
+});
+
+describe('failure card', () => {
+  it('allows retry only when nothing can have been sent', () => {
+    expect(canRetry('NoUtxo')).toBe(true);
+    expect(canRetry('TREASURER_PARSE')).toBe(true);
+    expect(canRetry('TransferFailed')).toBe(false);
+    expect(canRetry('InsufficientFunds')).toBe(true);
+    expect(canRetry('InsufficientFunds', 'tr_1')).toBe(false);
+    expect(canRetry('NoUtxo', 'tr_1')).toBe(false);
+    expect(canRetry('SubmitTimeout')).toBe(false);
+    expect(canRetry('already_executed')).toBe(false);
+    expect(canRetry('InvoiceExpired')).toBe(true);
+    expect(canRetry('PolicyDenied')).toBe(true);
+    for (const code of [
+      'unknown_plan',
+      'not_confirmed',
+      'hash_mismatch',
+      'over_cap',
+      'asset_not_allowed',
+      'insufficient_funds',
+      'invoice_expired',
+      'policy_denied',
+      'FAKE_ERROR',
+    ])
+      expect(canRetry(code), code).toBe(false);
+    expect(canRetry(undefined)).toBe(false);
+  });
+
+  it('maps every typed error to plain words', () => {
+    expect(errorWords('SubmitTimeout')).toMatch(/do NOT pay again/);
+    expect(errorWords('InsufficientFunds')).toBe('Not enough funds in the wallet.');
+    expect(errorWords('TREASURER_PARSE')).toBe('The AI could not start the payment. Nothing was sent.');
+    expect(errorWords('weird', 'Server text')).toBe('Server text');
+    expect(errorWords(undefined)).toBe('The payment failed.');
+    for (const [code, words] of Object.entries(ERROR_WORDS)) expect(words, code).not.toMatch(/_/);
+  });
+
+  it('fake: a *fail* invoice ends in TransferFailed, which is not retried (it may have been signed)', async () => {
+    const api = fast();
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'fail.txt' });
+    const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
+    if (!d.plan) throw new Error('no plan');
+    await api.confirm(invoiceId, { planId: d.plan.planId });
+    const f = await waitForState(api, invoiceId, 'FAILED');
+    const p = paymentProgress(f.invoice.state, f.events, f.execution);
+    expect(p.failed).toBe(true);
+    expect(p.errorCode).toBe('TransferFailed');
+    expect(canRetry(p.errorCode, p.transferId)).toBe(false);
+  });
+
+  it('fake: a *timeout* invoice fails with SubmitTimeout and no retry', async () => {
+    const api = fast();
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'timeout.txt' });
+    const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
+    if (!d.plan) throw new Error('no plan');
+    await api.confirm(invoiceId, { planId: d.plan.planId });
+    const f = await waitForState(api, invoiceId, 'FAILED');
+    const p = paymentProgress(f.invoice.state, f.events, f.execution);
+    expect(p.errorCode).toBe('SubmitTimeout');
+    expect(canRetry(p.errorCode, p.transferId)).toBe(false);
+  });
+});
+
+describe('explorer link', () => {
+  it('builds the Mutinynet tx URL by default and trims a trailing slash', () => {
+    expect(explorerTxUrl('abc123')).toBe('https://mutinynet.com/tx/abc123');
+    expect(explorerTxUrl('abc123', 'https://mempool.space/signet/')).toBe('https://mempool.space/signet/tx/abc123');
+  });
+});
+
+describe('history filter', () => {
+  const list = (
+    ['AWAITING_CONFIRMATION', 'PAID', 'SCHEDULED', 'BLOCKED', 'REJECTED', 'FAILED', 'EXECUTING'] as const
+  ).map((state) => ({ state }));
+  it('groups invoices by what the user cares about', () => {
+    expect(filterInvoices(list, 'all')).toHaveLength(7);
+    expect(filterInvoices(list, 'waiting').map((i) => i.state)).toEqual(['AWAITING_CONFIRMATION']);
+    expect(filterInvoices(list, 'paid').map((i) => i.state)).toEqual(['PAID']);
+    expect(filterInvoices(list, 'stopped').map((i) => i.state)).toEqual(['BLOCKED', 'REJECTED']);
+    expect(filterInvoices(list, 'failed').map((i) => i.state)).toEqual(['FAILED']);
+  });
+});
+
+describe('payment stepper', () => {
+  it('marks Submitted done once execute_plan succeeded', () => {
+    const at = new Date().toISOString();
+    const events: AppEvent[] = [
+      {
+        type: 'toolCall',
+        invoiceId: 'i',
+        at,
+        agent: 'treasurer',
+        name: 'execute_plan',
+        args: {},
+        status: 'ok',
+      },
+    ];
+    expect(paymentProgress('EXECUTING', events).steps.map((s) => s.status)).toEqual([
+      'done',
+      'running',
+      'pending',
+      'pending',
+    ]);
   });
 });
