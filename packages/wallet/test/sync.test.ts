@@ -25,6 +25,47 @@ describe('startSyncLoop', () => {
     loop.stop();
   });
 
+  it('syncs fast while busy, slowly when idle; kick() re-arms at the fast pace', async () => {
+    vi.useFakeTimers();
+    let pending = false;
+    const sync = vi.fn(async () => undefined);
+    const loop = startSyncLoop({ sync }, { intervalMs: 1000, idleIntervalMs: 10_000, isBusy: () => pending });
+    await vi.advanceTimersByTimeAsync(1000); // first sync; idle → next in 10 s
+    expect(sync).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(sync).toHaveBeenCalledTimes(1);
+    pending = true; // a payment goes out and the app kicks
+    await loop.kick();
+    expect(sync).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1000); // busy → 1 s, not the old idle timer
+    expect(sync).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sync).toHaveBeenCalledTimes(4);
+    pending = false;
+    await vi.advanceTimersByTimeAsync(1000); // settles; now idle
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sync).toHaveBeenCalledTimes(5);
+    loop.stop();
+  });
+
+  it('a failing isBusy counts as busy (fast)', async () => {
+    vi.useFakeTimers();
+    const sync = vi.fn(async () => undefined);
+    const loop = startSyncLoop(
+      { sync },
+      {
+        intervalMs: 1000,
+        idleIntervalMs: 10_000,
+        isBusy: () => {
+          throw new Error('x');
+        },
+      },
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sync).toHaveBeenCalledTimes(2);
+    loop.stop();
+  });
+
   it('kick() syncs immediately and never overlaps a running sync', async () => {
     let resolve: () => void = () => {};
     const sync = vi.fn(() => new Promise<void>((r) => (resolve = r)));
