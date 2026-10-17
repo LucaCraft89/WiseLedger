@@ -2,10 +2,10 @@ import react from '@vitejs/plugin-react';
 import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-// `/api` goes to A's server. Port from SERVER_PORT (default 8787) — keep in sync with apps/server.
+// `/api` goes to A's server. Port from SERVER_PORT or PORT (apps/server reads PORT, default 8787).
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '../..', '');
-  const serverPort = env.SERVER_PORT ?? '8787';
+  const serverPort = env.SERVER_PORT ?? env.PORT ?? '8787';
   return {
     plugins: [react()],
     server: {
