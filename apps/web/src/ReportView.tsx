@@ -1,6 +1,6 @@
 import type { AnalysisReport } from './api/contracts.js';
 import { FlagList } from './FlagCard.js';
-import { VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_LABELS } from './lib/format.js';
+import { VERDICT_ACCENT, VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_ICON, VERDICT_LABELS } from './lib/format.js';
 
 /** The Analyst's report: verdict banner, flags by severity, plain-language summary, questions. */
 export function ReportView({ report }: { report: AnalysisReport }) {
@@ -8,8 +8,18 @@ export function ReportView({ report }: { report: AnalysisReport }) {
   return (
     <div>
       <h3>What we found</h3>
-      <div style={{ background: VERDICT_COLORS[report.verdict], padding: 12 }}>
-        <strong style={{ fontSize: '1.2em' }}>{VERDICT_LABELS[report.verdict]}</strong>
+      <div
+        style={{
+          background: VERDICT_COLORS[report.verdict],
+          border: `2px solid ${VERDICT_ACCENT[report.verdict]}`,
+          borderRadius: 8,
+          padding: 12,
+        }}
+      >
+        <strong style={{ fontSize: '1.2em' }}>
+          <span aria-hidden="true">{VERDICT_ICON[report.verdict]} </span>
+          {VERDICT_LABELS[report.verdict]}
+        </strong>
         <div>{VERDICT_EXPLAIN[report.verdict]}</div>
       </div>
 
