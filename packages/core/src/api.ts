@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { AnalysisReport, BaseUnits, InvoiceSourceKind, IsoDateTime, LlmProviderName, Verdict } from './analysis.js';
 import { AppEvent } from './events.js';
 import type { AgentReply } from './llm.js';
-import { ExecutionResultSchema, InvoiceStateSchema, type PaymentPlan, PaymentPlanSchema } from './orchestrator.js';
+import {
+  ExecutionResultSchema,
+  InvoiceStateSchema,
+  JobSchema,
+  LabelEntrySchema,
+  type PaymentPlan,
+  PaymentPlanSchema,
+} from './orchestrator.js';
 import { AssetBalanceSchema, TransferStatusSchema } from './wallet.js';
 
 const InvoiceStateDto = InvoiceStateSchema;
@@ -70,6 +77,8 @@ export const ConfirmRequest = z.object({
   planId: z.string().min(1),
   /** Required true when verdict is `review`; ignored (refused) when `block`. */
   override: z.boolean().optional(),
+  /** Schedule instead of paying now (ISO time, from the chat confirmation card). The plan is built with it. */
+  executeAt: IsoDateTime.optional(),
 });
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
 
@@ -196,6 +205,8 @@ export const HealthResponse = z.object({
     model: z.string(),
     state: z.enum(['unloaded', 'loading', 'ready', 'error']),
     onDevice: z.boolean(),
+    /** Time the model took to load, once warm (optional, M3). */
+    warmUpMs: z.number().optional(),
   }),
   wallet: z.object({
     backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
@@ -205,8 +216,72 @@ export const HealthResponse = z.object({
   }),
   /** Plain-language problems found at startup ("No TUSDT yet: run pnpm demo:prepare"). */
   problems: z.array(z.string()),
+  // M3 additions, optional so an older server still parses.
+  /** First-run state of the wallet (see GET /api/onboarding). */
+  onboarding: z.enum(['needs_setup', 'locked', 'ready']).optional(),
+  network: z.enum(['mutinynet', 'regtest', 'mock']).optional(),
+  /** Getting-started hints in plain words (faucet, issue the test asset, regtest mining). */
+  hints: z.array(z.string()).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
+
+// First run (M3). While not `ready`, wallet routes answer 409 WALLET_NOT_READY.
+export const OnboardingState = z.enum(['needs_setup', 'locked', 'ready']);
+export type OnboardingState = z.infer<typeof OnboardingState>;
+
+// GET /api/onboarding
+export const OnboardingStatusResponse = z.object({
+  state: OnboardingState,
+  /** True once the recovery words were shown to the user. */
+  seedShown: z.boolean(),
+  network: z.enum(['mutinynet', 'regtest', 'mock']),
+  walletBackend: z.string(),
+  /** Minimum passphrase length (an empty passphrase means none). */
+  minPassphrase: z.number().int().min(0),
+});
+export type OnboardingStatusResponse = z.infer<typeof OnboardingStatusResponse>;
+
+// POST /api/onboarding/create → 201; the words are returned ONCE (409 ALREADY_SET_UP afterwards).
+export const OnboardingCreateRequest = z.object({ passphrase: z.string().optional() });
+export type OnboardingCreateRequest = z.infer<typeof OnboardingCreateRequest>;
+export const OnboardingCreateResponse = z.object({ mnemonic: z.string(), words: z.array(z.string()) });
+export type OnboardingCreateResponse = z.infer<typeof OnboardingCreateResponse>;
+
+// POST /api/onboarding/seed-confirmed
+export const OnboardingSeedConfirmedRequest = z.object({ confirmed: z.literal(true) });
+export type OnboardingSeedConfirmedRequest = z.infer<typeof OnboardingSeedConfirmedRequest>;
+export const OnboardingOkResponse = z.object({ ok: z.boolean() });
+export type OnboardingOkResponse = z.infer<typeof OnboardingOkResponse>;
+
+// POST /api/onboarding/restore · 400 INVALID_MNEMONIC
+export const OnboardingRestoreRequest = z.object({ mnemonic: z.string().min(1), passphrase: z.string().optional() });
+export type OnboardingRestoreRequest = z.infer<typeof OnboardingRestoreRequest>;
+export const OnboardingRestoreResponse = z.object({ ok: z.boolean(), note: z.string().optional() });
+export type OnboardingRestoreResponse = z.infer<typeof OnboardingRestoreResponse>;
+
+// POST /api/onboarding/unlock · 401 WalletLocked (wrong passphrase) · 429 after 5 tries
+export const OnboardingUnlockRequest = z.object({ passphrase: z.string() });
+export type OnboardingUnlockRequest = z.infer<typeof OnboardingUnlockRequest>;
+
+// GET /api/schedule · POST /api/schedule/:jobId/cancel
+export const ScheduleListResponse = z.object({ jobs: z.array(JobSchema) });
+export type ScheduleListResponse = z.infer<typeof ScheduleListResponse>;
+export const ScheduleCancelResponse = z.object({ ok: z.boolean() });
+export type ScheduleCancelResponse = z.infer<typeof ScheduleCancelResponse>;
+
+// PUT /api/labels/:transferId
+export const LabelsPutRequest = z.object({ labels: z.array(z.string().trim().min(1).max(40)).max(10) });
+export type LabelsPutRequest = z.infer<typeof LabelsPutRequest>;
+export const LabelsPutResponse = LabelEntrySchema;
+export type LabelsPutResponse = z.infer<typeof LabelsPutResponse>;
+
+// GET /api/fiscal?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv|json → file download (Content-Disposition attachment)
+export const FiscalQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  format: z.enum(['csv', 'json']).default('csv'),
+});
+export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
 /** Route table, for clients and docs. */
 export const API_ROUTES = {
@@ -220,7 +295,16 @@ export const API_ROUTES = {
   walletReceive: 'POST /api/wallet/receive',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  scheduleList: 'GET /api/schedule',
+  scheduleCancel: 'POST /api/schedule/:jobId/cancel',
+  labelsPut: 'PUT /api/labels/:transferId',
+  fiscal: 'GET /api/fiscal',
   health: 'GET /api/health',
+  onboarding: 'GET /api/onboarding',
+  onboardingCreate: 'POST /api/onboarding/create',
+  onboardingSeedConfirmed: 'POST /api/onboarding/seed-confirmed',
+  onboardingRestore: 'POST /api/onboarding/restore',
+  onboardingUnlock: 'POST /api/onboarding/unlock',
 } as const;
 
 /** Base units → display decimal: at least 2 decimals, trailing zeros trimmed ("25000000", 6 → "25.00"; "1234567", 6 → "1.234567"). */
@@ -240,11 +324,24 @@ export function formatAssetAmount(baseUnits: string, precision: number): string 
 export function buildConfirmationSentence(
   plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
   asset: { ticker: string; precision: number } | undefined,
+  /** IANA zone for the date (default: this machine's zone, so the user reads their own clock time). */
+  timeZone?: string,
 ): string {
   const amount = asset
     ? `${formatAssetAmount(plan.amount, asset.precision)} ${asset.ticker}`
     : `${plan.amount} base units`;
   const when =
-    plan.executeAt === 'now' ? 'now' : `on ${new Date(plan.executeAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}`;
+    plan.executeAt === 'now'
+      ? 'now'
+      : `on ${new Date(plan.executeAt).toLocaleString('en-GB', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+          ...(timeZone ? { timeZone } : {}),
+        })}`;
   return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
 }
