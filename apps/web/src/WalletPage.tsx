@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import { formatAssetAmount, type WalletReceiveResponse, type WalletResponse } from './api/contracts.js';
+import {
+  formatAssetAmount,
+  type ReceiveRequestDto,
+  type WalletReceiveResponse,
+  type WalletResponse,
+} from './api/contracts.js';
 import { formatDate } from './lib/format.js';
 import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
+import { explorerTxUrl } from './lib/payment.js';
+import { EXPLORER_BASE } from './PaymentCards.js';
 import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
@@ -123,6 +130,8 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
   const [assetId, setAssetId] = useState(wallet.assets[0]?.assetId ?? '');
   const [amount, setAmount] = useState('');
   const [expiry, setExpiry] = useState('60');
+  const [note, setNote] = useState('');
+  const [listTick, setListTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<WalletReceiveResponse | null>(null);
@@ -144,8 +153,11 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         ...(assetId ? { assetId } : {}),
         ...(base.value ? { amount: base.value } : {}),
         expiryMinutes: minutes,
+        ...(note.trim() ? { note: note.trim() } : {}),
       });
       setCreated(res);
+      setNote('');
+      setListTick((t) => t + 1);
       toast('Payment request created', 'success');
     } catch (err) {
       const msg = errorText(err, 'Could not create the payment request.');
@@ -192,6 +204,15 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           />
         </label>
         <label style={{ display: 'block', marginBottom: 8 }}>
+          Who pays, or what for (optional){' '}
+          <input
+            maxLength={120}
+            placeholder="e.g. Acme, refund October"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <label style={{ display: 'block', marginBottom: 8 }}>
           Valid for{' '}
           <input inputMode="numeric" value={expiry} onChange={(e) => setExpiry(e.target.value)} style={{ width: 80 }} />{' '}
           minutes
@@ -220,6 +241,83 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           </div>
         </div>
       )}
+      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
     </>
+  );
+}
+
+export const RECEIVE_STATUS_WORDS: Record<ReceiveRequestDto['status'], string> = {
+  waiting: 'Waiting for payment',
+  incoming: 'Payment on its way (waiting for a block)',
+  received: 'Received ✓',
+  expired: 'Expired: create a new request',
+  failed: 'The payment failed: ask them to try again',
+};
+
+/** Payment requests handed out, refreshed every 10 s while one is still open. */
+export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet: WalletResponse; tick: number }) {
+  const [list, setList] = useState<ReceiveRequestDto[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    void tick;
+    void refresh;
+    let live = true;
+    api.receives().then(
+      (r) => {
+        if (!live) return;
+        setList(r.receives);
+        setError(null);
+      },
+      (e: unknown) => {
+        if (live) setError(e);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, tick, refresh]);
+  const open = list?.some((r) => r.status === 'waiting' || r.status === 'incoming');
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => setRefresh((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  if (error) return <ErrorBox error={error} retry={() => setRefresh((n) => n + 1)} />;
+  if (!list || list.length === 0) return null;
+  return (
+    <>
+      <h3>Payment requests you sent</h3>
+      <div aria-live="polite">
+        {list.slice(0, 10).map((r) => (
+          <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function PaymentRequestRow({ r, wallet }: { r: ReceiveRequestDto; wallet: WalletResponse }) {
+  const asset = wallet.assets.find((a) => a.assetId === r.assetId);
+  const amount = r.receivedAmount ?? r.amount;
+  return (
+    <div style={{ ...box, marginBottom: 8 }} data-testid="receive-row">
+      <strong>{RECEIVE_STATUS_WORDS[r.status]}</strong>
+      {' · '}
+      {amount && asset ? `${formatAssetAmount(amount, asset.precision)} ${asset.ticker}` : 'any amount'}
+      {r.note ? ` · ${r.note}` : ''}
+      <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+        Created {formatDate(r.createdAt)}
+        {r.txid && (
+          <>
+            {' · '}
+            <a href={explorerTxUrl(r.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
+              View on the block explorer
+            </a>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

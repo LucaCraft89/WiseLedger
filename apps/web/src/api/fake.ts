@@ -27,6 +27,7 @@ import {
   mockInvoice,
   type OnboardingState,
   type PaymentPlan,
+  type ReceiveRequestDto,
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
@@ -134,6 +135,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const jobs = new MemoryJobStore();
   const labels = new MemoryLabelStore();
   const transferInvoice = new Map<string, string>();
+  const receiveList: ReceiveRequestDto[] = [];
   let jobSeq = 0;
 
   // Two past payments, so the transfers table, labels and "my last payment" have something to work with.
@@ -474,12 +476,28 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         ...(req.amount ? { amount: req.amount } : {}),
         expirySec: (req.expiryMinutes ?? 60) * 60,
       });
+      const at = new Date().toISOString();
+      receiveList.unshift({
+        receiveId: `rcv_fake_${receiveList.length + 1}`,
+        rgbInvoice: inv.rgbInvoice,
+        recipientId: inv.recipientId,
+        status: 'waiting',
+        createdAt: at,
+        updatedAt: at,
+        expiresAt: inv.expiresAt,
+        ...(inv.assetId ? { assetId: inv.assetId } : {}),
+        ...(inv.amount ? { amount: inv.amount } : {}),
+        ...(req.note ? { note: req.note } : {}),
+      });
       return {
         rgbInvoice: inv.rgbInvoice,
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
       };
+    },
+    async receives() {
+      return { receives: receiveList.map((r) => ({ ...r })) };
     },
     async transfers() {
       return { transfers: await transferList() };

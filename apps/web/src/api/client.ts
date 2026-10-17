@@ -20,6 +20,7 @@ import {
   type OnboardingRestoreResponse,
   type OnboardingStatusResponse,
   type OnboardingUnlockRequest,
+  type ReceivesListResponse,
   type RejectResponse,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
@@ -48,6 +49,8 @@ export interface ApiClient {
   wallet(): Promise<WalletResponse>;
   /** New RGB receive invoice (optional asset and amount in base units). */
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
+  /** Payment requests handed out, newest first, with the status of the payment that answers each. */
+  receives(): Promise<ReceivesListResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** Replace the labels of one transfer. */
@@ -145,6 +148,7 @@ export function createHttpClient(base = ''): ApiClient {
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
+    receives: () => call(`${base}/api/wallet/receives`),
     transfers: () => call(`${base}/api/transfers`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
