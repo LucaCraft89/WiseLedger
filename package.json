@@ -18,7 +18,8 @@
     "wallet:smoke": "pnpm -F wallet --if-present run smoke",
     "demo:prepare": "pnpm -F wallet --if-present run demo:prepare",
     "demo:reset": "pnpm -F wallet --if-present run demo:reset",
-    "evals": "pnpm -F ai --if-present run evals"
+    "evals": "pnpm -F ai --if-present run evals",
+    "regtest": "bash infra/regtest/regtest.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
