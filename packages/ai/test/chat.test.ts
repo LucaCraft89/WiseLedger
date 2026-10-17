@@ -51,6 +51,7 @@ function treasurer(llm: MockLlm | QvacProvider, wallet: MockWallet, labels = new
     fiscal,
     invoices: async () => INVOICES,
     now: () => NOW,
+    timeZone: 'UTC',
   });
 }
 
@@ -112,7 +113,7 @@ describe('Treasurer chat (MockLlm)', () => {
       needsConfirmation: true,
       kind: 'schedule',
       invoiceId: 'inv_acme',
-      sentence: 'Pay 25.00 TUSDT (asset rgb:mock-tusdt) to ACME SRL, on Fri, 23 Oct 2026 09:00 UTC. Confirm?',
+      sentence: 'Pay 25.00 TUSDT (asset rgb:mock-tusdt) to ACME SRL, on Fri, 23 Oct 2026, 09:00 UTC. Confirm?',
     });
     expect((await wallet.listTransfers()).length).toBe(before);
     expect(events.some((e) => e.type === 'toolCall' && e.status === 'ok')).toBe(true);

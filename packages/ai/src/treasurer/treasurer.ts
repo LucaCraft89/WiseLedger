@@ -99,6 +99,8 @@ export interface TreasurerDeps {
   fiscal?: FiscalService;
   /** Open invoices for chat ("pay the Acme invoice on Friday"). */
   invoices?: () => Promise<ChatInvoice[]>;
+  /** IANA zone for dates in confirmation sentences (default: this machine's zone). */
+  timeZone?: string;
 }
 
 /** Guard stub: knows the confirmed plans, checks the hash and executes each plan once. */
@@ -529,6 +531,7 @@ export class Treasurer implements TreasurerAgent {
           executeAt: new Date(t).toISOString(),
         },
         a ? { ticker: a.ticker, precision: a.precision } : undefined,
+        this.deps.timeZone,
       );
       return { needsConfirmation: true, kind: 'schedule', invoiceId: inv.invoiceId, sentence };
     }

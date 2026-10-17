@@ -273,11 +273,24 @@ export function formatAssetAmount(baseUnits: string, precision: number): string 
 export function buildConfirmationSentence(
   plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
   asset: { ticker: string; precision: number } | undefined,
+  /** IANA zone for the date (default: this machine's zone, so the user reads their own clock time). */
+  timeZone?: string,
 ): string {
   const amount = asset
     ? `${formatAssetAmount(plan.amount, asset.precision)} ${asset.ticker}`
     : `${plan.amount} base units`;
   const when =
-    plan.executeAt === 'now' ? 'now' : `on ${new Date(plan.executeAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}`;
+    plan.executeAt === 'now'
+      ? 'now'
+      : `on ${new Date(plan.executeAt).toLocaleString('en-GB', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+          ...(timeZone ? { timeZone } : {}),
+        })}`;
   return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
 }
