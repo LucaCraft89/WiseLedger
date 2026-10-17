@@ -90,6 +90,13 @@ describe('PaymentGuard', () => {
     });
   });
 
+  it('refuses a plan that would go over the daily limit (already sent today counts)', async () => {
+    const s = await setup({ amount: '60000000' });
+    await s.wallet.pay({ rgbInvoice: mockInvoice(undefined, undefined, far), assetId: MOCK_ASSET_ID, amount: '100000000' });
+    const daily = new WalletGuard({ store: s.store, wallet: s.wallet, limits: { ...limits, dailyCap: '150000000' } });
+    expect(await daily.check(s.plan.planId)).toMatchObject({ ok: false, reason: 'over_cap' });
+  });
+
   it('after a send timeout: no retry, result submitted with the transfer, plan stays claimed', async () => {
     const s = await setup({ amount: MOCK_TIMEOUT_AMOUNT });
     const r = await s.run();

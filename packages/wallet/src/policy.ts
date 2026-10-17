@@ -9,7 +9,12 @@ export interface SpendLimits {
   paymentCap: string;
   /** Allowed asset IDs; empty = any asset (cap still applies). */
   assetAllowlist: string[];
+  /** Max base units sent per asset in any rolling 24 h (optional). */
+  dailyCap?: string;
 }
+
+/** Base units of an asset already sent (not failed) in the last 24 h; read from the wallet, so it survives restarts. */
+export type SpentLast24h = (assetId: string) => number;
 
 /** Account methods the backend calls through WDK (everything else stays denied). */
 export const GOVERNED_ALLOWED = ['getRgbWallet', 'transfer'] as const;
@@ -21,10 +26,13 @@ interface TransferArgs {
 type Ctx = { args: readonly unknown[] };
 const first = (ctx: Ctx) => (ctx.args[0] ?? {}) as TransferArgs;
 
-export function buildSpendPolicy(limits: SpendLimits) {
+export function buildSpendPolicy(limits: SpendLimits, spentLast24h?: SpentLast24h) {
   const cap = Number(limits.paymentCap);
   if (!Number.isSafeInteger(cap) || cap <= 0)
     throw new Error(`PAYMENT_CAP=${limits.paymentCap} must be a positive integer.`);
+  const daily = limits.dailyCap === undefined ? undefined : Number(limits.dailyCap);
+  if (daily !== undefined && (!Number.isSafeInteger(daily) || daily <= 0))
+    throw new Error(`DAILY_CAP=${limits.dailyCap} must be a positive integer.`);
   const allow = new Set(limits.assetAllowlist);
   return {
     id: 'wiseledger-spend',
@@ -38,6 +46,19 @@ export function buildSpendPolicy(limits: SpendLimits) {
         action: 'DENY' as const,
         conditions: [(ctx: Ctx) => (first(ctx).amount ?? 0) > cap],
       },
+      ...(daily !== undefined && spentLast24h
+        ? [
+            {
+              name: 'over-daily-cap',
+              reason: 'This payment would go over your daily spending limit.',
+              operation: 'transfer',
+              action: 'DENY' as const,
+              conditions: [
+                (ctx: Ctx) => spentLast24h(first(ctx).token ?? '') + (first(ctx).amount ?? 0) > daily,
+              ],
+            },
+          ]
+        : []),
       ...(allow.size > 0
         ? [
             {
