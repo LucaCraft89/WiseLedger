@@ -38,6 +38,14 @@ interface Rec {
   listeners: Set<(e: AppEvent) => void>;
 }
 
+/** Pretend model output per stage, so the live AI box has something to show in demo mode. */
+const FAKE_TOKENS: Partial<Record<string, string[]>> = {
+  reading: ['Opening ', 'the file… ', 'text found.'],
+  extracting: ['{"issuer": ', '{"name": "Acme Srl"}, ', '"total": "25.00", ', '"currency": "TUSDT", ', '"dueDate": …}'],
+  checking: ['R1 supplier known… ', 'R4 amount usual… ', 'R7 payment details unchanged…'],
+  summarizing: ['This invoice ', 'is from a supplier ', 'you paid before. ', 'The amount is usual.'],
+};
+
 function kindOf(name: string): InvoiceSourceKind {
   const n = name.toLowerCase();
   if (n.endsWith('.pdf')) return 'pdf';
@@ -52,6 +60,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const treasurer = new MockTreasurer(wallet, { pollMs: opts.pollMs ?? 250 });
   const recs = new Map<string, Rec>();
   let seq = 0;
+  let address: string | undefined;
 
   const get = (id: string): Rec => {
     const r = recs.get(id);
@@ -80,6 +89,11 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       { invoiceId: id },
       (e) => {
         emit(r, e);
+        if (e.type === 'stage' && e.status === 'start') {
+          for (const text of FAKE_TOKENS[e.stage] ?? []) {
+            emit(r, { type: 'token', invoiceId: id, at: new Date().toISOString(), agent: 'analyst', text });
+          }
+        }
         if (e.type === 'stage' && e.stage === 'extracting' && e.status === 'end') setState(r, 'EXTRACTED');
       },
     );
@@ -200,11 +214,14 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       return { invoiceId: id, state: r.summary.state };
     },
     async wallet() {
+      address ??= await wallet.receiveAddress();
       const assets = await wallet.listAssets();
       return {
         backend: 'mock',
         network: 'mock',
         ready: true,
+        address,
+        btcBalanceSats: '150000',
         assets: assets.map((a) => ({
           assetId: a.assetId,
           ticker: a.ticker,
@@ -212,6 +229,22 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
           precision: a.precision,
           balance: a.balance,
         })),
+      };
+    },
+    async receive(req) {
+      if (req.assetId && !(await wallet.listAssets()).some((a) => a.assetId === req.assetId)) {
+        throw new ApiCallError('UNKNOWN_ASSET', 'This wallet does not hold that asset.');
+      }
+      const inv = await wallet.createReceiveInvoice({
+        ...(req.assetId ? { assetId: req.assetId } : {}),
+        ...(req.amount ? { amount: req.amount } : {}),
+        expirySec: (req.expiryMinutes ?? 60) * 60,
+      });
+      return {
+        rgbInvoice: inv.rgbInvoice,
+        expiresAt: inv.expiresAt,
+        ...(inv.assetId ? { assetId: inv.assetId } : {}),
+        ...(inv.amount ? { amount: inv.amount } : {}),
       };
     },
   };

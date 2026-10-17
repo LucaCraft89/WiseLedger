@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { AppEvent, InvoiceDetailResponse, PaymentPlan } from './api/contracts.js';
+import type { AppEvent, InvoiceDetailResponse, PaymentPlan, Stage } from './api/contracts.js';
 import { ConfirmDialog, PaymentProgressView } from './ConfirmDialog.js';
 import { StatusChip } from './InvoiceListPage.js';
 import {
@@ -13,7 +13,9 @@ import {
   showsProgress,
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
+import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallLine } from './lib/live.js';
 import { ReportView } from './ReportView.js';
+import { errorText, useToast } from './ui.js';
 
 const STEP_ICON = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
 const STEP_WORD = { pending: 'not started', running: 'in progress', done: 'done', error: 'failed' } as const;
@@ -32,12 +34,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
     );
   }, [api]);
 
-  const addEvents = useCallback((incoming: AppEvent[]) => {
-    setEvents((prev) => {
-      const seen = new Set(prev.map(eventKey));
-      const fresh = incoming.filter((e) => !seen.has(eventKey(e)));
-      return fresh.length ? [...prev, ...fresh] : prev;
-    });
+  const toast = useToast();
+
+  const addEvents = useCallback((incoming: AppEvent[], live = false) => {
+    setEvents((prev) => mergeEvents(prev, incoming, live));
   }, []);
 
   const refresh = useCallback(async () => {
@@ -46,15 +46,17 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       setDetail(d);
       addEvents(d.events);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load this invoice.');
+      const msg = errorText(err, 'Could not load this invoice.');
+      setError(msg);
+      toast(msg, 'error');
     }
-  }, [api, invoiceId, addEvents]);
+  }, [api, invoiceId, addEvents, toast]);
 
   useEffect(() => {
     let unsubscribe = () => {};
     try {
       unsubscribe = api.subscribe(invoiceId, (e) => {
-        addEvents([e]);
+        addEvents([e], true);
         // State changes bring new plan / sentence / execution: reload the full record.
         if (e.type === 'state' || e.type === 'report') void refresh();
       });
@@ -79,6 +81,8 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const timeline = buildFullTimeline(events);
   const history = stateHistory(events);
   const errors = events.filter((e) => e.type === 'error');
+  const live = liveAiView(events);
+  const toolCalls = events.filter((e) => e.type === 'toolCall');
 
   return (
     <section>
@@ -100,6 +104,17 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           </li>
         ))}
       </ol>
+
+      <LiveAiPanel stage={live.stage} text={live.text} />
+
+      {toolCalls.length > 0 && (
+        <div data-testid="tool-calls">
+          <h3>What the Treasurer did</h3>
+          <ul style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.9em' }}>
+            {toolCalls.map((e) => (e.type === 'toolCall' ? <li key={eventKey(e)}>{toolCallLine(e)}</li> : null))}
+          </ul>
+        </div>
+      )}
 
       {history.length > 0 && (
         <details>
@@ -153,6 +168,42 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
         <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>
       </p>
     </section>
+  );
+}
+
+/** While the Analyst works: the current step in plain words and the live text from the local model. */
+function LiveAiPanel({ stage, text }: { stage?: Stage; text: string }) {
+  const info = stage ? LIVE_STAGE_TEXT[stage] : undefined;
+  if (!info) return null;
+  return (
+    <div
+      data-testid="live-ai"
+      aria-live="polite"
+      style={{ border: '1px solid #b8daff', background: '#f0f7ff', borderRadius: 6, padding: 12, margin: '12px 0' }}
+    >
+      <strong>{info.title}</strong>
+      <div>{info.detail}</div>
+      <div style={{ fontSize: '0.85em', color: '#555' }}>
+        AI running on this computer: your invoice never leaves it.
+      </div>
+      <pre
+        style={{
+          fontFamily: 'ui-monospace, monospace',
+          fontSize: '0.85em',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          background: '#fff',
+          border: '1px solid #ddd',
+          padding: 8,
+          margin: '8px 0 0',
+          minHeight: '3em',
+          maxHeight: '10em',
+          overflow: 'auto',
+        }}
+      >
+        {text || '…'}
+      </pre>
+    </div>
   );
 }
 

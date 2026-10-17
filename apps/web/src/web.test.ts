@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { AppEvent, InvoiceState } from './api/contracts.js';
-import { AppEvent as AppEventSchema, InvoiceDetailResponse, InvoiceListResponse } from './api/contracts.js';
+import type { AppEvent, InvoiceState, Stage } from './api/contracts.js';
+import {
+  AppEvent as AppEventSchema,
+  InvoiceDetailResponse,
+  InvoiceListResponse,
+  WalletReceiveResponse,
+  WalletResponse,
+} from './api/contracts.js';
 import { createFakeClient } from './api/fake.js';
 import { confirmGate, dialogSentence, paymentProgress } from './lib/confirm.js';
 import {
@@ -13,6 +19,7 @@ import {
   stateTone,
   VERDICT_LABELS,
 } from './lib/format.js';
+import { LIVE_TEXT_CAP, liveAiView, mergeEvents, toBaseUnits, toolCallLine } from './lib/live.js';
 
 const fast = () => createFakeClient({ stageDelayMs: 0, transferStepMs: 0, pollMs: 1 });
 
@@ -227,5 +234,107 @@ describe('fake confirm flows', () => {
     expect((await api.reject(invoiceId, 'I do not know this supplier')).state).toBe('REJECTED');
     await expect(api.confirm(invoiceId, { planId: d.plan?.planId ?? '' })).rejects.toThrow(/not waiting/);
     await expect(api.reject(invoiceId)).rejects.toThrow(/no longer/);
+  });
+});
+
+describe('live AI view', () => {
+  const at = '2026-10-17T10:00:00.000Z';
+  const stage = (s: Stage, status: 'start' | 'end') =>
+    ({ type: 'stage', invoiceId: 'i', at, stage: s, status }) as AppEvent;
+  const tok = (text: string, agent: 'analyst' | 'treasurer' = 'analyst') =>
+    ({ type: 'token', invoiceId: 'i', at, agent, text }) as AppEvent;
+
+  it('accumulates analyst tokens per stage and resets at each stage start', () => {
+    let v = liveAiView([stage('extracting', 'start'), tok('{"a"'), tok(': 1}'), tok('ignored', 'treasurer')]);
+    expect(v.stage).toBe('extracting');
+    expect(v.text).toBe('{"a": 1}');
+    v = liveAiView([
+      stage('extracting', 'start'),
+      tok('old'),
+      stage('extracting', 'end'),
+      stage('summarizing', 'start'),
+      tok('new'),
+    ]);
+    expect(v.stage).toBe('summarizing');
+    expect(v.text).toBe('new');
+    v = liveAiView([stage('summarizing', 'start'), tok('x'), stage('analyzed', 'end')]);
+    expect(v.stage).toBeUndefined();
+    expect(v.finished).toBe(true);
+  });
+
+  it('keeps only the last characters', () => {
+    const v = liveAiView([stage('summarizing', 'start'), tok('a'.repeat(500)), tok('b'.repeat(500))]);
+    expect(v.text).toHaveLength(LIVE_TEXT_CAP);
+    expect(v.text.endsWith('b')).toBe(true);
+  });
+
+  it('merges replayed events without dropping repeated live tokens', () => {
+    const t = tok(' the');
+    let list = mergeEvents([], [t], true);
+    list = mergeEvents(list, [t], true);
+    expect(list).toHaveLength(2);
+    // A replay from GET with the same two tokens adds nothing; a third one is added.
+    expect(mergeEvents(list, [t, t])).toHaveLength(2);
+    expect(mergeEvents(list, [t, t, t])).toHaveLength(3);
+    const s = stage('reading', 'start');
+    expect(mergeEvents([s], [s], true)).toHaveLength(1);
+  });
+
+  it('describes a tool call in one line', () => {
+    expect(
+      toolCallLine({
+        type: 'toolCall',
+        at,
+        agent: 'treasurer',
+        name: 'execute_plan',
+        args: { planId: 'p1' },
+        status: 'ok',
+      }),
+    ).toBe('Treasurer called execute_plan(planId=p1): done');
+  });
+
+  it('fake analysis emits analyst tokens for each stage', async () => {
+    const api = fast();
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'acme.txt' });
+    const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
+    const tokenStages = new Set<string>();
+    let current = '';
+    for (const e of d.events) {
+      if (e.type === 'stage' && e.status === 'start') current = e.stage;
+      if (e.type === 'token') tokenStages.add(current);
+    }
+    expect([...tokenStages]).toEqual(['reading', 'extracting', 'checking', 'summarizing']);
+  });
+});
+
+describe('receive form', () => {
+  it('converts tokens to base units with the asset precision', () => {
+    expect(toBaseUnits('12.5', 6)).toEqual({ ok: true, value: '12500000' });
+    expect(toBaseUnits('0,000001', 6)).toEqual({ ok: true, value: '1' });
+    expect(toBaseUnits('25', 6)).toEqual({ ok: true, value: '25000000' });
+    expect(toBaseUnits('7', 0)).toEqual({ ok: true, value: '7' });
+    expect(toBaseUnits('', 6)).toEqual({ ok: true });
+    expect(toBaseUnits('1.1234567', 6).ok).toBe(false);
+    expect(toBaseUnits('abc', 6).ok).toBe(false);
+    expect(toBaseUnits('0', 6).ok).toBe(false);
+    expect(toBaseUnits('-1', 6).ok).toBe(false);
+  });
+
+  it('fake wallet returns an address and creates a receive invoice', async () => {
+    const api = fast();
+    const w = await api.wallet();
+    expect(WalletResponse.safeParse(w).success).toBe(true);
+    expect(w.address).toBeTruthy();
+    const asset = w.assets[0];
+    if (!asset) throw new Error('no asset');
+    const before = Date.now();
+    const res = await api.receive({ assetId: asset.assetId, amount: '5000000', expiryMinutes: 30 });
+    expect(WalletReceiveResponse.safeParse(res).success).toBe(true);
+    expect(res.amount).toBe('5000000');
+    expect(res.rgbInvoice).toBeTruthy();
+    const expires = new Date(res.expiresAt).getTime();
+    expect(expires).toBeGreaterThan(before + 29 * 60_000);
+    expect(expires).toBeLessThan(before + 31 * 60_000);
+    await expect(api.receive({ assetId: 'rgb:nope' })).rejects.toThrow('does not hold');
   });
 });
