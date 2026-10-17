@@ -1,7 +1,7 @@
 // Smoke test on the real chain. Without flags: both wallets' BTC, assets and UTXOs.
 // With --pay [amount]: payee creates a blind invoice, payer pays TUSDT (explicit feeRate), both refresh until
 // Settled (or --timeout seconds, default 600). Prints transfer ID, txid and explorer link. No retry after a timeout.
-import { SubmitTimeout } from 'core';
+import { NoUtxo, SubmitTimeout } from 'core';
 import { fundRegtest, log, mine, openWallet, readAssetId, sleep, tokens } from './common.js';
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
@@ -33,6 +33,22 @@ for (const [role, w] of [
     );
 }
 
+if (payIdx < 0) {
+  // Receive side check: blind invoice without asset (the payer names it), then decode it back.
+  try {
+    const inv = await payer.createReceiveInvoice({ amount: '5000000', expirySec: 600 });
+    const d = await payer.decodeInvoice(inv.rgbInvoice);
+    log('payer', `receive invoice ${inv.rgbInvoice.slice(0, 40)}… expires ${inv.expiresAt}`);
+    log(
+      'payer',
+      `decoded: network ${d.network} · amount ${d.amount ?? 'any'} · asset ${d.assetId ?? 'payer chooses'} · recipient ${d.recipientId.slice(0, 24)}…`,
+    );
+  } catch (e) {
+    if (!(e instanceof NoUtxo)) throw e;
+    log('payer', 'cannot create a receive invoice yet: no free UTXO. Fund the funding address above, then run again.');
+  }
+}
+
 if (payIdx >= 0) {
   const assetId = readAssetId();
   if (!assetId) throw new Error('No TUSDT asset ID: run `pnpm -F wallet issue-asset` first (or set TUSDT_ASSET_ID).');
@@ -44,13 +60,15 @@ if (payIdx >= 0) {
   const quote = await payer.quotePay({ rgbInvoice: inv.rgbInvoice, assetId, amount });
   log('payer', `quote: fee ${quote.fee} sats at ${quote.feeRate} sat/vB`);
   let transferId: string | undefined;
+  const sentAt = Date.now();
   try {
     const sent = await payer.pay({ rgbInvoice: inv.rgbInvoice, assetId, amount });
     transferId = sent.transferId;
     log('payer', `sent: transfer ${sent.transferId} txid ${sent.txid ?? '?'}`);
   } catch (e) {
     if (!(e instanceof SubmitTimeout)) throw e;
-    log('payer', 'submit timed out: NOT retrying, checking state instead');
+    transferId = e.transferId;
+    log('payer', `submit timed out: NOT retrying, checking state of transfer ${transferId ?? '(not found yet)'}`);
   }
   const deadline = Date.now() + timeoutSec * 1000;
   let done = false;
@@ -65,7 +83,11 @@ if (payIdx >= 0) {
     if (ours?.status === 'Failed') throw new Error(`Transfer ${ours.transferId} failed.`);
     if (ours?.status === 'Settled' && inc?.status === 'Settled') {
       done = true;
-      log('payer', `SETTLED transfer ${ours.transferId} txid ${ours.txid} → ${explorer}/tx/${ours.txid}`);
+      const secs = ((Date.now() - sentAt) / 1000).toFixed(1);
+      log(
+        'payer',
+        `SETTLED in ${secs}s · transfer ${ours.transferId} · txid ${ours.txid} → ${explorer}/tx/${ours.txid}`,
+      );
     } else await sleep(process.env.RGB_NETWORK === 'regtest' ? 2_000 : 10_000);
   }
   if (!done) {

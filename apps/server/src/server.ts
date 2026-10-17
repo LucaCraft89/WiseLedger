@@ -27,7 +27,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: { l
   const treasurer = new MockTreasurer(wallet, { pollMs: Math.max(10, Math.min(step / 4, 250)) });
   const llmInfo = (): LlmInfo => ({ provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true });
 
-  const store = new InvoiceStore();
+  const store = new InvoiceStore(config.dbPath);
   const orchestrator = new Orchestrator({ store, analyzer, treasurer, wallet, uploadDir: config.uploadDir });
 
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: MAX_UPLOAD_BYTES, forceCloseConnections: true });
@@ -40,11 +40,21 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: { l
     llmInfo,
     walletBackend: config.walletBackend,
     network: config.rgbNetwork,
-    problems: () => [],
+    problems: () =>
+      orchestrator
+        .awaitingSync()
+        .map(
+          (inv) =>
+            `Invoice ${inv.filename} (${inv.id}) was being paid when the app stopped. It was not sent again; a wallet sync will show whether the payment went through.`,
+        ),
   });
   app.addHook('onClose', async () => {
     await orchestrator.idle();
+    store.close();
   });
+  const recovery = await orchestrator.recover(app.log);
+  const touched = Object.values(recovery).flat().length;
+  if (touched > 0) app.log.info({ recovery }, 'Recovered invoices interrupted by the last shutdown');
   return { app, orchestrator, store, config };
 }
 

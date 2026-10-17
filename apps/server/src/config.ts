@@ -8,6 +8,8 @@ export interface ServerConfig {
   walletBackend: 'mock';
   rgbNetwork: 'mutinynet' | 'regtest';
   uploadDir: string;
+  /** SQLite file (env DB_PATH), or `:memory:`. */
+  dbPath: string;
   /** MockWallet status step and MockAnalyzer stage delay, in ms. */
   mockStepMs: number;
 }
@@ -22,6 +24,7 @@ export class ConfigError extends Error {
 /** Repo root: apps/server/src → ../../.. */
 export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 export const DEFAULT_UPLOAD_DIR = fileURLToPath(new URL('../../../.data/uploads/', import.meta.url));
+export const DEFAULT_DB_PATH = fileURLToPath(new URL('../../../.data/app.db', import.meta.url));
 
 function oneOf<T extends string>(env: NodeJS.ProcessEnv, name: string, allowed: readonly T[], fallback: T): T {
   const raw = env[name]?.trim();
@@ -52,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     walletBackend: oneOf(env, 'WALLET_BACKEND', ['mock'] as const, 'mock'),
     rgbNetwork: oneOf(env, 'RGB_NETWORK', ['mutinynet', 'regtest'] as const, 'mutinynet'),
     uploadDir: env.UPLOAD_DIR?.trim() || DEFAULT_UPLOAD_DIR,
+    dbPath: env.DB_PATH?.trim() || DEFAULT_DB_PATH,
     mockStepMs: int(env, 'MOCK_STEP_MS', 1000),
   };
 }

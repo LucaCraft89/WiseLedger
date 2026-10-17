@@ -1,5 +1,5 @@
 # Secret patterns (POSIX extended regex, one per line, `#` comments). Used by scripts/secret-scan.sh (pnpm check)
-# and by every publish (docs/PUBLISH.md). A single match fails the run. Placeholders in .env.example are written
+# and by every publish. A single match fails the run. Placeholders in .env.example are written
 # so that they do NOT match (empty values or the word REPLACE_ME).
 -----BEGIN ([A-Z]+ )?PRIVATE KEY-----
 gh[pousr]_[A-Za-z0-9]{30,}

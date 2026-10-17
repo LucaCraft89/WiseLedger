@@ -1,12 +1,13 @@
-// pnpm demo:mock — full invoice flow on mocks: upload → analysis → confirm → PAID.
-// Starts the server in-process on a free port, or targets DEMO_URL when set. Exit 0 only on PAID within 30 s.
+// pnpm demo:mock — invoice flow on mocks, three paths: ok → confirm → PAID; review → refused without override,
+// PAID with it; block → BLOCKED and confirm refused. Starts the server in-process on a free port, or targets
+// DEMO_URL when set. Exit 0 only when all three behave within 30 s.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import type { ConfirmResponse, CreateInvoiceResponse, InvoiceDetailResponse } from 'core';
+import type { CreateInvoiceResponse, InvoiceDetailResponse } from 'core';
 import { startServer } from '../src/server.js';
 
 const TIMEOUT_MS = 30_000;
-const FIXTURE = fileURLToPath(new URL('./fixtures/ok-basic.txt', import.meta.url));
+const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const deadline = Date.now() + TIMEOUT_MS;
 
 let stop: (() => Promise<void>) | undefined;
@@ -38,7 +39,12 @@ async function waitFor(base: string, id: string, until: string[], seen: Set<stri
 async function main(): Promise<void> {
   let base = process.env.DEMO_URL?.replace(/\/$/, '');
   if (!base) {
-    const started = await startServer({ port: 0, mockStepMs: Number(process.env.MOCK_STEP_MS ?? 500) });
+    // Hermetic by default: a throwaway in-memory DB unless DB_PATH is set.
+    const started = await startServer({
+      port: 0,
+      dbPath: process.env.DB_PATH ?? ':memory:',
+      mockStepMs: Number(process.env.MOCK_STEP_MS ?? 500),
+    });
     base = started.url;
     stop = () => started.app.close();
   }
@@ -47,28 +53,61 @@ async function main(): Promise<void> {
   const health = await api<{ ok: boolean }>(base, '/api/health');
   if (!health.ok) throw new Error('Server health is not ok');
 
-  const form = new FormData();
-  form.append('file', new Blob([await readFile(FIXTURE)], { type: 'text/plain' }), 'ok-basic.txt');
-  const created = await api<CreateInvoiceResponse>(base, '/api/invoices', { method: 'POST', body: form });
-  console.log(`Uploaded ok-basic.txt → invoice ${created.invoiceId}`);
+  await scenario(base, 'ok-basic.txt', 'ok');
+  await scenario(base, 'ok-eur.txt', 'review');
+  await scenario(base, 'scam-bank-change.txt', 'block');
+  console.log('All three paths behaved: ok → PAID, review → override → PAID, block → refused.');
+}
 
-  const seen = new Set<string>();
-  const analysed = await waitFor(base, created.invoiceId, ['AWAITING_CONFIRMATION', 'BLOCKED', 'FAILED'], seen);
-  if (analysed.invoice.state !== 'AWAITING_CONFIRMATION' || !analysed.plan) {
-    throw new Error(`Analysis ended in ${analysed.invoice.state}, expected AWAITING_CONFIRMATION`);
-  }
-  console.log(`Verdict: ${analysed.report?.verdict}. ${analysed.confirmationSentence}`);
-
-  const confirmed = await api<ConfirmResponse>(base, `/api/invoices/${created.invoiceId}/confirm`, {
+async function confirm(base: string, id: string, planId: string, override?: boolean): Promise<Response> {
+  return fetch(`${base}/api/invoices/${id}/confirm`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ planId: analysed.plan.planId }),
+    body: JSON.stringify({ planId, ...(override === undefined ? {} : { override }) }),
   });
-  console.log(`Confirmed plan ${confirmed.planId.slice(0, 12)}…`);
+}
 
-  const final = await waitFor(base, created.invoiceId, ['PAID', 'FAILED', 'REJECTED', 'BLOCKED', 'SCHEDULED'], seen);
-  if (final.invoice.state !== 'PAID') throw new Error(`Payment ended in ${final.invoice.state}, expected PAID`);
-  console.log(`PAID · transfer ${final.execution?.transferId} · txid ${final.execution?.txid ?? 'n/a'}`);
+async function errorCode(res: Response): Promise<string | undefined> {
+  return ((await res.json()) as { error?: { code: string } }).error?.code;
+}
+
+async function scenario(base: string, file: string, expect: 'ok' | 'review' | 'block'): Promise<void> {
+  console.log(`\n[${expect}] ${file}`);
+  const form = new FormData();
+  form.append('file', new Blob([await readFile(fixture(file))], { type: 'text/plain' }), file);
+  const created = await api<CreateInvoiceResponse>(base, '/api/invoices', { method: 'POST', body: form });
+  const id = created.invoiceId;
+  const seen = new Set<string>();
+  const analysed = await waitFor(base, id, ['AWAITING_CONFIRMATION', 'BLOCKED', 'FAILED'], seen);
+  console.log(`  verdict: ${analysed.report?.verdict}`);
+  if (analysed.report?.verdict !== expect)
+    throw new Error(`${file}: verdict ${analysed.report?.verdict}, expected ${expect}`);
+
+  if (expect === 'block') {
+    if (analysed.invoice.state !== 'BLOCKED')
+      throw new Error(`${file}: state ${analysed.invoice.state}, expected BLOCKED`);
+    const res = await confirm(base, id, analysed.plan?.planId ?? 'none', true);
+    if (res.ok) throw new Error(`${file}: confirm of a blocked invoice was accepted`);
+    console.log(`  confirm refused: ${res.status} ${await errorCode(res)}`);
+    return;
+  }
+  if (analysed.invoice.state !== 'AWAITING_CONFIRMATION' || !analysed.plan) {
+    throw new Error(`${file}: analysis ended in ${analysed.invoice.state}, expected AWAITING_CONFIRMATION`);
+  }
+  console.log(`  ${analysed.confirmationSentence}`);
+  if (expect === 'review') {
+    const res = await confirm(base, id, analysed.plan.planId);
+    if (res.ok) throw new Error(`${file}: review confirmed without override`);
+    console.log(`  without override: ${res.status} ${await errorCode(res)}`);
+  }
+  const res = await confirm(base, id, analysed.plan.planId, expect === 'review' ? true : undefined);
+  if (!res.ok) throw new Error(`${file}: confirm → ${res.status} ${await errorCode(res)}`);
+  const final = await waitFor(base, id, ['PAID', 'FAILED', 'REJECTED', 'BLOCKED', 'SCHEDULED'], seen);
+  if (final.invoice.state !== 'PAID')
+    throw new Error(`${file}: payment ended in ${final.invoice.state}, expected PAID`);
+  console.log(
+    `  PAID · transfer ${final.execution?.transferId} · txid ${final.execution?.txid?.slice(0, 16) ?? 'n/a'}…`,
+  );
 }
 
 let code = 0;

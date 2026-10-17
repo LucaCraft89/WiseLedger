@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@12.11.2",
   "engines": {
-    "node": ">=22.17"
+    "node": ">=22.17 <23"
   },
   "scripts": {
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm secret-scan",
@@ -18,7 +18,8 @@
     "wallet:smoke": "pnpm -F wallet --if-present run smoke",
     "demo:prepare": "pnpm -F wallet --if-present run demo:prepare",
     "demo:reset": "pnpm -F wallet --if-present run demo:reset",
-    "evals": "pnpm -F ai --if-present run evals"
+    "evals": "pnpm -F ai --if-present run evals",
+    "regtest": "bash infra/regtest/regtest.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",

@@ -25,7 +25,7 @@ async function upload(filename: string, text: string): Promise<string> {
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'wiseledger-server-'));
-  built = await createApp({ uploadDir: dir, mockStepMs: 0 });
+  built = await createApp({ uploadDir: dir, dbPath: ':memory:', mockStepMs: 0 });
 });
 
 afterEach(async () => {
@@ -47,7 +47,7 @@ describe('server on mocks', () => {
     const id = await upload('ok-basic.txt', 'Invoice 2026-042, Acme Srl, 25.00 TUSDT');
     expect(await waitForState(id, ['AWAITING_CONFIRMATION', 'BLOCKED', 'FAILED'])).toBe('AWAITING_CONFIRMATION');
     const detail = (await built.app.inject({ method: 'GET', url: `/api/invoices/${id}` })).json();
-    expect(detail.confirmationSentence).toContain('25.000000 TUSDT');
+    expect(detail.confirmationSentence).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?');
     const planId = detail.plan.planId as string;
 
     const res = await built.app.inject({ method: 'POST', url: `/api/invoices/${id}/confirm`, payload: { planId } });

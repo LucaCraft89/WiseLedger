@@ -1,0 +1,15 @@
+STUDIO GRAFICO LUNA S.N.C.
+Corso Francia 88, 10143 Torino - P.IVA IT09876543210
+amministrazione@studioluna.example
+
+Fattura n. 117/2026 del 05/10/2026
+Scadenza: 04/11/2026
+
+Descrizione                         Q.tà   Prezzo    Importo
+Logo redesign                          1     42.37     42.37
+Business card layout                   1     20.00     20.00
+
+TOTALE: EUR 62.37
+
+Pagamento: RGB, asset TUSDT al cambio del giorno
+RGB invoice: rgb:mock/rgb:mock-tusdt/62370000/1900000000
