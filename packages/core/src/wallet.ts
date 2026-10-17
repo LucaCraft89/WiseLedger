@@ -37,6 +37,9 @@ export const TransferInfoSchema = z.object({
   rgbInvoice: z.string().optional(),
   /** RGB recipient ID (blinded UTXO) the transfer pays; matches DecodedInvoice.recipientId of the invoice paid. */
   recipientId: z.string().optional(),
+  /** How it moved; absent = onchain. Lightning payments have a paymentHash and no txid. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
+  paymentHash: z.string().optional(),
   /** ISO timestamps */
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -53,6 +56,12 @@ export const DecodedInvoiceSchema = z.object({
   /** ISO timestamp; absent = no expiry */
   expiresAt: z.string().optional(),
   transportEndpoints: z.array(z.string()),
+  /**
+   * `lightning` for an RGB Lightning invoice (BOLT11 with RGB fields, paid over a channel, instant); absent = onchain.
+   * The same `rgbInvoice` string travels through plan, guard and pay() either way.
+   */
+  rail: z.enum(['onchain', 'lightning']).optional(),
+  paymentHash: z.string().optional(),
 });
 export type DecodedInvoice = z.infer<typeof DecodedInvoiceSchema>;
 
@@ -97,7 +106,29 @@ export interface QuoteResult {
 
 export interface PayResult {
   transferId: string;
+  /** On-chain only. */
   txid?: string;
+  /** Lightning only. */
+  paymentHash?: string;
+}
+
+export interface LightningChannel {
+  channelId: string;
+  /** Peer node public key (the LSP for the app's node). */
+  peer: string;
+  /** Base units of the channel asset on our side / the peer's side. */
+  localAsset: string;
+  remoteAsset: string;
+  assetId?: string;
+  usable: boolean;
+}
+
+export interface LightningStatus {
+  enabled: boolean;
+  nodePubkey?: string;
+  channels: LightningChannel[];
+  /** Plain words when enabled but not working ("No channel yet: requested from the LSP"). */
+  problem?: string;
 }
 
 /** First-run state. The mnemonic is revealed at most once (the backend records that it was shown). */
@@ -139,6 +170,11 @@ export interface WalletPort {
   getTransfer(transferId: string): Promise<TransferInfo | null>;
   listTransfers(assetId?: string): Promise<TransferInfo[]>;
   sync(): Promise<void>;
+  /**
+   * Lightning node and channels, for the UI. Optional: backends without Lightning omit it. pay() dispatches by the
+   * invoice's rail; a Lightning payment maps to TransferStatus (pending = WaitingCounterparty, Succeeded = Settled).
+   */
+  lightningStatus?(): Promise<LightningStatus>;
 }
 
 export type WalletErrorCode =
