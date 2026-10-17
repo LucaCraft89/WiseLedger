@@ -86,6 +86,13 @@ describe.each(backends)('WalletPort contract: $name', ({ make, prepare }) => {
     expect(d.recipientId).toBeTruthy();
   });
 
+  it('creates an open-amount invoice (no asset, no amount)', async () => {
+    const r = await w.createReceiveInvoice({ expirySec: 600 });
+    const d = await w.decodeInvoice(r.rgbInvoice);
+    expect(d.amount).toBeUndefined();
+    expect(d.assetId).toBeUndefined();
+  });
+
   it('rejects garbage invoices and unknown assets with typed errors', async () => {
     expect(await errorCode(w.decodeInvoice('not-an-invoice'))).toBe('InvalidInvoice');
     expect(await errorCode(w.assetBalance('rgb:unknownAsset-xxxxxxx-xxxxxxx-xxxxxxx-xxxxxxx-xxxxxxx'))).toBe(

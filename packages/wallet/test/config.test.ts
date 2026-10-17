@@ -20,6 +20,11 @@ describe('walletConfigFromEnv', () => {
     expect(c.transportEndpoint).toBe('rpc://127.0.0.1:3000/json-rpc');
   });
 
+  it('resolves relative data dirs against the repo root, whatever the cwd', () => {
+    const c = walletConfigFromEnv({ WALLET_DATA_DIR: '.data/wallet' });
+    expect(c.dataDir).toBe(new URL('../../../.data/wallet', import.meta.url).pathname);
+  });
+
   it('rejects unknown values with the variable name', () => {
     expect(() => walletConfigFromEnv({ WALLET_BACKEND: 'utexo' })).toThrow(/WALLET_BACKEND/);
     expect(() => walletConfigFromEnv({ RGB_NETWORK: 'mainnet' })).toThrow(/RGB_NETWORK/);

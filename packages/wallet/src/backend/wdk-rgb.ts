@@ -1,6 +1,8 @@
 // WalletPort on WDK core + @utexo/wdk-wallet-rgb (rgb-lib underneath). Pitfalls handled here (PLAN §3):
 // feeRate always passed; some methods exist only on the rgb-sdk wallet (`getRgbWallet()`); receive invoices are
 // created without assetId; dispose() throws "Invalid checksum" so it is guarded; amounts cross as base-unit strings.
+import fs from 'node:fs';
+import path from 'node:path';
 import WDK from '@tetherto/wdk';
 import WalletManagerRgb from '@utexo/wdk-wallet-rgb';
 import {
@@ -13,6 +15,7 @@ import {
   InvoiceExpired,
   type IssueNiaRequest,
   NoUtxo,
+  type OnboardingInfo,
   type PaymentRequest,
   type PayResult,
   type QuoteResult,
@@ -27,6 +30,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { loadOrCreateMnemonic } from '../seed.js';
 
 /** The rgb-sdk WalletManager methods we use (wdk-wallet-rgb 2.0.3 exposes some only there). */
@@ -72,6 +76,20 @@ interface SdkAsset {
   balance?: Partial<SdkBalance>;
 }
 
+/** rgb-sdk's internal client: the rgb-lib binding and the transport endpoint it was built with. */
+interface RgbLibClient {
+  transportEndpoint: string;
+  wallet: {
+    blindReceive(
+      assetId: string | null,
+      assignment: string,
+      durationSeconds: string,
+      transportEndpoints: string[],
+      minConfirmations: string,
+    ): ReturnType<RgbSdkWallet['blindReceive']>;
+  };
+}
+
 export interface SdkTransfer {
   idx: number;
   batchTransferIdx: number;
@@ -101,7 +119,8 @@ function transferAmount(t: SdkTransfer): string {
 
 /** The WDK account surface we use (WalletAccountRgb from wdk-wallet-rgb). */
 export interface RgbAccount {
-  getRgbWallet(): RgbSdkWallet;
+  /** Async once the WDK policy proxy governs the account. */
+  getRgbWallet(): RgbSdkWallet | Promise<RgbSdkWallet>;
   getAddress(): Promise<string> | string;
   quoteTransfer(o: { token: string; recipient: string; amount: number; feeRate: number }): Promise<{ fee: bigint }>;
   transfer(o: { token: string; recipient: string; amount: number; feeRate: number }): Promise<{
@@ -157,6 +176,8 @@ function str(n: number | undefined): string {
 /** Maps rgb-lib / WDK error text to our typed errors (messages stay plain for the UI). */
 export function mapWalletError(e: unknown): WalletError {
   if (e instanceof WalletError) return e;
+  const denied = policyDenied(e);
+  if (denied) return denied;
   const msg = e instanceof Error ? e.message : String(e);
   if (/InsufficientSpendableAssets|InsufficientTotalAssets|InsufficientAssignments/i.test(msg))
     return new InsufficientFunds();
@@ -173,6 +194,9 @@ export class WdkRgbWallet implements WalletPort {
   private wdk: WDK | null = null;
   private account: RgbAccount | null = null;
   private registered = false;
+  private created = false;
+  /** Raw rgb-sdk wallet, fetched once through the governed account (governed calls are async). */
+  private sdk: RgbSdkWallet | null = null;
 
   /** `deps.account` injects a fake WDK account in tests (no native code, no chain). */
   constructor(
@@ -181,19 +205,21 @@ export class WdkRgbWallet implements WalletPort {
   ) {
     if (deps.account) {
       this.account = deps.account;
+      this.sdk = deps.account.getRgbWallet() as RgbSdkWallet;
       this.registered = true;
     }
   }
 
   /** The rgb-sdk wallet, for scripts that need BTC-level calls. */
   get rgb(): RgbSdkWallet {
-    if (!this.account) throw new Error('Wallet not initialised: call init() first.');
-    return this.account.getRgbWallet();
+    if (!this.sdk) throw new Error('Wallet not initialised: call init() first.');
+    return this.sdk;
   }
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
-      const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir);
+      this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
       const Manager = WalletManagerRgb as unknown as Parameters<WDK['registerWallet']>[1];
       this.wdk = new WDK(mnemonic).registerWallet('rgb', Manager, {
@@ -202,13 +228,25 @@ export class WdkRgbWallet implements WalletPort {
         indexerUrl: this.cfg.indexerUrl,
         transportEndpoint: this.cfg.transportEndpoint,
       } as never);
+      // Spend limits live in WDK: every transfer passes the policy engine before signing.
+      this.wdk.registerPolicy([buildSpendPolicy(this.cfg)] as never);
       this.account = (await this.wdk.getAccount('rgb', 0)) as unknown as RgbAccount;
+      this.sdk = await this.account.getRgbWallet();
     }
     if (!this.registered) {
       this.rgb.registerWallet();
       this.registered = true;
     }
     return { backend: 'wdk-rgb', network: this.cfg.network };
+  }
+
+  async onboarding(opts: { reveal?: boolean } = {}): Promise<OnboardingInfo> {
+    const marker = path.join(this.cfg.dataDir, 'seed-shown');
+    const seedShown = fs.existsSync(marker);
+    if (!opts.reveal || seedShown) return { walletCreated: this.created, seedShown };
+    const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+    fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    return { walletCreated: this.created, seedShown: true, mnemonic };
   }
 
   async receiveAddress(): Promise<string> {
@@ -241,15 +279,30 @@ export class WdkRgbWallet implements WalletPort {
     }
   }
 
-  async createUtxosIfNeeded(): Promise<{ created: number }> {
+  /**
+   * Creates colorable UTXOs when fewer than 2 look free. `force` creates more even then: pending receive invoices
+   * reserve UTXOs that still show no allocation, so a NoUtxo from rgb-lib is the reliable signal.
+   */
+  async createUtxosIfNeeded(force = false): Promise<{ created: number }> {
     const free = this.rgb.listUnspents().filter((u) => u.utxo.colorable && u.rgbAllocations.length === 0).length;
-    if (free >= 2) return { created: 0 };
+    if (free >= 2 && !force) return { created: 0 };
     try {
-      const created = await this.rgb.createUtxos({ upTo: true, num: 5, size: 1000, feeRate: this.cfg.feeRate });
+      const created = await this.rgb.createUtxos({ upTo: !force, num: 5, size: 1000, feeRate: this.cfg.feeRate });
       return { created };
     } catch (e) {
       if (/AllocationsAlreadyAvailable/i.test(String(e))) return { created: 0 };
       throw mapWalletError(e);
+    }
+  }
+
+  /** Runs an RGB operation; on NoUtxo creates UTXOs once and retries (never used for sends, see pay()). */
+  private async withUtxos<T>(op: () => T): Promise<T> {
+    try {
+      return op();
+    } catch (e) {
+      if (!(mapWalletError(e) instanceof NoUtxo)) throw e;
+      await this.createUtxosIfNeeded(true);
+      return op();
     }
   }
 
@@ -279,12 +332,16 @@ export class WdkRgbWallet implements WalletPort {
   async createReceiveInvoice(req: CreateReceiveRequest): Promise<ReceiveInvoice> {
     try {
       // A receiver cannot name an asset it has never seen (AssetNotFound): the payer names it.
-      const r = this.rgb.blindReceive({
-        ...(req.assetId ? { assetId: req.assetId } : {}),
-        ...(req.amount ? { amount: toNumber(req.amount) } : {}),
-        durationSeconds: req.expirySec,
-        minConfirmations: 1,
-      });
+      const r = await this.withUtxos(() =>
+        req.amount
+          ? this.rgb.blindReceive({
+              ...(req.assetId ? { assetId: req.assetId } : {}),
+              amount: toNumber(req.amount),
+              durationSeconds: req.expirySec,
+              minConfirmations: 1,
+            })
+          : this.blindReceiveAny(req.assetId, req.expirySec),
+      );
       return {
         rgbInvoice: r.invoice,
         recipientId: r.recipientId,
@@ -337,13 +394,17 @@ export class WdkRgbWallet implements WalletPort {
     await this.precheck(req);
     const before = new Set(this.rgb.listTransfers(req.assetId).map((t) => t.batchTransferIdx));
     let hash: string;
+    const send = () =>
+      this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate });
     try {
-      ({ hash } = await this.acct().transfer({
-        token: req.assetId,
-        recipient: req.rgbInvoice,
-        amount: toNumber(req.amount),
-        feeRate,
-      }));
+      try {
+        ({ hash } = await send());
+      } catch (e) {
+        // NoUtxo comes from sendBegin, before anything is signed: create UTXOs and try once more.
+        if (!(mapWalletError(e) instanceof NoUtxo)) throw e;
+        await this.createUtxosIfNeeded(true);
+        ({ hash } = await send());
+      }
     } catch (e) {
       const err = mapWalletError(e);
       if (!(err instanceof SubmitTimeout)) throw err;
@@ -406,6 +467,16 @@ export class WdkRgbWallet implements WalletPort {
   private acct(): RgbAccount {
     if (!this.account) throw new Error('Wallet not initialised: call init() first.');
     return this.account;
+  }
+
+  /**
+   * Open-amount invoice. rgb-sdk 1.0.3 always builds `{"Fungible":amount}` (undefined → rgb-lib JSONConversion error),
+   * so call the rgb-lib binding underneath with the `"Any"` assignment.
+   */
+  private blindReceiveAny(assetId: string | undefined, expirySec: number): ReturnType<RgbSdkWallet['blindReceive']> {
+    const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
+    if (!client?.wallet) throw new TransferFailed('This wallet cannot create an open-amount invoice; set an amount.');
+    return client.wallet.blindReceive(assetId ?? null, '"Any"', String(expirySec), [client.transportEndpoint], '1');
   }
 
   private newOutgoing(assetId: string, before: Set<number>): SdkTransfer | undefined {
