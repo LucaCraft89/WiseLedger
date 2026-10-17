@@ -38,6 +38,10 @@ describe('canTransition', () => {
     }
   });
 
+  it('allows a user retry after a failure (re-confirm, never straight to executing)', () => {
+    expect(canTransition('FAILED', 'CONFIRMED')).toBe(true);
+  });
+
   it('allows scheduling and blocking', () => {
     expect(canTransition('EXECUTING', 'SCHEDULED')).toBe(true);
     expect(canTransition('SCHEDULED', 'EXECUTING')).toBe(true);
@@ -50,6 +54,7 @@ describe('canTransition', () => {
     expect(canTransition('AWAITING_CONFIRMATION', 'EXECUTING')).toBe(false);
     expect(canTransition('BLOCKED', 'CONFIRMED')).toBe(false);
     expect(canTransition('PAID', 'EXECUTING')).toBe(false);
+    expect(canTransition('FAILED', 'EXECUTING')).toBe(false);
     expect(INVOICE_TRANSITIONS.PAID).toEqual([]);
     expect(INVOICE_TRANSITIONS.REJECTED).toEqual([]);
     expect(() => assertTransition('PAID', 'FAILED')).toThrow(IllegalTransition);

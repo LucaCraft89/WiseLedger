@@ -98,6 +98,16 @@ export interface PayResult {
   txid?: string;
 }
 
+/** First-run state. The mnemonic is revealed at most once (the backend records that it was shown). */
+export interface OnboardingInfo {
+  /** True when this process created the wallet (new seed) instead of opening an existing one. */
+  walletCreated: boolean;
+  /** True once the seed has been revealed to the user. */
+  seedShown: boolean;
+  /** Present only on the one call with `reveal: true` while `seedShown` was still false. */
+  mnemonic?: string;
+}
+
 export interface WalletInfo {
   backend: 'mock' | 'wdk-rgb' | 'rgb-lib';
   network: string;
@@ -105,6 +115,8 @@ export interface WalletInfo {
 
 export interface WalletPort {
   init(): Promise<WalletInfo>;
+  /** First-run info; `reveal: true` returns the mnemonic once and marks it shown. */
+  onboarding(opts?: { reveal?: boolean }): Promise<OnboardingInfo>;
   /** Bitcoin address for funding. Real backends may return a new address on every call. */
   receiveAddress(): Promise<string>;
   listAssets(): Promise<AssetInfo[]>;
@@ -134,7 +146,8 @@ export type WalletErrorCode =
   | 'UnknownAsset'
   | 'InvalidInvoice'
   | 'TransferFailed'
-  | 'SubmitTimeout';
+  | 'SubmitTimeout'
+  | 'PolicyDenied';
 
 export class WalletError extends Error {
   readonly code: WalletErrorCode;
@@ -184,6 +197,13 @@ export class SubmitTimeout extends WalletError {
   ) {
     super('SubmitTimeout', message);
     this.transferId = transferId;
+  }
+}
+
+/** A spend policy (WDK policy engine) refused the operation: over the limit or asset not approved. */
+export class PolicyDenied extends WalletError {
+  constructor(message = 'Your spending rules do not allow this payment.') {
+    super('PolicyDenied', message);
   }
 }
 

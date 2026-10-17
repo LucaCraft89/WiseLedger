@@ -81,6 +81,15 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX events_invoice ON events(invoice_id, seq);
   `,
+  // 2: PaymentGuard idempotency keys. One row per plan that started executing; deleted only when nothing left the
+  // wallet (RELEASE_ON_FAILURE). Survives restarts, so a plan is never paid twice.
+  `
+  CREATE TABLE guard_claims (
+    plan_id TEXT PRIMARY KEY,
+    claimed_at TEXT NOT NULL
+  );
+  CREATE INDEX plans_plan_id ON plans(plan_id);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -341,6 +350,12 @@ export class InvoiceStore {
       .prepare('SELECT event_json FROM events WHERE invoice_id = ? ORDER BY seq')
       .all(id) as unknown as { event_json: string }[];
     return rows.map((r) => JSON.parse(r.event_json) as AppEvent);
+  }
+
+  /** Events without an invoice (e.g. status changes of transfers not linked to an invoice). */
+  subscribeGlobal(listener: Listener): () => void {
+    this.bus.on('global', listener);
+    return () => this.bus.off('global', listener);
   }
 
   /** Returns an unsubscribe function. */

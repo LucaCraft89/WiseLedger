@@ -47,6 +47,16 @@ export function confirmGate(verdict: Verdict, ticked: boolean): { canConfirm: bo
   return { canConfirm: true };
 }
 
+/** The override rule in words, shown next to "Confirm and pay". */
+export function gateHint(verdict: Verdict, ticked: boolean): string {
+  if (verdict === 'block') return 'You cannot pay this invoice: it was stopped because it looks unsafe.';
+  if (verdict === 'review')
+    return ticked
+      ? 'You read the warnings. You can pay now.'
+      : 'Tick the box above to say you read the warnings. Then you can pay.';
+  return 'We found nothing suspicious. Read the sentence above, then pay.';
+}
+
 export type ProgressStatus = 'pending' | 'running' | 'done';
 export interface ProgressStep {
   label: string;
@@ -56,12 +66,14 @@ export interface PaymentProgress {
   steps: ProgressStep[];
   failed: boolean;
   errorMessage?: string;
+  /** Typed error code (wallet, guard or Treasurer), when known. */
+  errorCode?: string;
   transferId?: string;
   txid?: string;
 }
 
 export const PROGRESS_LABELS = [
-  'Sent to the network',
+  'Submitted',
   "Waiting for the supplier's wallet",
   'Waiting for a block confirmation',
   'Paid',
@@ -95,7 +107,8 @@ export function paymentProgress(
 ): PaymentProgress {
   let rank = 0;
   let failed = state === 'FAILED' || execution?.status === 'failed';
-  let errorMessage = execution?.error?.message;
+  let errorMessage: string | undefined;
+  let errorCode: string | undefined;
   let transferId = execution?.transferId;
   let txid = execution?.txid;
   let started = state === 'CONFIRMED' || state === 'EXECUTING';
@@ -110,15 +123,21 @@ export function paymentProgress(
       if (e.to === 'EXECUTING' || e.to === 'CONFIRMED') started = true;
       if (e.to === 'PAID') rank = 4;
       if (e.to === 'FAILED') failed = true;
+    } else if (e.type === 'toolCall' && e.name === 'execute_plan' && e.status === 'ok') {
+      started = true;
+      rank = Math.max(rank, 1);
     } else if (e.type === 'error') {
       errorMessage = e.message;
+      errorCode = e.code;
     }
   }
   if (state === 'PAID') rank = 4;
+  // The execution result is the latest word on the payment.
+  if (execution?.error) ({ code: errorCode, message: errorMessage } = execution.error);
   const inFlight = started && !failed && rank < 4;
   const steps = PROGRESS_LABELS.map((label, i) => ({
     label,
     status: (i < rank ? 'done' : i === rank && inFlight ? 'running' : 'pending') as ProgressStatus,
   }));
-  return { steps, failed, errorMessage, transferId, txid };
+  return { steps, failed, errorMessage, errorCode, transferId, txid };
 }

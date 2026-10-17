@@ -82,7 +82,7 @@ describe('extract: deterministic clean-up', () => {
     expect(rowAmount(text, 'Bike repair, labour')).toBe('30.00');
     const e = toExtraction({ ...base, lineItems: [{ description: 'Spare parts', quantity: 1, amount: null }] }, text);
     expect(e.lineItems[0]?.amount).toBe('10.00');
-    expect(rowAmount(text + 'Spare parts again 5.00', 'Spare parts')).toBeUndefined();
+    expect(rowAmount(`${text}Spare parts again 5.00`, 'Spare parts')).toBeUndefined();
   });
   it('marks missing fields with confidence 0', () => {
     const e = toExtraction({ ...base, invoiceNumber: null, total: 'abc' });

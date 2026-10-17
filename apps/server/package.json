@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.4",
+    "ai": "workspace:*",
     "core": "workspace:*",
     "fastify": "^5.12.7",
+    "wallet": "workspace:*",
     "zod": "^4.6.7"
   },
   "devDependencies": {

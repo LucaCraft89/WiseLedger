@@ -1,16 +1,17 @@
 // The Analyst (no tools): extract (call 1) → rules (code) → verdict (code) → summary (call 2, fields + flags only).
-import type {
-  AnalysisReport,
-  AnalyzeContext,
-  DecodedInvoice,
-  EmitFn,
-  HistoryPort,
-  InvoiceAnalyzer,
-  InvoiceSource,
-  LlmProvider,
-  ProposedPayment,
-  Stage,
-  WalletPort,
+import {
+  type AnalysisReport,
+  type AnalyzeContext,
+  type DecodedInvoice,
+  type EmitFn,
+  FLAG_CODES,
+  type HistoryPort,
+  type InvoiceAnalyzer,
+  type InvoiceSource,
+  type LlmProvider,
+  type ProposedPayment,
+  type Stage,
+  type WalletPort,
 } from 'core';
 import { loadInvoice } from '../extract/text.js';
 import { paymentAmount, paymentAsset, type RuleConfig, type RuleInput, runRules } from '../rules/index.js';
@@ -59,9 +60,16 @@ export class Analyst implements InvoiceAnalyzer {
     };
 
     const input = await stage('reading', () => loadInvoice(src));
-    const { extraction, ms: extractMs } = await stage('extracting', () =>
-      extractInvoice(input, llm, { ...(ctx.signal ? { signal: ctx.signal } : {}), ...(onToken ? { onToken } : {}) }),
-    );
+    let extracted: Awaited<ReturnType<typeof extractInvoice>>;
+    try {
+      extracted = await stage('extracting', () =>
+        extractInvoice(input, llm, { ...(ctx.signal ? { signal: ctx.signal } : {}), ...(onToken ? { onToken } : {}) }),
+      );
+    } catch (err) {
+      // Never a silent pass: without a reliable extraction the user must review, and there is nothing to pay.
+      return this.unavailable(invoiceId, err, emit, at);
+    }
+    const { extraction, ms: extractMs } = extracted;
 
     const rulesStarted = Date.now();
     const { flags, verdict, ruleInput } = await stage('checking', async () => {
@@ -121,7 +129,34 @@ export class Analyst implements InvoiceAnalyzer {
     emit({ type: 'stage', invoiceId, at: at(), stage: 'analyzed', status: 'end' });
     return report;
   }
+
+  private unavailable(invoiceId: string, err: unknown, emit: EmitFn, at: () => string): AnalysisReport {
+    const detail = err instanceof Error ? err.message : String(err);
+    const flag = {
+      code: FLAG_CODES.AI_UNAVAILABLE,
+      severity: 'warn' as const,
+      message: AI_UNAVAILABLE_MESSAGE,
+      evidence: detail.slice(0, 120),
+    };
+    emit({ type: 'flag', invoiceId, at: at(), flag });
+    const report: AnalysisReport = {
+      invoiceId,
+      extraction: { issuer: {}, lineItems: [], payment: { method: 'unknown' }, fieldConfidence: {} },
+      flags: [flag],
+      verdict: 'review',
+      summary: AI_UNAVAILABLE_MESSAGE,
+      questionsForUser: [],
+      model: { name: this.deps.llm.info().model, provider: this.deps.llm.info().provider },
+      createdAt: at(),
+    };
+    emit({ type: 'report', invoiceId, at: at(), report });
+    emit({ type: 'stage', invoiceId, at: at(), stage: 'analyzed', status: 'end' });
+    return report;
+  }
 }
+
+export const AI_UNAVAILABLE_MESSAGE =
+  'The local AI could not read this invoice, so nothing was checked. Check it yourself or try again in a minute.';
 
 /** Built by code from validated data only: the RGB invoice as printed, the asset and amount the rules checked. */
 export function buildProposedPayment(input: RuleInput): ProposedPayment | undefined {

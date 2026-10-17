@@ -1,5 +1,9 @@
 // Wallet configuration from env. Endpoints are always explicit: the wdk-wallet-rgb defaults for 'signet' do not work.
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** Repo root: relative data dirs resolve here, not against the cwd (pnpm -F runs scripts inside the package). */
+export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 export type WalletBackendName = 'mock' | 'wdk-rgb' | 'rgb-lib';
 export type RgbNetworkName = 'mutinynet' | 'regtest';
@@ -14,6 +18,10 @@ export interface WalletConfig {
   explorerUrl: string;
   /** sat/vB, always passed to the chain (the estimate is 0 on Mutinynet) */
   feeRate: number;
+  /** Max base units per payment, enforced by the WDK spend policy (PAYMENT_CAP, default 100 TUSDT). */
+  paymentCap: string;
+  /** Asset IDs allowed for payments (ASSET_ALLOWLIST, comma-separated); empty = any. */
+  assetAllowlist: string[];
 }
 
 const DEFAULTS: Record<RgbNetworkName, Pick<WalletConfig, 'indexerUrl' | 'transportEndpoint' | 'explorerUrl'>> = {
@@ -49,15 +57,24 @@ export function walletConfigFromEnv(
   const feeRate = Number(env.RGB_FEE_RATE ?? '2');
   if (!Number.isFinite(feeRate) || feeRate < 1)
     throw new Error(`RGB_FEE_RATE=${env.RGB_FEE_RATE} must be a number ≥ 1.`);
+  const paymentCap = (env.PAYMENT_CAP ?? '').trim() || '100000000';
+  if (!/^[1-9]\d*$/.test(paymentCap))
+    throw new Error(`PAYMENT_CAP=${paymentCap} must be base units (a positive integer).`);
+  const assetAllowlist = (env.ASSET_ALLOWLIST ?? '')
+    .split(',')
+    .map((a) => a.trim())
+    .filter(Boolean);
   const dataDirVar = opts.dataDirVar ?? 'WALLET_DATA_DIR';
   return {
     backend,
     network,
-    dataDir: path.resolve(env[dataDirVar] || opts.defaultDataDir || '.data/wallet'),
+    dataDir: path.resolve(REPO_ROOT, env[dataDirVar] || opts.defaultDataDir || '.data/wallet'),
     indexerUrl: env.RGB_INDEXER_URL || d.indexerUrl,
     transportEndpoint: env.RGB_TRANSPORT_ENDPOINT || d.transportEndpoint,
     explorerUrl: env.RGB_EXPLORER_URL || d.explorerUrl,
     feeRate,
+    paymentCap,
+    assetAllowlist,
   };
 }
 

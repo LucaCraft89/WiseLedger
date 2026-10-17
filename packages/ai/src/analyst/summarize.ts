@@ -86,7 +86,7 @@ export async function summarize(
     }
     const out = SummaryOut.parse(json);
     return {
-      summary: limitWords(out.summary, 120),
+      summary: limitWords(withLead(out.summary, extraction), 120),
       questionsForUser: verdict === 'ok' ? [] : out.questionsForUser.map((q) => q.slice(0, 200)),
       ms: Date.now() - started,
       fallback: false,
@@ -94,6 +94,16 @@ export async function summarize(
   } catch {
     return { ...templateSummary(extraction, flags, verdict), ms: Date.now() - started, fallback: true };
   }
+}
+
+/** Makes sure the summary says who asks for what: prepends a code-built sentence when the model left the supplier out. */
+export function withLead(summary: string, extraction: InvoiceExtraction): string {
+  const name = extraction.issuer.name?.trim();
+  if (!name) return summary.trim();
+  const first = name.split(/\s+/)[0]?.toLowerCase() ?? '';
+  if (first && summary.toLowerCase().includes(first)) return summary.trim();
+  const what = extraction.total ? ` ${extraction.total} ${extraction.currency ?? ''}`.trimEnd() : '';
+  return `${name} asks for${what || ' a payment'}. ${summary.trim()}`;
 }
 
 export function limitWords(text: string, max: number): string {
