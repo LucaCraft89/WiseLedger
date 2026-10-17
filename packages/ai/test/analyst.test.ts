@@ -3,13 +3,13 @@ import { MockLlm, MockWallet } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
 import { Analyst } from '../src/analyst/analyze.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { EXPECTED, perfectAnswer, sourceOf } from './fixtures.js';
+import { EXPECTED, PAYEE_BOOK, perfectAnswer, sourceOf } from './fixtures.js';
 import { CONFIG, historyOf } from './helpers.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z');
 const okVerdict = (expected: string | string[], actual: string) =>
   (Array.isArray(expected) ? expected : [expected]).includes(actual);
-const history = historyOf([{ issuer: 'ACME SRL', number: '2026-042', invoiceId: 'inv_ok_basic_before' }]);
+const history = historyOf([{ issuer: 'ACME SRL', number: '2026-042', invoiceId: 'inv_ok_basic_before' }], PAYEE_BOOK);
 
 function analystWith(llm: MockLlm | QvacProvider) {
   return new Analyst({
@@ -37,14 +37,15 @@ describe('Analyst v1 with MockLlm', () => {
         : new Analyst({
             llm,
             wallet: new MockWallet({ now: () => NOW.getTime() }),
-            history: historyOf(),
+            history: historyOf([], PAYEE_BOOK),
             config: CONFIG,
             now: () => NOW,
           });
       const report = await analyst.analyze(sourceOf(f), { invoiceId: f.id }, (e) => events.push(e));
       expect(okVerdict(f.verdict, report.verdict), `${report.verdict} ${JSON.stringify(report.flags)}`).toBe(true);
-      if (f.flags[0]) expect(report.flags.map((x) => x.code)).toContain(f.flags[0]);
-      else expect(report.flags).toEqual([]);
+      // Every expected warn/block code and nothing else (info flags such as "new supplier" are not listed).
+      const raised = [...new Set(report.flags.filter((x) => x.severity !== 'info').map((x) => x.code))].sort();
+      expect(raised).toEqual([...f.flags].sort());
     });
   }
 
@@ -58,7 +59,7 @@ describe('Analyst v1 with MockLlm', () => {
     const r = await new Analyst({
       llm,
       wallet: new MockWallet(),
-      history: historyOf(),
+      history: historyOf([], PAYEE_BOOK),
       config: CONFIG,
       now: () => NOW,
     }).analyze(sourceOf(f), { invoiceId: 'x' }, (e) => events.push(e));
@@ -108,7 +109,7 @@ describe('Analyst v1 with MockLlm', () => {
     const r = await new Analyst({
       llm,
       wallet: new MockWallet(),
-      history: historyOf(),
+      history: historyOf([], PAYEE_BOOK),
       config: CONFIG,
       now: () => NOW,
     }).analyze(sourceOf(f), { invoiceId: 'x' }, (e) => events.push(e));
@@ -141,7 +142,7 @@ describe('Analyst v1 with MockLlm', () => {
     const r = await new Analyst({
       llm,
       wallet: new MockWallet(),
-      history: historyOf(),
+      history: historyOf([], PAYEE_BOOK),
       config: CONFIG,
       now: () => NOW,
     }).analyze(sourceOf(f), { invoiceId: 'x' }, () => {});
@@ -150,7 +151,7 @@ describe('Analyst v1 with MockLlm', () => {
 });
 
 describe.skipIf(process.env.LIVE_QVAC !== '1')('Analyst v1 on live QVAC', () => {
-  it('the six fixtures give the expected verdicts', { timeout: 1_200_000 }, async () => {
+  it('the fixtures give the expected verdicts', { timeout: 1_200_000 }, async () => {
     const llm = new QvacProvider({ vision: true });
     const rows: string[] = [];
     let good = 0;
@@ -161,7 +162,7 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('Analyst v1 on live QVAC', () => 
         : new Analyst({
             llm,
             wallet: new MockWallet({ now: () => NOW.getTime() }),
-            history: historyOf(),
+            history: historyOf([], PAYEE_BOOK),
             config: CONFIG,
             now: () => NOW,
             streamTokens: false,
@@ -179,7 +180,7 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('Analyst v1 on live QVAC', () => 
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       resolve(dir, 'verdicts-live.md'),
-      `| fixture | expected | actual | flags | time |\n|---|---|---|---|---|\n${rows.join('\n')}\n\n${good}/6 (${llm.model})\n`,
+      `| fixture | expected | actual | flags | time |\n|---|---|---|---|---|\n${rows.join('\n')}\n\n${good}/${EXPECTED.length} (${llm.model})\n`,
     );
     await llm.unload();
     expect(good).toBe(6);

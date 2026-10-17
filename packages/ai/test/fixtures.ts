@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { InvoiceSource } from 'core';
+import type { InvoiceSource, PayeeBookEntry } from 'core';
 import type { LlmExtraction } from '../src/analyst/extract.js';
 
 export const FIXTURES_DIR = resolve(import.meta.dirname, '../../../fixtures/invoices');
@@ -21,11 +21,15 @@ export interface ExpectedFixture {
   flags: string[];
   seenBefore?: string[];
   lineAmounts: string[];
+  issueDate?: string;
+  dueDate?: string;
+  note?: string;
 }
 
-export const EXPECTED: ExpectedFixture[] = JSON.parse(
-  readFileSync(resolve(FIXTURES_DIR, 'expected.json'), 'utf8'),
-).fixtures;
+const EXPECTED_FILE = JSON.parse(readFileSync(resolve(FIXTURES_DIR, 'expected.json'), 'utf8'));
+export const EXPECTED: ExpectedFixture[] = EXPECTED_FILE.fixtures;
+/** Suppliers the user paid before (R5), shared by tests and evals. */
+export const PAYEE_BOOK: PayeeBookEntry[] = EXPECTED_FILE.payeeBook;
 
 export function sourceOf(f: ExpectedFixture): InvoiceSource {
   const path = resolve(FIXTURES_DIR, f.file);
@@ -44,8 +48,8 @@ export function perfectAnswer(f: ExpectedFixture): LlmExtraction {
     issuerVatId: f.vatId,
     issuerEmail: null,
     invoiceNumber: f.invoiceNumber,
-    issueDate: null,
-    dueDate: null,
+    issueDate: f.issueDate ?? null,
+    dueDate: f.dueDate ?? null,
     currency: f.currency,
     total: f.total,
     lineItems: f.lineAmounts.map((amount, i) => ({ description: `line ${i + 1}`, quantity: 1, amount })),
