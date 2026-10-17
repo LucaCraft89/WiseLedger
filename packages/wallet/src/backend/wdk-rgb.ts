@@ -255,15 +255,30 @@ export class WdkRgbWallet implements WalletPort {
     }
   }
 
-  async createUtxosIfNeeded(): Promise<{ created: number }> {
+  /**
+   * Creates colorable UTXOs when fewer than 2 look free. `force` creates more even then: pending receive invoices
+   * reserve UTXOs that still show no allocation, so a NoUtxo from rgb-lib is the reliable signal.
+   */
+  async createUtxosIfNeeded(force = false): Promise<{ created: number }> {
     const free = this.rgb.listUnspents().filter((u) => u.utxo.colorable && u.rgbAllocations.length === 0).length;
-    if (free >= 2) return { created: 0 };
+    if (free >= 2 && !force) return { created: 0 };
     try {
-      const created = await this.rgb.createUtxos({ upTo: true, num: 5, size: 1000, feeRate: this.cfg.feeRate });
+      const created = await this.rgb.createUtxos({ upTo: !force, num: 5, size: 1000, feeRate: this.cfg.feeRate });
       return { created };
     } catch (e) {
       if (/AllocationsAlreadyAvailable/i.test(String(e))) return { created: 0 };
       throw mapWalletError(e);
+    }
+  }
+
+  /** Runs an RGB operation; on NoUtxo creates UTXOs once and retries (never used for sends, see pay()). */
+  private async withUtxos<T>(op: () => T): Promise<T> {
+    try {
+      return op();
+    } catch (e) {
+      if (!(mapWalletError(e) instanceof NoUtxo)) throw e;
+      await this.createUtxosIfNeeded(true);
+      return op();
     }
   }
 
@@ -293,12 +308,14 @@ export class WdkRgbWallet implements WalletPort {
   async createReceiveInvoice(req: CreateReceiveRequest): Promise<ReceiveInvoice> {
     try {
       // A receiver cannot name an asset it has never seen (AssetNotFound): the payer names it.
-      const r = this.rgb.blindReceive({
-        ...(req.assetId ? { assetId: req.assetId } : {}),
-        ...(req.amount ? { amount: toNumber(req.amount) } : {}),
-        durationSeconds: req.expirySec,
-        minConfirmations: 1,
-      });
+      const r = await this.withUtxos(() =>
+        this.rgb.blindReceive({
+          ...(req.assetId ? { assetId: req.assetId } : {}),
+          ...(req.amount ? { amount: toNumber(req.amount) } : {}),
+          durationSeconds: req.expirySec,
+          minConfirmations: 1,
+        }),
+      );
       return {
         rgbInvoice: r.invoice,
         recipientId: r.recipientId,
