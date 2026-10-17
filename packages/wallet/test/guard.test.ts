@@ -62,7 +62,11 @@ describe('PaymentGuard', () => {
     expect(await over.guard.check(over.plan.planId)).toMatchObject({ ok: false, reason: 'over_cap' });
 
     const s = await setup();
-    const strict = new WalletGuard({ store: s.store, wallet: s.wallet, limits: { ...limits, assetAllowlist: ['rgb:x'] } });
+    const strict = new WalletGuard({
+      store: s.store,
+      wallet: s.wallet,
+      limits: { ...limits, assetAllowlist: ['rgb:x'] },
+    });
     expect(await strict.check(s.plan.planId)).toMatchObject({ ok: false, reason: 'asset_not_allowed' });
 
     const poor = await setup({ amount: '90000000' });

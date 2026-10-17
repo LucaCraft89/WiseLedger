@@ -17,8 +17,9 @@ const regtest = (...args: string[]) =>
 
 describe.skipIf(!live)('PaymentGuard on the real chain (regtest)', () => {
   it('pays once, refuses the second execution of the same plan, settles', async () => {
-    const assetId = (JSON.parse(fs.readFileSync(path.join(root, '.data/regtest/tusdt.json'), 'utf8')) as { assetId: string })
-      .assetId;
+    const assetId = (
+      JSON.parse(fs.readFileSync(path.join(root, '.data/regtest/tusdt.json'), 'utf8')) as { assetId: string }
+    ).assetId;
     const open = (dir: string) =>
       new WdkRgbWallet(walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: path.join(root, dir) }));
     const payer = open('.data/regtest/wallet');
@@ -39,8 +40,16 @@ describe.skipIf(!live)('PaymentGuard on the real chain (regtest)', () => {
       labels: [],
     });
     const store = new MemoryGuardStore();
-    store.put({ plan, state: 'CONFIRMED', confirmation: { planId: plan.planId, confirmedAt: new Date().toISOString() } });
-    const guard = new WalletGuard({ store, wallet: payer, limits: { paymentCap: '100000000', assetAllowlist: [assetId] } });
+    store.put({
+      plan,
+      state: 'CONFIRMED',
+      confirmation: { planId: plan.planId, confirmedAt: new Date().toISOString() },
+    });
+    const guard = new WalletGuard({
+      store,
+      wallet: payer,
+      limits: { paymentCap: '100000000', assetAllowlist: [assetId] },
+    });
 
     const first = await executeGuarded(plan.planId, { guard, wallet: payer });
     expect(first, JSON.stringify(first)).toMatchObject({ status: 'submitted', transferId: expect.any(String) });

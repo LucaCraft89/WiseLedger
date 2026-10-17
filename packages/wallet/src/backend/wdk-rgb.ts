@@ -76,6 +76,20 @@ interface SdkAsset {
   balance?: Partial<SdkBalance>;
 }
 
+/** rgb-sdk's internal client: the rgb-lib binding and the transport endpoint it was built with. */
+interface RgbLibClient {
+  transportEndpoint: string;
+  wallet: {
+    blindReceive(
+      assetId: string | null,
+      assignment: string,
+      durationSeconds: string,
+      transportEndpoints: string[],
+      minConfirmations: string,
+    ): ReturnType<RgbSdkWallet['blindReceive']>;
+  };
+}
+
 export interface SdkTransfer {
   idx: number;
   batchTransferIdx: number;
@@ -319,12 +333,14 @@ export class WdkRgbWallet implements WalletPort {
     try {
       // A receiver cannot name an asset it has never seen (AssetNotFound): the payer names it.
       const r = await this.withUtxos(() =>
-        this.rgb.blindReceive({
-          ...(req.assetId ? { assetId: req.assetId } : {}),
-          ...(req.amount ? { amount: toNumber(req.amount) } : {}),
-          durationSeconds: req.expirySec,
-          minConfirmations: 1,
-        }),
+        req.amount
+          ? this.rgb.blindReceive({
+              ...(req.assetId ? { assetId: req.assetId } : {}),
+              amount: toNumber(req.amount),
+              durationSeconds: req.expirySec,
+              minConfirmations: 1,
+            })
+          : this.blindReceiveAny(req.assetId, req.expirySec),
       );
       return {
         rgbInvoice: r.invoice,
@@ -451,6 +467,16 @@ export class WdkRgbWallet implements WalletPort {
   private acct(): RgbAccount {
     if (!this.account) throw new Error('Wallet not initialised: call init() first.');
     return this.account;
+  }
+
+  /**
+   * Open-amount invoice. rgb-sdk 1.0.3 always builds `{"Fungible":amount}` (undefined → rgb-lib JSONConversion error),
+   * so call the rgb-lib binding underneath with the `"Any"` assignment.
+   */
+  private blindReceiveAny(assetId: string | undefined, expirySec: number): ReturnType<RgbSdkWallet['blindReceive']> {
+    const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
+    if (!client?.wallet) throw new TransferFailed('This wallet cannot create an open-amount invoice; set an amount.');
+    return client.wallet.blindReceive(assetId ?? null, '"Any"', String(expirySec), [client.transportEndpoint], '1');
   }
 
   private newOutgoing(assetId: string, before: Set<number>): SdkTransfer | undefined {

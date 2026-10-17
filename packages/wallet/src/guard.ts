@@ -63,8 +63,7 @@ export class WalletGuard implements PaymentGuard {
     if (plan.planId !== planId || !(await verifyPlanId(plan)))
       return no('hash_mismatch', 'The payment changed after you confirmed it. Nothing was sent.');
     const amount = BigInt(plan.amount);
-    if (amount > BigInt(this.deps.limits.paymentCap))
-      return no('over_cap', 'The amount is above your payment limit.');
+    if (amount > BigInt(this.deps.limits.paymentCap)) return no('over_cap', 'The amount is above your payment limit.');
     const allow = this.deps.limits.assetAllowlist;
     if (allow.length > 0 && !allow.includes(plan.assetId))
       return no('asset_not_allowed', 'This asset is not on your list of approved assets.');

@@ -15,7 +15,12 @@ export const CreateReceiveParams = z.object({
     .string()
     .regex(/^[1-9]\d{0,15}$/)
     .optional(),
-  expiryMinutes: z.number().int().min(5).max(7 * 24 * 60).optional(),
+  expiryMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(7 * 24 * 60)
+    .optional(),
 });
 
 export function walletTools(deps: {
