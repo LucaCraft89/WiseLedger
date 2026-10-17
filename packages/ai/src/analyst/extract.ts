@@ -107,8 +107,10 @@ const RGB_INVOICE_RE = /rgb:[^\s"'<>]+/g;
 
 /** Every payment request printed in the text: on-chain RGB (rgb:…) and RGB Lightning (BOLT11, lightning: dropped). */
 export function paymentRequestsIn(text: string): string[] {
-  const ln = [...text.matchAll(LN_INVOICE_RE)].map((m) => m[1] ?? '');
-  return [...new Set([...(text.match(RGB_INVOICE_RE) ?? []), ...ln.filter(Boolean)])];
+  const ln = [...text.matchAll(LN_INVOICE_RE)].map((m) => m[1] ?? '').filter(Boolean);
+  // A Lightning invoice may embed "rgb:…" (lnrgb:mock/rgb:…): look for on-chain ones only outside it.
+  const rest = text.replace(LN_INVOICE_RE, ' ');
+  return [...new Set([...(rest.match(RGB_INVOICE_RE) ?? []), ...ln])];
 }
 
 /** Maps the model output to the contract and applies deterministic clean-up. */

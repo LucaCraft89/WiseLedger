@@ -85,14 +85,17 @@ describe('rules R1–R10', () => {
       ...base,
       config: { ...CONFIG, networks: ['mutinynet'] },
       extraction: { ...extraction, payment: { method: 'ln', rgbInvoice: LN } },
-      decoded: { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'lightning' } as RuleInput['decoded'],
+      decoded: { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'lightning' },
     };
     expect(r1RgbInvoice(lnBase)).toEqual([]);
     expect(runRules(lnBase).verdict).toBe('ok');
-    const wrongNet = r1RgbInvoice({ ...lnBase, decoded: { ...decoded, rgbInvoice: LN, network: 'bitcoin' } });
+    const wrongNet = r1RgbInvoice({
+      ...lnBase,
+      decoded: { ...decoded, rgbInvoice: LN, network: 'bitcoin', rail: 'lightning' },
+    });
     expect(wrongNet[0]?.message).toMatch(/Lightning payment request is for another network/);
     expect(r1RgbInvoice({ ...lnBase, decoded: { error: 'InvalidInvoice' } })[0]?.message).toMatch(/Lightning is off/);
-    const mismatch = { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'onchain' } as RuleInput['decoded'];
+    const mismatch = { ...decoded, rgbInvoice: LN, network: 'signet', rail: 'onchain' as const };
     expect(r1RgbInvoice({ ...lnBase, decoded: mismatch })[0]?.message).toMatch(/different kind of payment/);
   });
   it('R2: asset outside the allowlist or contradicting the hint', () => {

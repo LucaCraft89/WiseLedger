@@ -162,6 +162,7 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
             ? 'No Lightning channel is ready yet, so payments go on-chain. A channel opens on first start; check back in a few minutes.'
             : `${usable} channel${usable === 1 ? '' : 's'} ready.`}
         </div>
+        {ln.problem && <div style={{ color: '#8a6d3b' }}>{ln.problem}</div>}
         {lightningTotals(ln).map((t) => (
           <div key={t.assetId ?? 'unknown'}>
             Can send now: <strong>{fmt(t.assetId, t.send)}</strong> · Can receive: {fmt(t.assetId, t.receive)}

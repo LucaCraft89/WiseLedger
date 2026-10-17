@@ -331,6 +331,8 @@ export const LightningStatusResponse = z.object({
   enabled: z.boolean(),
   nodePubkey: z.string().optional(),
   channels: z.array(LightningChannelDto),
+  /** Plain words when enabled but not working ("No channel yet: requested from the LSP"). */
+  problem: z.string().optional(),
 });
 export type LightningStatusResponse = z.infer<typeof LightningStatusResponse>;
 

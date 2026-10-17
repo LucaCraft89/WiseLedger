@@ -136,7 +136,7 @@ export function paymentProgress(
   let errorCode: string | undefined;
   let transferId = execution?.transferId;
   let txid = execution?.txid;
-  let paymentHash = (execution as { paymentHash?: string } | undefined)?.paymentHash;
+  let paymentHash = execution?.paymentHash;
   let started = state === 'CONFIRMED' || state === 'EXECUTING';
   for (const e of events) {
     if (e.type === 'transfer') {

@@ -229,6 +229,24 @@
       "issueDate": "2026-10-15",
       "dueDate": "2026-10-17",
       "note": "FatturaPA XML, bank transfer only, \"bank details changed, pay today\""
+    },
+    {
+      "id": "ln-basic",
+      "file": "ln-basic.txt",
+      "kind": "text",
+      "issuer": "PIXEL PRINT SRL",
+      "vatId": "IT05566778899",
+      "invoiceNumber": "PP-2026-118",
+      "total": "18.50",
+      "currency": "TUSDT",
+      "paymentMethod": "ln",
+      "rgbInvoice": "lnrgb:mock/rgb:mock-tusdt/18500000/1900000000",
+      "verdict": "ok",
+      "flags": [],
+      "lineAmounts": ["12.50", "6.00"],
+      "issueDate": "2026-10-16",
+      "dueDate": "2026-10-31",
+      "note": "RGB Lightning invoice (mock format lnrgb:mock/…; the real one is BOLT11 with RGB fields): same checks, paid over a channel"
     }
   ],
   "payeeBook": [
