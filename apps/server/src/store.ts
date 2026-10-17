@@ -4,6 +4,7 @@
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { ChatInvoice } from 'ai';
 import type {
   AnalysisReport,
   AppEvent,
@@ -15,6 +16,8 @@ import type {
   PaymentPlan,
 } from 'core';
 import { DatabaseSync } from './sqlite.js';
+
+export type { ChatInvoice };
 
 export interface StoredInvoice extends InvoiceRecord {
   kind: InvoiceSourceKind;
@@ -385,17 +388,6 @@ export class InvoiceStore {
     this.bus.on(key, listener);
     return () => this.bus.off(key, listener);
   }
-}
-
-/** Invoice summary the Treasurer's chat sees (B's `ChatInvoice` in the ai package; structured fields only). */
-export interface ChatInvoice {
-  invoiceId: string;
-  supplier?: string;
-  total?: string;
-  currency?: string;
-  state: InvoiceState;
-  /** report.proposedPayment when payable (present and verdict not `block`). */
-  payment?: { amount: string; assetId: string };
 }
 
 /** Every invoice as a ChatInvoice, newest first. Never includes raw invoice text. */
