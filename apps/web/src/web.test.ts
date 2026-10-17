@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { AppEvent, InvoiceState } from './api/contracts.js';
-import { AppEvent as AppEventSchema, InvoiceDetailResponse } from './api/contracts.js';
+import { AppEvent as AppEventSchema, InvoiceDetailResponse, InvoiceListResponse } from './api/contracts.js';
 import { createFakeClient } from './api/fake.js';
-import { buildTimeline, formatAmount } from './lib/format.js';
+import {
+  buildFullTimeline,
+  buildTimeline,
+  describeHealth,
+  formatAmount,
+  STATE_LABELS,
+  stateHistory,
+  stateTone,
+  VERDICT_LABELS,
+} from './lib/format.js';
 
 const fast = () => createFakeClient({ stageDelayMs: 0, transferStepMs: 0, pollMs: 1 });
 
@@ -63,5 +72,66 @@ describe('fake client', () => {
     await expect(api.confirm(eur.invoiceId, { planId })).rejects.toThrow(/tick the box/);
     await api.confirm(eur.invoiceId, { planId, override: true });
     await waitForState(api, eur.invoiceId, 'PAID');
+  });
+});
+
+describe('plain-language labels', () => {
+  it('names states and verdicts in plain words', () => {
+    expect(STATE_LABELS.AWAITING_CONFIRMATION).toBe('Waiting for your OK');
+    expect(STATE_LABELS.BLOCKED).toBe('Stopped: looks unsafe');
+    expect(STATE_LABELS.PAID).toBe('Paid');
+    expect(VERDICT_LABELS).toEqual({ ok: 'Looks fine', review: 'Check before paying', block: 'Do not pay' });
+    expect(stateTone('PAID')).toBe('good');
+    expect(stateTone('AWAITING_CONFIRMATION')).toBe('attention');
+    expect(stateTone('BLOCKED')).toBe('bad');
+    expect(stateTone('EXECUTING')).toBe('neutral');
+  });
+
+  it('describes health in plain words', () => {
+    const d = describeHealth({
+      ok: false,
+      time: '2026-10-17T10:00:00.000Z',
+      llm: { provider: 'qvac', model: 'Qwen3.5-2B', state: 'ready', onDevice: true },
+      wallet: { backend: 'wdk-rgb', network: 'mutinynet', ready: false, blockHeight: 123 },
+      problems: ['No TUSDT yet'],
+    });
+    expect(d.ai).toBe('AI: Qwen3.5-2B (QVAC) running on this device (ready)');
+    expect(d.wallet).toBe('Wallet: wdk-rgb · network mutinynet · not ready · block 123');
+    expect(d.overall).toMatch(/needs attention/);
+  });
+
+  it('always shows the four analysis steps, pending until started', () => {
+    const at = '2026-10-17T10:00:00.000Z';
+    const events: AppEvent[] = [
+      { type: 'stage', at, stage: 'reading', status: 'start' },
+      { type: 'stage', at, stage: 'reading', status: 'end' },
+      { type: 'stage', at, stage: 'extracting', status: 'start' },
+      { type: 'state', at, from: 'UPLOADED', to: 'EXTRACTED' },
+    ];
+    expect(buildFullTimeline(events).map((s) => [s.stage, s.status])).toEqual([
+      ['reading', 'done'],
+      ['extracting', 'running'],
+      ['checking', 'pending'],
+      ['summarizing', 'pending'],
+    ]);
+    const failed = [...events, { type: 'stage', at, stage: 'extracting', status: 'error' } as AppEvent];
+    expect(buildFullTimeline(failed)[1]?.status).toBe('error');
+    expect(stateHistory(events)).toEqual([{ at, label: STATE_LABELS.EXTRACTED }]);
+  });
+});
+
+describe('fake listInvoices', () => {
+  it('starts empty and lists invoices newest first with their summary', async () => {
+    const api = fast();
+    expect((await api.listInvoices()).invoices).toEqual([]);
+    const a = await api.createInvoice({ text: 'x', filename: 'acme.txt' });
+    const b = await api.createInvoice({ text: 'x', filename: 'scam.txt' });
+    await waitForState(api, a.invoiceId, 'AWAITING_CONFIRMATION');
+    await waitForState(api, b.invoiceId, 'BLOCKED');
+    const list = await api.listInvoices();
+    expect(InvoiceListResponse.safeParse(list).success).toBe(true);
+    expect(list.invoices.map((i) => i.id)).toEqual([b.invoiceId, a.invoiceId]);
+    expect(list.invoices[0]?.verdict).toBe('block');
+    expect(list.invoices[1]?.state).toBe('AWAITING_CONFIRMATION');
   });
 });

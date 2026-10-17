@@ -1,4 +1,12 @@
-import type { AppEvent, InvoiceState, Stage, TransferStatus } from '../api/contracts.js';
+import type {
+  AppEvent,
+  HealthResponse,
+  InvoiceState,
+  Severity,
+  Stage,
+  TransferStatus,
+  Verdict,
+} from '../api/contracts.js';
 
 /** Base units (decimal string) → human amount with 2..precision decimals. "25000000", 6 → "25.00". */
 export function formatAmount(baseUnits: string, precision: number): string {
@@ -30,25 +38,81 @@ export const TRANSFER_LABELS: Record<TransferStatus, string> = {
 };
 
 export const STATE_LABELS: Record<InvoiceState, string> = {
-  UPLOADED: 'Uploaded',
-  EXTRACTED: 'Details extracted',
-  ANALYZED: 'Analyzed',
-  AWAITING_CONFIRMATION: 'Waiting for your confirmation',
-  CONFIRMED: 'Confirmed',
+  UPLOADED: 'Reading…',
+  EXTRACTED: 'Checking…',
+  ANALYZED: 'Checked',
+  AWAITING_CONFIRMATION: 'Waiting for your OK',
+  CONFIRMED: 'Confirmed, paying soon',
   EXECUTING: 'Paying…',
   SCHEDULED: 'Payment scheduled',
   PAID: 'Paid',
-  FAILED: 'Something went wrong',
-  REJECTED: 'Rejected, not paid',
-  BLOCKED: 'Blocked, not paid',
+  FAILED: 'Payment failed',
+  REJECTED: 'You said no, not paid',
+  BLOCKED: 'Stopped: looks unsafe',
 };
 
-export type StepStatus = 'running' | 'done' | 'error';
+/** Chip colour per state: green = done, amber = needs you, red = stopped/failed, grey = in progress. */
+export function stateTone(state: InvoiceState): 'good' | 'attention' | 'bad' | 'neutral' {
+  if (state === 'PAID' || state === 'SCHEDULED') return 'good';
+  if (state === 'AWAITING_CONFIRMATION') return 'attention';
+  if (state === 'BLOCKED' || state === 'FAILED') return 'bad';
+  return 'neutral';
+}
+
+export const TONE_COLORS = {
+  good: '#d4edda',
+  attention: '#fff3cd',
+  bad: '#f8d7da',
+  neutral: '#e2e3e5',
+} as const;
+
+export const VERDICT_LABELS: Record<Verdict, string> = {
+  ok: 'Looks fine',
+  review: 'Check before paying',
+  block: 'Do not pay',
+};
+
+export const VERDICT_EXPLAIN: Record<Verdict, string> = {
+  ok: 'We found nothing suspicious.',
+  review: 'Some details look unusual. Read the warnings below before you pay.',
+  block: 'This invoice looks dangerous. We will not pay it.',
+};
+
+export const VERDICT_COLORS: Record<Verdict, string> = { ok: '#d4edda', review: '#fff3cd', block: '#f8d7da' };
+
+export const SEVERITY_WORDS: Record<Severity, string> = { info: 'Note', warn: 'Warning', block: 'Danger' };
+
+/** info grey, warn amber, block red: background and left border. */
+export const SEVERITY_COLORS: Record<Severity, { bg: string; border: string }> = {
+  info: { bg: '#f1f3f5', border: '#adb5bd' },
+  warn: { bg: '#fff3cd', border: '#e0a800' },
+  block: { bg: '#f8d7da', border: '#c82333' },
+};
+
+const LLM_STATE_WORDS = { unloaded: 'not loaded', loading: 'loading…', ready: 'ready', error: 'not working' } as const;
+
+/** Health → plain-language lines for the settings drawer. */
+export function describeHealth(h: HealthResponse): { ai: string; wallet: string; overall: string } {
+  const where = h.llm.onDevice ? 'running on this device' : 'running on a remote server';
+  const provider = h.llm.provider === 'mock' ? 'pretend AI for testing' : h.llm.provider.toUpperCase();
+  const ai = `AI: ${h.llm.model} (${provider}) ${where} (${LLM_STATE_WORDS[h.llm.state]})`;
+  const backend = h.wallet.backend === 'mock' ? 'mock (pretend wallet, no real payments)' : h.wallet.backend;
+  const height = h.wallet.blockHeight !== undefined ? ` · block ${h.wallet.blockHeight}` : '';
+  const wallet = `Wallet: ${backend} · network ${h.wallet.network} · ${h.wallet.ready ? 'ready' : 'not ready'}${height}`;
+  const overall = h.ok ? 'Everything is working.' : 'Something needs attention, see the problems below.';
+  return { ai, wallet, overall };
+}
+
+export type StepStatus = 'pending' | 'running' | 'done' | 'error';
 export interface TimelineStep {
   stage: Stage;
   label: string;
   status: StepStatus;
+  message?: string;
 }
+
+/** The four analysis steps, always shown in this order. */
+export const ANALYSIS_STAGES = ['reading', 'extracting', 'checking', 'summarizing'] as const satisfies readonly Stage[];
 
 /** Folds stage events into an ordered list of steps (first-seen order, last status wins). */
 export function buildTimeline(events: readonly AppEvent[]): TimelineStep[] {
@@ -56,9 +120,40 @@ export function buildTimeline(events: readonly AppEvent[]): TimelineStep[] {
   for (const e of events) {
     if (e.type !== 'stage' || e.stage === 'analyzed' || e.stage === 'done') continue;
     const status: StepStatus = e.status === 'start' ? 'running' : e.status === 'end' ? 'done' : 'error';
-    steps.set(e.stage, { stage: e.stage, label: STAGE_LABELS[e.stage], status });
+    steps.set(e.stage, { stage: e.stage, label: STAGE_LABELS[e.stage], status, message: e.message });
   }
   return [...steps.values()];
+}
+
+/**
+ * Timeline for the detail page: the four analysis steps first (pending until their first event,
+ * marked done once a later step started), then any later steps seen (planning, executing).
+ */
+export function buildFullTimeline(events: readonly AppEvent[]): TimelineStep[] {
+  const seen = new Map(buildTimeline(events).map((s) => [s.stage, s]));
+  const analysis: TimelineStep[] = ANALYSIS_STAGES.map(
+    (stage) => seen.get(stage) ?? { stage, label: STAGE_LABELS[stage], status: 'pending' },
+  );
+  // A step still "running" while a later one has started actually finished (missed end event).
+  for (let i = 0; i < analysis.length - 1; i++) {
+    const cur = analysis[i];
+    if (cur?.status === 'running' && analysis.slice(i + 1).some((s) => s.status !== 'pending')) {
+      analysis[i] = { ...cur, status: 'done' };
+    }
+  }
+  const later = [...seen.values()].filter((s) => !(ANALYSIS_STAGES as readonly Stage[]).includes(s.stage));
+  return [...analysis, ...later];
+}
+
+/** State-change events as plain-language lines with their time. */
+export function stateHistory(events: readonly AppEvent[]): { at: string; label: string }[] {
+  return events.flatMap((e) => (e.type === 'state' ? [{ at: e.at, label: STATE_LABELS[e.to] }] : []));
+}
+
+/** ISO date → short local date and time. */
+export function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /** Key for de-duplicating events replayed by both GET /invoices/:id and the SSE stream. */
