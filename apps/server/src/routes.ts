@@ -17,6 +17,7 @@ import {
   InvoiceStateSchema,
   type InvoiceSummaryDto,
   isWalletError,
+  type LightningStatusResponse,
   type LlmInfo,
   type ReceivesListResponse,
   RejectRequest,
@@ -161,6 +162,7 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     ...(t.txid ? { txid: t.txid } : {}),
+    ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
     ...(invoiceId ? { invoiceId } : {}),
   };
 }
@@ -347,6 +349,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     deps.receives.reconcile(await wallet.listTransfers());
     return { receives: deps.receives.list() };
   });
+
+  // Lightning node and channels (Wallet page panel); off when the backend has no Lightning rail.
+  route(
+    app,
+    API_ROUTES.walletLightning,
+    async (): Promise<LightningStatusResponse> =>
+      wallet.lightningStatus ? wallet.lightningStatus() : { enabled: false, channels: [] },
+  );
 
   route(app, API_ROUTES.transfers, async (): Promise<TransfersResponse> => {
     const transfers = await wallet.listTransfers();
