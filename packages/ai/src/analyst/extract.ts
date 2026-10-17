@@ -150,7 +150,7 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     lineItems: raw.lineItems.slice(0, 10).map((l) => ({
       description: l.description.slice(0, 200),
       ...opt('quantity', l.quantity ?? undefined),
-      ...opt('amount', normalizeDecimal(l.amount)),
+      ...opt('amount', normalizeDecimal(l.amount) ?? (sourceText ? rowAmount(sourceText, l.description) : undefined)),
     })),
     payment: {
       method: rgbInvoice ? 'rgb' : raw.paymentMethod,
@@ -174,6 +174,16 @@ export function printedTotal(text: string): string | undefined {
     if (v) found.add(v);
   }
   return found.size === 1 ? [...found][0] : undefined;
+}
+
+/** Small models sometimes drop row amounts: take the last decimal on the one text line that holds the description. */
+export function rowAmount(text: string, description: string): string | undefined {
+  const needle = description.trim().toLowerCase();
+  if (needle.length < 3) return undefined;
+  const rows = text.split('\n').filter((r) => r.toLowerCase().includes(needle));
+  if (rows.length !== 1) return undefined;
+  const nums = (rows[0] ?? '').match(/\d[\d.,]*[.,]\d{2}\b/g);
+  return nums ? normalizeDecimal(nums[nums.length - 1]) : undefined;
 }
 
 /** "1.250,00" | "1,250.00" | "€ 25" | "25.00 TUSDT" → "1250.00" | "25". Undefined when not a number. */
