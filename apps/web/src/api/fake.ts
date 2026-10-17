@@ -1,5 +1,6 @@
 // In-browser fake backend: walks the same lifecycle as A's server using the core mocks.
 // Verdict by file name (MockAnalyzer): *scam* / *inject* → block, *eur* → review, anything else → ok.
+// Payment outcome by file name: *fail* → TransferFailed, *timeout* → SubmitTimeout (MockWallet amounts).
 
 import type { ApiClient, InvoiceInput } from './client.js';
 import { ApiCallError } from './client.js';
@@ -11,6 +12,8 @@ import {
   type InvoiceSourceKind,
   type InvoiceState,
   type InvoiceSummaryDto,
+  MOCK_FAIL_AMOUNT,
+  MOCK_TIMEOUT_AMOUNT,
   MockAnalyzer,
   MockTreasurer,
   MockWallet,
@@ -56,7 +59,14 @@ function kindOf(name: string): InvoiceSourceKind {
 
 export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const wallet = new MockWallet({ stepMs: opts.transferStepMs ?? 1500 });
-  const analyzer = new MockAnalyzer({ stageDelayMs: opts.stageDelayMs ?? 600 });
+  const stageDelayMs = opts.stageDelayMs ?? 600;
+  const analyzer = new MockAnalyzer({ stageDelayMs });
+  const failAnalyzer = new MockAnalyzer({ stageDelayMs, amount: MOCK_FAIL_AMOUNT });
+  const timeoutAnalyzer = new MockAnalyzer({ stageDelayMs, amount: MOCK_TIMEOUT_AMOUNT });
+  const analyzerFor = (name: string) => {
+    const n = name.toLowerCase();
+    return n.includes('timeout') ? timeoutAnalyzer : n.includes('fail') ? failAnalyzer : analyzer;
+  };
   const treasurer = new MockTreasurer(wallet, { pollMs: opts.pollMs ?? 250 });
   const recs = new Map<string, Rec>();
   let seq = 0;
@@ -84,7 +94,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
 
   async function analyze(r: Rec, filename: string, content: string) {
     const id = r.summary.id;
-    const report = await analyzer.analyze(
+    const report = await analyzerFor(filename).analyze(
       { kind: r.summary.kind, path: `fake://${filename}`, sha256: await sha256Hex(content), filename },
       { invoiceId: id },
       (e) => {

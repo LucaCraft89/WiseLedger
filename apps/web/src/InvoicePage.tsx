@@ -14,6 +14,7 @@ import {
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
 import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallLine } from './lib/live.js';
+import { FailureCard, ResultCard } from './PaymentCards.js';
 import { ReportView } from './ReportView.js';
 import { errorText, useToast } from './ui.js';
 
@@ -80,7 +81,9 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const { invoice, report, plan, confirmationSentence, execution } = detail;
   const timeline = buildFullTimeline(events);
   const history = stateHistory(events);
-  const errors = events.filter((e) => e.type === 'error');
+  const progress = paymentProgress(invoice.state, events, execution);
+  // A failed payment gets its own card with the error in plain words.
+  const errors = progress.failed ? [] : events.filter((e) => e.type === 'error');
   const live = liveAiView(events);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
 
@@ -158,11 +161,21 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
         </p>
       )}
 
-      {showsProgress(invoice.state, events) && (
-        <PaymentProgressView progress={paymentProgress(invoice.state, events, execution)} />
-      )}
+      {showsProgress(invoice.state, events) && <PaymentProgressView progress={progress} />}
 
-      <FinalStatus detail={detail} progress={paymentProgress(invoice.state, events, execution)} assets={assets} />
+      <FinalStatus
+        detail={detail}
+        progress={progress}
+        assets={assets}
+        onRetry={async () => {
+          if (!plan) return;
+          await api.confirm(invoiceId, {
+            planId: plan.planId,
+            override: report?.verdict === 'review' ? true : undefined,
+          });
+          await refresh();
+        }}
+      />
 
       <p style={{ marginTop: 32 }}>
         <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>
@@ -221,21 +234,32 @@ function FinalStatus({
   detail,
   progress,
   assets,
+  onRetry,
 }: {
   detail: InvoiceDetailResponse;
   progress: PaymentProgress;
   assets: AssetMeta[];
+  onRetry: () => Promise<void>;
 }) {
   const { state } = detail.invoice;
   const { plan } = detail;
   if (state === 'PAID') {
     return (
-      <div style={{ background: '#d4edda', padding: 12, marginTop: 16 }} data-testid="paid-card">
-        <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
-        {plan && <div>You paid {paidSentence(plan, assets)}.</div>}
-        {progress.transferId && <div>Transfer ID: {progress.transferId}</div>}
-        {progress.txid && <div>Bitcoin transaction: {progress.txid}</div>}
-      </div>
+      <ResultCard
+        sentence={plan ? paidSentence(plan, assets) : undefined}
+        transferId={progress.transferId}
+        txid={progress.txid}
+      />
+    );
+  }
+  if (progress.failed) {
+    return (
+      <FailureCard
+        code={progress.errorCode}
+        message={progress.errorMessage}
+        transferId={progress.transferId}
+        onRetry={plan ? onRetry : undefined}
+      />
     );
   }
   if (state === 'SCHEDULED') return <p style={{ background: '#d1ecf1', padding: 12 }}>The payment is scheduled.</p>;
