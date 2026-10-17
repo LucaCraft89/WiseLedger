@@ -10,6 +10,7 @@ import {
   type InvoiceSource,
   type LlmProvider,
   type ProposedPayment,
+  type RiskFlag,
   type Stage,
   type WalletPort,
 } from 'core';
@@ -90,7 +91,8 @@ export class Analyst implements InvoiceAnalyzer {
           ...(rgbInvoice ? { rgbInvoice } : {}),
           excludeInvoiceId: invoiceId,
         }),
-        ...(input.mode === 'text' ? { sourceText: input.text } : {}),
+        payees: await history.payeeBook().catch(() => []),
+        ...(input.mode === 'text' ? { sourceText: input.text, removed: input.removed } : {}),
         config,
         now: now(),
       };
@@ -120,7 +122,7 @@ export class Analyst implements InvoiceAnalyzer {
       verdict,
       ...(proposedPayment ? { proposedPayment } : {}),
       summary: summary.summary,
-      questionsForUser: summary.questionsForUser,
+      questionsForUser: withRuleQuestions(summary.questionsForUser, flags),
       model: { name: llm.info().model, provider: llm.info().provider },
       timings: { extractMs, rulesMs, summaryMs: summary.ms },
       createdAt: at(),
@@ -157,6 +159,14 @@ export class Analyst implements InvoiceAnalyzer {
 
 export const AI_UNAVAILABLE_MESSAGE =
   'The local AI could not read this invoice, so nothing was checked. Check it yourself or try again in a minute.';
+
+/** Questions the rules ask in their own words (R8 rate question) go first; at most 3 in total. */
+export function withRuleQuestions(questions: string[], flags: RiskFlag[]): string[] {
+  const fromRules = flags
+    .filter((f) => f.code === FLAG_CODES.R8_CURRENCY)
+    .map((f) => f.message.slice(f.message.lastIndexOf('. ') + 2));
+  return [...new Set([...fromRules, ...questions])].slice(0, 3);
+}
 
 /** Built by code from validated data only: the RGB invoice as printed, the asset and amount the rules checked. */
 export function buildProposedPayment(input: RuleInput): ProposedPayment | undefined {

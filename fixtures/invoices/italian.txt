@@ -1,0 +1,19 @@
+FERRAMENTA ROSSI S.R.L.
+Corso Francia 210, 10143 Torino - P.IVA IT05566778899
+amministrazione@ferramentarossi.example
+
+FATTURA n. 88/2026
+Data fattura: 05/10/2026
+Scadenza: 04/11/2026
+
+Spett.le Coin Cube Studio, Torino
+
+Descrizione                      Q.ta  Prezzo      Importo
+Viti e tasselli assortiti          1     12,00      12,00
+Spedizione                         1      6,50       6,50
+
+TOTALE: 18,50 TUSDT
+
+Pagamento: RGB (asset TUSDT)
+Fattura RGB: rgb:mock/rgb:mock-tusdt/18500000/1900000000
+Grazie per la collaborazione.

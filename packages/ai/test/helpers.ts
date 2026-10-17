@@ -1,4 +1,4 @@
-import type { HistoryMatch, HistoryPort, HistoryQuery } from 'core';
+import type { HistoryMatch, HistoryPort, HistoryQuery, PayeeBookEntry } from 'core';
 import { MOCK_ASSET_ID } from 'core/mocks';
 import type { RuleConfig } from '../src/rules/types.js';
 
@@ -9,8 +9,11 @@ export const CONFIG: RuleConfig = {
   assets: { [MOCK_ASSET_ID]: { ticker: 'TUSDT', precision: 6 } },
 };
 
-/** History that "remembers" issuer+number pairs. */
-export function historyOf(seen: { issuer: string; number: string; invoiceId: string }[] = []): HistoryPort {
+/** History that "remembers" issuer+number pairs and a payee book. */
+export function historyOf(
+  seen: { issuer: string; number: string; invoiceId: string }[] = [],
+  payees: PayeeBookEntry[] = [],
+): HistoryPort {
   return {
     async seen(by: HistoryQuery): Promise<HistoryMatch[]> {
       return seen
@@ -18,7 +21,7 @@ export function historyOf(seen: { issuer: string; number: string; invoiceId: str
         .map((s) => ({ invoiceId: s.invoiceId, matchedOn: 'issuer+number' as const }));
     },
     async payeeBook() {
-      return [];
+      return payees;
     },
   };
 }

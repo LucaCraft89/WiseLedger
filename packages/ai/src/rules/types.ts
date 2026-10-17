@@ -1,4 +1,4 @@
-import type { AssetBalance, DecodedInvoice, HistoryMatch, InvoiceExtraction, RiskFlag } from 'core';
+import type { AssetBalance, DecodedInvoice, HistoryMatch, InvoiceExtraction, PayeeBookEntry, RiskFlag } from 'core';
 
 export interface RuleConfig {
   /** Asset IDs the user accepts to pay with (ASSET_ALLOWLIST). First = default when the invoice lets the payer choose. */
@@ -20,8 +20,12 @@ export interface RuleInput {
   balance?: AssetBalance;
   /** HistoryPort.seen() matches for this invoice (already excluding itself). */
   history: HistoryMatch[];
-  /** Raw document text when available (R7 only: rules are code, the LLM never sees it again). */
+  /** HistoryPort.payeeBook(): suppliers paid before (R5). Missing = empty book. */
+  payees?: PayeeBookEntry[];
+  /** Sanitized document text when available (R3, R5, R6, R7: rules are code, the LLM never sees it again). */
   sourceText?: string;
+  /** Control-like text stripped from the document before the model saw it (R7). */
+  removed?: string[];
   config: RuleConfig;
   now: Date;
 }
