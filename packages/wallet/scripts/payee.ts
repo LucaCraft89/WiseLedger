@@ -26,7 +26,8 @@ switch (cmd) {
     await w.sync();
     const b = w.btcBalance();
     log('payee', `BTC vanilla ${b.vanilla.settled} (spendable ${b.vanilla.spendable}) · colored ${b.colored.settled}`);
-    for (const a of await w.listAssets()) log('payee', `${a.ticker} ${a.assetId} ${tokens(a.balance.settled, a.precision)}`);
+    for (const a of await w.listAssets())
+      log('payee', `${a.ticker} ${a.assetId} ${tokens(a.balance.settled, a.precision)}`);
   }
 }
 w.close();

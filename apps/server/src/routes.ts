@@ -13,14 +13,14 @@ import {
   type InvoiceListResponse,
   type InvoiceSummaryDto,
   type LlmInfo,
-  ReceiveRequest,
-  type ReceiveResponse,
   RejectRequest,
   type TransferDto,
   type TransferInfo,
   type TransfersResponse,
   type TreasurerAgent,
   type WalletPort,
+  WalletReceiveRequest,
+  type WalletReceiveResponse,
   type WalletResponse,
 } from 'core';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -194,8 +194,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     };
   });
 
-  route(app, API_ROUTES.walletReceive, async (req): Promise<ReceiveResponse> => {
-    const body = ReceiveRequest.parse(req.body ?? {});
+  route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
+    const body = WalletReceiveRequest.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
       expirySec: (body.expiryMinutes ?? 60) * 60,
       ...(body.assetId ? { assetId: body.assetId } : {}),

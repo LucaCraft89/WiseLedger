@@ -336,7 +336,9 @@ export class WdkRgbWallet implements WalletPort {
   }
 
   async listTransfers(assetId?: string): Promise<TransferInfo[]> {
-    const assetIds = assetId ? [assetId] : (this.rgb.listAssets().nia ?? []).flatMap((a) => (a.assetId ? [a.assetId] : []));
+    const assetIds = assetId
+      ? [assetId]
+      : (this.rgb.listAssets().nia ?? []).flatMap((a) => (a.assetId ? [a.assetId] : []));
     const out: TransferInfo[] = [];
     for (const id of assetIds) {
       for (const t of this.rgb.listTransfers(id)) {
