@@ -1,10 +1,12 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { MockLlm } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
 import { extractInvoice, normalizeDecimal, toExtraction } from '../src/analyst/extract.js';
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { EXPECTED, type ExpectedFixture, perfectAnswer, sourceOf } from './fixtures.js';
+import { EXPECTED, type ExpectedFixture, FIXTURES_DIR, perfectAnswer, sourceOf } from './fixtures.js';
 
 describe('extract: input loading', () => {
   it('reads text and the PDF text layer, and passes images by path', async () => {
@@ -95,9 +97,11 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('extract: live QVAC on the six fi
         rows.push(`| ${f.id} | error: ${(err as Error).message} |`);
       }
     }
-    console.log(
-      `\n| fixture | issuer | total | method | rgbInvoice exact | pressure | time |\n|---|---|---|---|---|---|---|\n${rows.join('\n')}\n${good}/6\n`,
-    );
+    const table = `| fixture | issuer | total | method | rgbInvoice exact | pressure | time |\n|---|---|---|---|---|---|---|\n${rows.join('\n')}\n\n${good}/6 with issuer, total and method right (${llm.model})\n`;
+    // vitest hides console output of passing tests: keep the table in the git-ignored .data/.
+    mkdirSync(resolve(FIXTURES_DIR, '../../.data'), { recursive: true });
+    writeFileSync(resolve(FIXTURES_DIR, '../../.data/extract-live.md'), table);
+    console.log(table);
     await llm.unload();
     expect(good).toBeGreaterThanOrEqual(4);
   });
