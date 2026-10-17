@@ -134,7 +134,8 @@ export type WalletReceiveResponse = z.infer<typeof WalletReceiveResponse>;
 // GET /api/transfers
 export const TransferDto = z.object({
   transferId: z.string(),
-  assetId: z.string(),
+  /** Absent for transfers where the wallet does not know the asset yet (wallet.ts TransferInfo). */
+  assetId: z.string().optional(),
   amount: BaseUnits,
   direction: z.enum(['in', 'out']),
   status: TransferStatusSchema,
