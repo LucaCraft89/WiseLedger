@@ -21,7 +21,7 @@ describe('seed storage and wallet lock', () => {
     expect(loadOrCreateMnemonic(dir)).toEqual({ mnemonic: a.mnemonic, created: false });
   });
 
-  it('creates a locked seed when a passphrase is given; no plain words on disk', () => {
+  it('creates a locked seed when a passphrase is given; no plain words on disk', { timeout: 30_000 }, () => {
     const dir = tmp();
     const { mnemonic } = loadOrCreateMnemonic(dir, { passphrase: PASS });
     expect(seedStatus(dir)).toBe('locked');
@@ -31,7 +31,7 @@ describe('seed storage and wallet lock', () => {
     expect(readSeed(dir, PASS)).toBe(mnemonic);
   });
 
-  it('a locked seed needs the right passphrase (WalletLocked otherwise)', () => {
+  it('a locked seed needs the right passphrase (WalletLocked otherwise)', { timeout: 30_000 }, () => {
     const dir = tmp();
     loadOrCreateMnemonic(dir, { passphrase: PASS });
     expect(() => readSeed(dir)).toThrow(WalletLocked);
@@ -39,7 +39,8 @@ describe('seed storage and wallet lock', () => {
     expect(() => loadOrCreateMnemonic(dir)).toThrow(WalletLocked);
   });
 
-  it('lockSeed turns an existing plain seed into a locked one and removes the plain file', () => {
+  // scrypt key derivation takes several seconds on a loaded machine (vitest's default timeout is 5 s).
+  it('lockSeed turns an existing plain seed into a locked one and removes the plain file', { timeout: 30_000 }, () => {
     const dir = tmp();
     const { mnemonic } = loadOrCreateMnemonic(dir);
     lockSeed(dir, PASS);

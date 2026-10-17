@@ -17,7 +17,7 @@ import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast 
 
 const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-export function WalletPage({ api }: { api: ApiClient }) {
+export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: WalletTab }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,68 +50,98 @@ export function WalletPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <h2>Wallet</h2>
-      <p>
-        Wallet: {BACKEND_WORDS[w.backend]} · Network: {NETWORK_WORDS[w.network]} ·{' '}
-        {w.ready ? 'Ready to use' : 'Not ready yet: press Refresh in a minute'}{' '}
-        <button type="button" onClick={() => void load()}>
+      <p style={{ color: 'var(--wl-c-muted)' }}>
+        {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} ·{' '}
+        {w.ready ? 'Ready to use' : 'Not ready yet: check again in a minute'}{' '}
+        <button type="button" className="wl-quiet" onClick={() => void load()}>
           Refresh
         </button>
       </p>
 
-      <h3>Balances</h3>
-      {w.assets.length === 0 && (
-        <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
-      )}
-      {w.assets.map((a) => (
-        <div key={a.assetId} style={box} data-testid="asset-balance">
-          <div style={{ fontSize: '1.3em' }}>
-            <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
-            <small style={{ color: 'var(--wl-c-muted)' }}>{a.name}</small>
-          </div>
-          <div>
-            Available to spend: {formatAssetAmount(a.balance.spendable, a.precision)} · Confirmed:{' '}
-            {formatAssetAmount(a.balance.settled, a.precision)}
-            {a.balance.future !== a.balance.settled && (
-              <> · Incoming included: {formatAssetAmount(a.balance.future, a.precision)}</>
-            )}
-          </div>
-          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
-            Token ID (the unique code of this token, used in every payment):{' '}
-            <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
-          </div>
-        </div>
-      ))}
-      {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
+      <nav aria-label="Wallet sections" className="wl-tabs">
+        {WALLET_TABS.map((t) => (
+          <a key={t.id} href={t.href} aria-current={tab === t.id ? 'page' : undefined}>
+            {t.label}
+          </a>
+        ))}
+      </nav>
 
-      {w.btcBalanceSats !== undefined && (
-        <p>
-          Bitcoin for network fees: <strong>{formatAssetAmount(w.btcBalanceSats, 8)} BTC</strong> (
-          {Number(w.btcBalanceSats).toLocaleString()} sats)
-        </p>
-      )}
-
-      <LightningPanel api={api} assets={w.assets} />
-
-      <RecentTransfers api={api} assets={w.assets} />
-
-      {w.address && (
+      {tab === 'overview' && (
         <>
-          <h3>Bitcoin address</h3>
-          <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
-            <div style={{ minWidth: 0 }}>
-              <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
-              <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
-              <CopyButton value={w.address} what="Address" />
+          {w.assets.length === 0 && (
+            <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
+          )}
+          {w.assets.map((a) => (
+            <div key={a.assetId} style={box} data-testid="asset-balance">
+              <div style={{ fontSize: '1.6em' }}>
+                <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
+                <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
+              </div>
+              <div style={{ color: 'var(--wl-c-muted)' }}>
+                Available to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
+                {a.balance.future !== a.balance.settled && (
+                  <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
+                )}
+                {w.btcBalanceSats !== undefined && (
+                  <> · {Number(w.btcBalanceSats).toLocaleString()} sats for network fees</>
+                )}
+              </div>
             </div>
-          </div>
+          ))}
+          {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
+          <RecentTransfers api={api} assets={w.assets} />
         </>
       )}
 
-      <ReceiveForm api={api} wallet={w} />
+      {tab === 'get-paid' && <ReceiveForm api={api} wallet={w} />}
+
+      {tab === 'details' && (
+        <>
+          <h3>Tokens</h3>
+          {w.assets.map((a) => (
+            <div key={a.assetId} style={box}>
+              <strong>{a.ticker}</strong> {a.name}
+              <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+                Token ID (the unique code of this token, used in every payment):{' '}
+                <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
+              </div>
+            </div>
+          ))}
+          {w.btcBalanceSats !== undefined && (
+            <p>
+              Bitcoin for network fees: <strong>{formatAssetAmount(w.btcBalanceSats, 8)} BTC</strong> (
+              {Number(w.btcBalanceSats).toLocaleString()} sats)
+            </p>
+          )}
+          {w.address && (
+            <>
+              <h3>Bitcoin address</h3>
+              <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
+                  <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
+                  <CopyButton value={w.address} what="Address" />
+                </div>
+              </div>
+            </>
+          )}
+          <LightningPanel api={api} assets={w.assets} />
+        </>
+      )}
     </section>
   );
 }
+
+export type WalletTab = 'overview' | 'get-paid' | 'details';
+export const WALLET_TABS: readonly { id: WalletTab; href: string; label: string }[] = [
+  { id: 'overview', href: '#/wallet', label: 'Overview' },
+  { id: 'get-paid', href: '#/wallet/get-paid', label: 'Get paid' },
+  { id: 'details', href: '#/wallet/details', label: 'Details' },
+];
+/** "#/wallet/get-paid" → "get-paid"; anything else under #/wallet → overview. */
+export const walletTab = (hash: string): WalletTab =>
+  WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview';
 
 /** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
 export function SpendingRules({

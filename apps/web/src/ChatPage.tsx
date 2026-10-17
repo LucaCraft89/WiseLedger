@@ -94,14 +94,18 @@ export function ChatPage({ api }: { api: ApiClient }) {
         <div ref={endRef} />
       </div>
       {error ? <ErrorBox error={error} /> : null}
-      <div className="wl-chips" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        {CHAT_SUGGESTIONS.map((s) => (
-          <button key={s} type="button" disabled={busy} onClick={() => void send(s)}>
-            {s}
-          </button>
-        ))}
-      </div>
+      {/* Ideas to start with; once the conversation runs they would only push the input down. */}
+      {messages.length === 0 && (
+        <div className="wl-chips" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          {CHAT_SUGGESTIONS.map((s) => (
+            <button key={s} type="button" disabled={busy} onClick={() => void send(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
       <form
+        className="wl-chat-input"
         style={{ display: 'flex', gap: 8 }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -352,7 +356,12 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
           <button type="button" onClick={() => void confirm()} disabled={st.s === 'busy'}>
             {st.s === 'busy' ? 'Scheduling…' : 'Confirm'}
           </button>{' '}
-          <button type="button" onClick={() => setSt({ s: 'cancelled' })} disabled={st.s === 'busy'}>
+          <button
+            className="wl-secondary"
+            type="button"
+            onClick={() => setSt({ s: 'cancelled' })}
+            disabled={st.s === 'busy'}
+          >
             Cancel
           </button>
         </>

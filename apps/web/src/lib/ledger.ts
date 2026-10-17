@@ -62,6 +62,14 @@ export function labelEditReducer(s: LabelEditState, a: LabelEditAction): LabelEd
 
 export const DIRECTION_WORDS: Record<TransferDto['direction'], string> = { in: 'Received', out: 'Sent' };
 
+/** Chip colours of transfer statuses (theme tokens: readable in light and dark). */
+export const TRANSFER_STATUS_TONE: Record<TransferDto['status'], { bg: string; fg: string }> = {
+  WaitingCounterparty: { bg: 'var(--wl-c-pending-bg)', fg: 'var(--wl-c-warn-text)' },
+  WaitingConfirmations: { bg: 'var(--wl-c-running-bg)', fg: 'var(--wl-c-strong)' },
+  Settled: { bg: 'var(--wl-c-ok-bg)', fg: 'var(--wl-c-ok-text)' },
+  Failed: { bg: 'var(--wl-c-error-bg)', fg: 'var(--wl-c-error)' },
+};
+
 export const TRANSFER_STATUS_WORDS: Record<TransferDto['status'], string> = {
   WaitingCounterparty: 'Waiting for the other wallet',
   WaitingConfirmations: 'Waiting for a block confirmation',
@@ -126,7 +134,7 @@ export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string =>
 /** Where to see what a tool made or read ("See it in Wallet"); null when there is nothing to open. */
 export function toolLink(c: Pick<ToolCall, 'name' | 'ok'>): { href: string; label: string } | null {
   if (!c.ok) return null;
-  if (c.name === 'create_receive_invoice') return { href: '#/wallet', label: 'See it in Wallet' };
+  if (c.name === 'create_receive_invoice') return { href: '#/wallet/get-paid', label: 'See it in Wallet' };
   if (c.name === 'label_transfer' || c.name === 'list_transfers')
     return { href: '#/transfers', label: 'See transfers' };
   if (c.name === 'get_balance') return { href: '#/wallet', label: 'Open Wallet' };

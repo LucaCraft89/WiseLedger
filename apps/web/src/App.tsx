@@ -13,7 +13,7 @@ import { SettingsPage } from './SettingsPage.js';
 import { ThemeSwitch } from './ThemeSwitch.js';
 import { TransfersPage } from './TransfersPage.js';
 import { UploadPage } from './UploadPage.js';
-import { WalletPage } from './WalletPage.js';
+import { WalletPage, walletTab } from './WalletPage.js';
 
 /**
  * Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet,
@@ -35,14 +35,15 @@ const NAV = [
   { href: '#/', label: 'Check an invoice' },
   { href: '#/invoices', label: 'My invoices' },
   { href: '#/wallet', label: 'Wallet' },
-  { href: '#/schedule', label: 'Scheduled' },
   { href: '#/chat', label: 'Ask the Treasurer' },
   { href: '#/settings', label: 'Settings' },
 ] as const;
 
 function isCurrent(href: string, hash: string): boolean {
   if (href === '#/') return hash === '' || hash === '#' || hash === '#/';
-  return hash === href || (href === '#/invoices' && hash.startsWith('#/invoice/'));
+  if (href === '#/wallet') return hash.startsWith('#/wallet');
+  // Scheduled payments live under My invoices (a tab there).
+  return hash === href || (href === '#/invoices' && (hash.startsWith('#/invoice/') || hash === '#/schedule'));
 }
 
 export function App() {
@@ -126,6 +127,7 @@ export function App() {
               WiseLedger
             </a>
           </h1>
+          <ThemeSwitch />
           {screen === 'app' && (
             <nav aria-label="Main" className="wl-nav">
               {NAV.map((n) => (
@@ -135,7 +137,6 @@ export function App() {
               ))}
             </nav>
           )}
-          <ThemeSwitch />
         </header>
         {api.mode === 'fake' && (
           <p role="note" style={{ background: 'var(--wl-review-bg)', padding: '2px 8px', borderRadius: 4 }}>
@@ -157,10 +158,10 @@ export function App() {
               )}
               {invoiceId ? (
                 <InvoicePage key={invoiceId} api={api} invoiceId={decodeURIComponent(invoiceId)} />
-              ) : hash === '#/wallet' ? (
+              ) : hash.startsWith('#/wallet') ? (
                 <>
                   <GettingStarted api={api} />
-                  <WalletPage api={api} />
+                  <WalletPage api={api} tab={walletTab(hash)} />
                 </>
               ) : hash === '#/transfers' ? (
                 <TransfersPage api={api} />

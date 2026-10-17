@@ -55,7 +55,7 @@ describe('chat retention', () => {
 
   it('links what the Treasurer made and offers the payment request to copy', () => {
     expect(toolLink({ name: 'create_receive_invoice', ok: true })).toEqual({
-      href: '#/wallet',
+      href: '#/wallet/get-paid',
       label: 'See it in Wallet',
     });
     expect(toolLink({ name: 'label_transfer', ok: true })).toEqual({ href: '#/transfers', label: 'See transfers' });

@@ -122,6 +122,7 @@ export function CopyButton({ value, label = 'Copy', what = 'Text' }: { value: st
   const toast = useToast();
   return (
     <button
+      className="wl-quiet"
       type="button"
       onClick={() => {
         if (!navigator.clipboard) {

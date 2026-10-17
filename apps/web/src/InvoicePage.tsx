@@ -100,13 +100,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const live = liveAiView(events);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
 
-  return (
-    <section>
-      <h2>{invoice.filename}</h2>
-      <p>
-        Status: <StatusChip state={invoice.state} />
-      </p>
-
+  // Analysis steps, live AI text, tool calls and status history: on top while the check runs, folded away at the
+  // bottom once the report is there (the answer comes first).
+  const steps = (
+    <>
       <h3>Progress</h3>
       <ol>
         {timeline.map((s) => (
@@ -158,6 +155,17 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           </ul>
         </details>
       )}
+    </>
+  );
+
+  return (
+    <section>
+      <h2>{invoice.filename}</h2>
+      <p>
+        Status: <StatusChip state={invoice.state} />
+      </p>
+
+      {!report && steps}
 
       {report && <ReportView report={report} />}
 
@@ -203,6 +211,13 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           await refresh();
         }}
       />
+
+      {report && (
+        <details style={{ marginTop: 24 }} data-testid="how-we-checked">
+          <summary>How we checked it (steps, AI activity, status history)</summary>
+          {steps}
+        </details>
+      )}
 
       <p style={{ marginTop: 32 }}>
         <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>

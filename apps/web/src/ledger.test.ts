@@ -236,3 +236,13 @@ describe('fake wallet tools', () => {
     expect((await api.getInvoice(invoiceId)).invoice.state).toBe('AWAITING_CONFIRMATION');
   });
 });
+
+describe('table dates', () => {
+  it('short: day, month and 24 h time; the year only when it differs', async () => {
+    const { shortDate } = await import('./lib/format.js');
+    const now = new Date('2026-10-17T12:00:00');
+    expect(shortDate('2026-10-17T16:46:00', now)).toBe('17 Oct, 16:46');
+    expect(shortDate('2025-03-02T09:05:00', now)).toBe('2 Mar 2025, 09:05');
+    expect(shortDate('not a date', now)).toBe('not a date');
+  });
+});

@@ -443,3 +443,45 @@ button[aria-label^="Stop recording"]:hover:not(:disabled) {
   color: var(--md-primary);
   box-shadow: none;
 }
+
+/* Quiet text button (Copy, Refresh, Check again): never competes with the one main action on a screen. */
+button.wl-quiet {
+  min-height: 32px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--md-primary);
+  border: 0;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+button.wl-quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+  color: var(--md-primary);
+  box-shadow: none;
+}
+
+/* Section tabs inside a page (Wallet: Overview / Get paid / Details; My invoices / Scheduled). */
+.wl-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--md-outline-variant);
+  overflow-x: auto;
+}
+.wl-tabs a {
+  padding: 10px 16px;
+  color: var(--md-on-surface-variant);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+.wl-tabs a:hover {
+  color: var(--md-on-surface);
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+}
+.wl-tabs a[aria-current="page"] {
+  color: var(--md-primary);
+  border-bottom-color: var(--md-primary);
+}

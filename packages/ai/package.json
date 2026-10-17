@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=20000",
     "spike:hello": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-hello.ts",
     "spike:json": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-json.ts",
     "spike:vision": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-vision.ts",

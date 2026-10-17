@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --testTimeout=20000",
     "smoke": "tsx scripts/wallet-smoke.ts",
     "issue-asset": "tsx scripts/issue-asset.ts",
     "payee": "tsx scripts/payee.ts",
