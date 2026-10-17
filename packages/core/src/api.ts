@@ -129,6 +129,8 @@ export const WalletReceiveRequest = z.object({
     .positive()
     .max(60 * 24 * 7)
     .optional(),
+  /** Who should pay or what for ("Acme, refund October"); shown in the payment request list (M4). */
+  note: z.string().trim().max(120).optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -284,6 +286,28 @@ export const FiscalQuery = z.object({
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
 /** Route table, for clients and docs. */
+// GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
+export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed']);
+export type ReceiveStatus = z.infer<typeof ReceiveStatus>;
+export const ReceiveRequestDto = z.object({
+  receiveId: z.string(),
+  rgbInvoice: z.string(),
+  recipientId: z.string(),
+  assetId: z.string().optional(),
+  amount: BaseUnits.optional(),
+  note: z.string().optional(),
+  status: ReceiveStatus,
+  transferId: z.string().optional(),
+  txid: z.string().optional(),
+  receivedAmount: BaseUnits.optional(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
+export const ReceivesListResponse = z.object({ receives: z.array(ReceiveRequestDto) });
+export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
+
 export const API_ROUTES = {
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
@@ -293,6 +317,7 @@ export const API_ROUTES = {
   rejectInvoice: 'POST /api/invoices/:id/reject',
   wallet: 'GET /api/wallet',
   walletReceive: 'POST /api/wallet/receive',
+  walletReceives: 'GET /api/wallet/receives',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
   scheduleList: 'GET /api/schedule',
