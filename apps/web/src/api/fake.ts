@@ -469,6 +469,21 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
           precision: a.precision,
           balance: a.balance,
         })),
+        // The server's defaults (PAYMENT_CAP 100 TUSDT, DAILY_CAP 5×); the demo backend has no WDK policy engine.
+        spending: {
+          paymentCap: '100000000',
+          dailyCap: '500000000',
+          assetAllowlist: [MOCK_ASSET_ID],
+          spentLast24h: (await wallet.listTransfers())
+            .filter((t) => t.direction === 'outgoing' && t.status !== 'Failed' && t.assetId)
+            .reduce<{ assetId: string; amount: string }[]>((acc, t) => {
+              const row = acc.find((r) => r.assetId === t.assetId);
+              if (row) row.amount = (BigInt(row.amount) + BigInt(t.amount)).toString();
+              else acc.push({ assetId: t.assetId as string, amount: t.amount });
+              return acc;
+            }, []),
+          enforcedBy: 'guard' as const,
+        },
       };
     },
     async receive(req) {

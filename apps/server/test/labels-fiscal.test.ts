@@ -374,6 +374,16 @@ describe('M3 routes', () => {
     expect((await inject('POST', '/api/agent/chat/stream', { message: '' })).statusCode).toBe(400);
   });
 
+  it('wallet shows the spending rules and what was spent in the last 24 h', async () => {
+    const before = (await inject('GET', '/api/wallet')).json().spending;
+    expect(before).toMatchObject({ paymentCap: '100000000', enforcedBy: 'guard' });
+    expect(typeof before.dailyCap).toBe('string');
+    await payInvoice();
+    const after = (await inject('GET', '/api/wallet')).json().spending;
+    const spent = after.spentLast24h.reduce((s: bigint, r: { amount: string }) => s + BigInt(r.amount), 0n);
+    expect(spent).toBeGreaterThanOrEqual(25000000n);
+  });
+
   it('chatInvoices() gives structured fields only, with the payment when payable', async () => {
     const id = await payInvoice();
     const inv = chatInvoices(built.store).find((x) => x.invoiceId === id);
