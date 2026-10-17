@@ -12,7 +12,7 @@
     "smoke": "tsx scripts/wallet-smoke.ts",
     "issue-asset": "tsx scripts/issue-asset.ts",
     "payee": "tsx scripts/payee.ts",
-    "test:live": "LIVE_WALLET=1 vitest run"
+    "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run"
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",

@@ -1,6 +1,6 @@
 // PaymentGuard: money moves only for a plan a human confirmed, exactly as confirmed, once.
 // check(planId) → plan exists · invoice CONFIRMED/EXECUTING · confirmation is for this planId · plan fields still hash
-// to planId · amount ≤ cap · asset allowed · spendable ≥ amount · not executed before (atomic claim = idempotency key).
+// to planId · amount ≤ cap · asset allowed · not executed before (atomic claim = idempotency key) · spendable ≥ amount.
 // The WDK spend policy checks cap and asset again at signing time (a-002).
 import {
   type Confirmation,
@@ -68,15 +68,24 @@ export class WalletGuard implements PaymentGuard {
     const allow = this.deps.limits.assetAllowlist;
     if (allow.length > 0 && !allow.includes(plan.assetId))
       return no('asset_not_allowed', 'This asset is not on your list of approved assets.');
-    let spendable: bigint;
+    // Claim before the balance check: a paid plan must answer "already made", even while its change is locked.
+    if (!(await this.deps.store.claim(planId)))
+      return no('already_executed', 'This payment was already made (or is being made). It will not be sent twice.');
+    let spendable: bigint | undefined;
     try {
       spendable = BigInt((await this.deps.wallet.assetBalance(plan.assetId)).spendable);
     } catch {
-      return no('insufficient_funds', 'We could not read your balance for this asset. Nothing was sent.');
+      spendable = undefined;
     }
-    if (amount > spendable) return no('insufficient_funds', 'You do not have enough funds for this payment.');
-    if (!(await this.deps.store.claim(planId)))
-      return no('already_executed', 'This payment was already made (or is being made). It will not be sent twice.');
+    if (spendable === undefined || amount > spendable) {
+      await this.deps.store.release(planId);
+      return no(
+        'insufficient_funds',
+        spendable === undefined
+          ? 'We could not read your balance for this asset. Nothing was sent.'
+          : 'You do not have enough funds for this payment.',
+      );
+    }
     return { ok: true, plan };
   }
 

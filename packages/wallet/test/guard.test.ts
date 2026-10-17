@@ -72,6 +72,18 @@ describe('PaymentGuard', () => {
       limits,
     });
     expect(await big.check(poor.plan.planId)).toMatchObject({ ok: false, reason: 'insufficient_funds' });
+    // the claim was released: with funds the same plan can run
+    expect(await poor.guard.check(poor.plan.planId)).toMatchObject({ ok: true });
+  });
+
+  it('answers already_executed (not insufficient funds) while the first payment locks the change', async () => {
+    const s = await setup({ amount: '600000000' });
+    const slow = new MockWallet({ stepMs: 60_000 });
+    const guard = new WalletGuard({ store: s.store, wallet: slow, limits: { ...limits, paymentCap: '900000000' } });
+    expect(await executeGuarded(s.plan.planId, { guard, wallet: slow })).toMatchObject({ status: 'submitted' });
+    expect(await executeGuarded(s.plan.planId, { guard, wallet: slow })).toMatchObject({
+      error: { code: 'already_executed' },
+    });
   });
 
   it('after a send timeout: no retry, result submitted with the transfer, plan stays claimed', async () => {
