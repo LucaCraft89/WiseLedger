@@ -78,6 +78,41 @@ describe('Treasurer skeleton', () => {
   });
 });
 
+describe('Treasurer tools', () => {
+  it('get_balance and create_receive_invoice validate arguments and emit toolCall events', async () => {
+    const { guard, wallet } = await setup();
+    const t = new Treasurer({ llm: new MockLlm(), wallet, guard, pollMs: 0 });
+    const events: AppEvent[] = [];
+    const ctx = { emit: (e: AppEvent) => events.push(e) };
+    const bal = await t.runTool('get_balance', {}, ctx);
+    expect(bal.ok).toBe(true);
+    expect(bal.result).toEqual([
+      expect.objectContaining({ assetId: MOCK_ASSET_ID, ticker: 'TUSDT', spendable: '1000000000' }),
+    ]);
+    const inv = await t.runTool('create_receive_invoice', { amount: '5000000', expiryMinutes: 30 }, ctx);
+    expect(inv.ok).toBe(true);
+    expect((inv.result as { rgbInvoice: string }).rgbInvoice).toMatch(/^rgb:mock\//);
+    expect((await t.runTool('create_receive_invoice', { amount: '5.00' }, ctx)).ok).toBe(false); // base units only
+    expect((await t.runTool('delete_wallet', {}, ctx)).ok).toBe(false);
+    expect(events.map((e) => `${(e as { name: string }).name}:${(e as { status: string }).status}`)).toEqual([
+      'get_balance:ok',
+      'create_receive_invoice:ok',
+      'create_receive_invoice:rejected',
+      'delete_wallet:rejected',
+    ]);
+  });
+  it('tool definitions are ID-only: no free-text RGB invoice or amount strings in execute_plan', () => {
+    const t = new Treasurer({ llm: new MockLlm(), wallet: new MockWallet(), guard: confirmationGuard() });
+    const exec = t.tools({ emit: () => {} }).find((x) => x.name === 'execute_plan');
+    if (!exec) throw new Error('execute_plan missing');
+    expect(Object.keys((exec.params as unknown as { shape: Record<string, unknown> }).shape)).toEqual([
+      'planId',
+      'executeAt',
+      'labels',
+    ]);
+  });
+});
+
 describe.skipIf(process.env.LIVE_QVAC !== '1')('Treasurer on live QVAC', () => {
   it('calls execute_plan with the confirmed planId in 5 of 5 runs, and a wrong plan surfaces as a guard rejection', {
     timeout: 900_000,
