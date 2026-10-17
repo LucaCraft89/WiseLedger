@@ -12,6 +12,7 @@ import { SqliteLabelStore } from './labels.js';
 import { registerOnboardingRoutes } from './onboarding.js';
 import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
+import { SqliteReceiveStore } from './receives.js';
 import { registerRoutes } from './routes.js';
 import { chatInvoices, InvoiceStore } from './store.js';
 
@@ -51,6 +52,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   const labels = new SqliteLabelStore(store);
   const jobs = new SqliteJobStore(store);
   const guardStore = new SqliteGuardStore(store);
+  const receives = new SqliteReceiveStore(store);
   let fiscal: WalletFiscalService | undefined;
   // Bound once the orchestrator exists: every wallet sync settles EXECUTING invoices from the wallet's transfers.
   let settle: () => void = () => undefined;
@@ -96,6 +98,14 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   });
   settle = () => {
     orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
+    wallet
+      .listTransfers()
+      .then((transfers) => {
+        for (const r of receives.reconcile(transfers)) {
+          app.log.info({ receiveId: r.receiveId, status: r.status, transferId: r.transferId }, 'Incoming payment');
+        }
+      })
+      .catch((err: unknown) => app.log.warn({ err }, 'Checking incoming payments failed'));
   };
   // The mock wallet has no sync loop: settle on a timer instead (e.g. a timed-out mock payment). The real wallet
   // settles after each sync (its loop starts once onboarding has a ready wallet).
@@ -111,6 +121,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     treasurer,
     labels,
     jobs,
+    receives,
     fiscal: fiscalService,
     llmInfo: providers.llmInfo,
     holder: providers.holder,

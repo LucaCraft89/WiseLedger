@@ -114,6 +114,25 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX jobs_status_run_at ON jobs(status, run_at);
   `,
+  // 4: RGB invoices the app handed out to get paid, matched to incoming transfers.
+  `
+  CREATE TABLE receives (
+    receive_id TEXT PRIMARY KEY,
+    rgb_invoice TEXT NOT NULL,
+    recipient_id TEXT NOT NULL,
+    asset_id TEXT,
+    amount TEXT,
+    note TEXT,
+    status TEXT NOT NULL,
+    transfer_id TEXT,
+    txid TEXT,
+    received_amount TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX receives_status ON receives(status);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
