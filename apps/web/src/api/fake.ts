@@ -154,6 +154,10 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       setTimeout(() => void analyze(r, filename, content).catch((err) => fail(r, err)), 50);
       return { invoiceId: id, state: r.summary.state };
     },
+    async listInvoices() {
+      const invoices = [...recs.values()].map((r) => r.summary).reverse();
+      return { invoices };
+    },
     async getInvoice(id) {
       const r = get(id);
       return {
