@@ -8,11 +8,20 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "smoke": "tsx scripts/wallet-smoke.ts",
+    "issue-asset": "tsx scripts/issue-asset.ts",
+    "payee": "tsx scripts/payee.ts"
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",
     "@utexo/wdk-wallet-rgb": "2.0.3",
     "core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   }
 }
