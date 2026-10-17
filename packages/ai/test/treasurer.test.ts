@@ -131,6 +131,9 @@ describe('Treasurer tools', () => {
     expect(usdc).toMatchObject({ ok: false, error: expect.stringMatching(/only ask for tokens it holds: TUSDT/) });
     const tiny = await t.runTool('create_receive_invoice', { amount: '0.0000001' }, ctx);
     expect(tiny).toMatchObject({ ok: false, error: expect.stringMatching(/at most 6 decimals/) });
+    // The model passed the ticker it read in CONTEXT: accepted for a request when it names exactly one held token.
+    const byTicker = await t.runTool('create_receive_invoice', { assetId: 'tusdt', amount: '500' }, ctx);
+    expect(byTicker).toMatchObject({ ok: true, result: { assetId: MOCK_ASSET_ID, amount: '500000000' } });
     const open = await t.runTool('create_receive_invoice', {}, ctx); // payer chooses asset and amount
     expect(open.ok).toBe(true);
   });

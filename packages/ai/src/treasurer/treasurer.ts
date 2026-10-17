@@ -39,7 +39,13 @@ export async function receiveTarget(
 ): Promise<{ assetId?: string; amount?: string }> {
   const assets = await wallet.listAssets();
   const held = assets.map((a) => `${a.ticker} (assetId=${a.assetId})`).join(', ') || 'no tokens yet';
-  let asset = args.assetId ? assets.find((a) => a.assetId === args.assetId) : undefined;
+  // Asset ID first. A small model often passes the ticker it read ("TUSDT"): for a payment request (money coming in)
+  // a ticker that names exactly one held token is accepted. Payments themselves are always matched by asset ID.
+  const byTicker = (t: string) => {
+    const hits = assets.filter((a) => a.ticker.toUpperCase() === t.trim().toUpperCase());
+    return hits.length === 1 ? hits[0] : undefined;
+  };
+  let asset = args.assetId ? (assets.find((a) => a.assetId === args.assetId) ?? byTicker(args.assetId)) : undefined;
   if (args.assetId && !asset) throw new Error(`This wallet can only ask for tokens it holds: ${held}.`);
   if (!asset && args.amount) {
     if (assets.length !== 1) throw new Error(`Which token should the request be in? This wallet holds: ${held}.`);
@@ -579,6 +585,7 @@ export class Treasurer implements TreasurerAgent {
       'Each invoice shows the safety check (check, reasons). To say why an invoice was stopped or needs review, use them; you never see the document itself.',
       'Your tools: get_balance; create_receive_invoice ("create/make an invoice", "request a payment", "I want to get paid": a payment request someone else pays into this wallet; it needs no address); schedule_payment and execute_plan for uploaded invoices; label_transfer; list_transfers; fiscal_report. Never say you cannot do what a tool does: call it.',
       'Only the tokens under Assets exist in this wallet. If the user names another one (e.g. USDC), say this wallet holds only those and offer them. Paying a Bitcoin address is not possible here: payments go to invoices the user uploads.',
+      'You already know every asset ID (under Assets): never ask the user for one. For a payment request call create_receive_invoice right away with the amount and expiry the user gave; if they also gave an address, create the request anyway and say in one sentence that a payment request needs no address.',
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
       'Invoices (newest first; the first one is the latest):',
