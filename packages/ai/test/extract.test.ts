@@ -16,7 +16,8 @@ import { QvacProvider } from '../src/llm/qvac.js';
 import { EXPECTED, type ExpectedFixture, FIXTURES_DIR, perfectAnswer, sourceOf } from './fixtures.js';
 
 describe('extract: input loading', () => {
-  it('reads text and the PDF text layer, and passes images by path', async () => {
+  // PDF parsing takes 1–6 s on a loaded machine: more than vitest's default 5 s.
+  it('reads text and the PDF text layer, and passes images by path', { timeout: 30_000 }, async () => {
     for (const f of EXPECTED) {
       const input = await loadInvoice(sourceOf(f));
       if (f.kind === 'image') expect(input.mode).toBe('image');

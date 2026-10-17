@@ -128,9 +128,33 @@ describe('chat helpers', () => {
     expect(fiscalFromToolCall({ ...call, ok: false })).toBeUndefined();
   });
 
-  it('sends only the last 6 turns', () => {
-    const turns = Array.from({ length: 9 }, (_, i) => ({ role: 'user' as const, text: `m${i}` }));
-    expect(chatHistory(turns).map((t) => t.text)).toEqual(['m3', 'm4', 'm5', 'm6', 'm7', 'm8']);
+  it('sends the last 10 turns; assistant turns carry what their tools did', () => {
+    const turns = Array.from({ length: 12 }, (_, i) => ({ role: 'user' as const, text: `m${i}` }));
+    expect(chatHistory(turns).map((t) => t.text)).toEqual([
+      'm2',
+      'm3',
+      'm4',
+      'm5',
+      'm6',
+      'm7',
+      'm8',
+      'm9',
+      'm10',
+      'm11',
+    ]);
+    const withTool = chatHistory([
+      { role: 'user', text: 'request 100 TUSDT for 30 minutes' },
+      {
+        role: 'assistant',
+        text: 'Here is your payment request.',
+        reply: {
+          toolCalls: [{ name: 'create_receive_invoice', args: { amount: '100', expiryMinutes: 30 }, ok: true }],
+        },
+      },
+    ]);
+    expect(withTool[1]?.text).toBe(
+      'Here is your payment request.\n(done: create_receive_invoice {"amount":"100","expiryMinutes":30} ok)',
+    );
   });
 });
 

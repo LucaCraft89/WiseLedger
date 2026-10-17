@@ -433,7 +433,7 @@ export class Treasurer implements TreasurerAgent {
     }));
     const messages: ChatMessage[] = [
       { role: 'system', content: await this.chatSystem() },
-      ...history.slice(-6).map((h) => ({ role: h.role, content: h.text.slice(0, 500) }) as ChatMessage),
+      ...history.slice(-10).map((h) => ({ role: h.role, content: h.text.slice(0, 600) }) as ChatMessage),
       { role: 'user', content: message.slice(0, 1000) },
     ];
     const records: AgentToolCallRecord[] = [];
@@ -551,6 +551,7 @@ export class Treasurer implements TreasurerAgent {
       }).join(', ')}. A payment "on <weekday>" means the next one, at 09:00.`,
       'Use IDs exactly as written in CONTEXT. Spend tools only prepare a payment; the user confirms it on screen.',
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
+      'The earlier messages of this conversation come before the last one, with "(done: …)" notes of the tools you used. Use them: "make it 50", "the same for Friday", "that one" refer to them.',
       'Each invoice shows the safety check (check, reasons). To say why an invoice was stopped or needs review, use them; you never see the document itself.',
       'Your tools: get_balance; create_receive_invoice ("create/make an invoice", "request a payment", "I want to get paid": a payment request someone else pays into this wallet; it needs no address); schedule_payment and execute_plan for uploaded invoices; label_transfer; list_transfers; fiscal_report. Never say you cannot do what a tool does: call it.',
       'Only the tokens under Assets exist in this wallet. If the user names another one (e.g. USDC), say this wallet holds only those and offer them. Paying a Bitcoin address is not possible here: payments go to invoices the user uploads.',
