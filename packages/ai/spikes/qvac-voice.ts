@@ -2,7 +2,8 @@
 import { createTranscriber } from '../src/voice.js';
 import { rssMb, secs } from './util.js';
 
-const file = process.argv[2] ?? new URL('./voice-sample.wav', import.meta.url).pathname;
+// Third-party audio is not committed: pass a speech WAV, default the ALSA system sample.
+const file = process.argv[2] ?? '/usr/share/sounds/alsa/Front_Center.wav';
 const stt = createTranscriber({
   provider: 'qvac',
   onProgress: (p) => process.stdout.write(`\rdownload ${p.toFixed(0)}%   `),

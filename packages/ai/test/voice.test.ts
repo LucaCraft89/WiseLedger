@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   createTranscriber,
@@ -63,10 +64,12 @@ describe('voice: WAV handling', () => {
 });
 
 describe.skipIf(process.env.LIVE_QVAC !== '1')('voice: live QVAC Parakeet', () => {
-  it('transcribes the sample WAV', { timeout: 900_000 }, async () => {
+  // A system sample (not committed: third-party audio). Any speech WAV via VOICE_SAMPLE.
+  const sample = process.env.VOICE_SAMPLE ?? '/usr/share/sounds/alsa/Front_Center.wav';
+  it.skipIf(!existsSync(sample))('transcribes a sample WAV', { timeout: 900_000 }, async () => {
     const stt = createTranscriber({ provider: 'qvac' });
     try {
-      const r = await stt.transcribe(new URL('../spikes/voice-sample.wav', import.meta.url).pathname, 'audio/wav');
+      const r = await stt.transcribe(sample, 'audio/wav');
       expect(r.text.length).toBeGreaterThan(10);
     } finally {
       await stt.unload();
