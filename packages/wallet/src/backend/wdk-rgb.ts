@@ -60,6 +60,7 @@ export interface RgbSdkWallet {
   listTransfers(assetId?: string): SdkTransfer[];
   refreshWallet(): void;
   syncWallet(): void;
+  createBackup(p: { backupPath: string; password: string }): { message: string; backupPath: string };
 }
 
 interface SdkBalance {
