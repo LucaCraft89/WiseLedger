@@ -31,6 +31,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import {
   FiscalQuery,
+  type HealthOnboardingFields,
   type LabelsListResponse,
   LabelsPutRequest,
   M3_ROUTES,
@@ -41,6 +42,7 @@ import {
 import type { WalletFiscalService } from './fiscal.js';
 import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
+import { healthHints, type WalletHolder } from './onboarding.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
@@ -55,6 +57,8 @@ export interface RouteDeps {
   jobs: SqliteJobStore;
   fiscal: WalletFiscalService;
   llmInfo: () => LlmInfo;
+  /** Onboarding state (needs_setup / locked / ready) for /api/health. */
+  holder: WalletHolder;
   walletBackend: WalletResponse['backend'];
   network: WalletResponse['network'];
   problems: () => string[];
@@ -66,6 +70,9 @@ export interface RouteDeps {
 
 /** Wallet errors caused by the request (400); the rest are the wallet's own failures (502). */
 const WALLET_CLIENT_ERRORS: ReadonlySet<string> = new Set(['UnknownAsset', 'InvalidInvoice', 'InvoiceExpired']);
+
+/** Wallet errors with their own HTTP status: a locked wallet needs the passphrase; the network may be down. */
+const WALLET_STATUS: Partial<Record<WalletErrorCode, number>> = { WalletLocked: 401, NetworkUnavailable: 503 };
 
 /** Plain words for wallet errors whose native message is technical (e.g. rgb-lib JSONConversion). */
 const WALLET_MESSAGES: Partial<Record<WalletErrorCode, string>> = {
@@ -82,8 +89,8 @@ export interface WalletSyncState {
   lastError: string | null;
 }
 
-/** /api/health body: the core DTO plus the wallet sync state (not in HealthResponse yet: core gap). */
-export type HealthBody = HealthResponse & { walletSync: WalletSyncState };
+/** /api/health body: the core DTO plus the wallet sync state and onboarding fields (not in HealthResponse yet: core gap). */
+export type HealthBody = HealthResponse & { walletSync: WalletSyncState } & HealthOnboardingFields;
 
 /** BTC balance in sats when the backend exposes one (WdkRgbWallet.btcBalance(); not part of WalletPort). */
 function btcBalanceSats(wallet: WalletPort): string | undefined {
@@ -164,7 +171,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     }
     if (isWalletError(err)) {
       app.log.warn({ err }, 'Wallet operation failed');
-      const status = WALLET_CLIENT_ERRORS.has(err.code) ? 400 : 502;
+      const status = WALLET_STATUS[err.code] ?? (WALLET_CLIENT_ERRORS.has(err.code) ? 400 : 502);
       return reply.status(status).send(apiError(err.code, WALLET_MESSAGES[err.code] ?? err.message));
     }
     if (isTooLarge(err)) {
@@ -188,9 +195,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       time: new Date().toISOString(),
       llm: { provider: llm.provider, model: llm.model, state: llm.state, onDevice: llm.onDevice },
       // blockHeight: WalletPort exposes no chain tip yet (core gap), so it is omitted.
-      wallet: { backend: deps.walletBackend, network: deps.network, ready: true },
+      wallet: { backend: deps.walletBackend, network: deps.network, ready: deps.holder.state === 'ready' },
       walletSync: deps.walletSync(),
       problems: deps.problems(),
+      onboarding: deps.holder.state,
+      network: deps.holder.opts.network,
+      hints: await healthHints(deps.holder, () => btcBalanceSats(wallet)),
     };
   });
 
