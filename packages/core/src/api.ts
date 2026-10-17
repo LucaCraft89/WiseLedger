@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { AnalysisReport, BaseUnits, InvoiceSourceKind, IsoDateTime, LlmProviderName, Verdict } from './analysis.js';
 import { AppEvent } from './events.js';
 import type { AgentReply } from './llm.js';
-import { ExecutionResultSchema, InvoiceStateSchema, type PaymentPlan, PaymentPlanSchema } from './orchestrator.js';
+import {
+  ExecutionResultSchema,
+  InvoiceStateSchema,
+  JobSchema,
+  LabelEntrySchema,
+  type PaymentPlan,
+  PaymentPlanSchema,
+} from './orchestrator.js';
 import { AssetBalanceSchema, TransferStatusSchema } from './wallet.js';
 
 const InvoiceStateDto = InvoiceStateSchema;
@@ -70,6 +77,8 @@ export const ConfirmRequest = z.object({
   planId: z.string().min(1),
   /** Required true when verdict is `review`; ignored (refused) when `block`. */
   override: z.boolean().optional(),
+  /** Schedule instead of paying now (ISO time, from the chat confirmation card). The plan is built with it. */
+  executeAt: IsoDateTime.optional(),
 });
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
 
@@ -208,6 +217,26 @@ export const HealthResponse = z.object({
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
+// GET /api/schedule · POST /api/schedule/:jobId/cancel
+export const ScheduleListResponse = z.object({ jobs: z.array(JobSchema) });
+export type ScheduleListResponse = z.infer<typeof ScheduleListResponse>;
+export const ScheduleCancelResponse = z.object({ ok: z.boolean() });
+export type ScheduleCancelResponse = z.infer<typeof ScheduleCancelResponse>;
+
+// PUT /api/labels/:transferId
+export const LabelsPutRequest = z.object({ labels: z.array(z.string().trim().min(1).max(40)).max(10) });
+export type LabelsPutRequest = z.infer<typeof LabelsPutRequest>;
+export const LabelsPutResponse = LabelEntrySchema;
+export type LabelsPutResponse = z.infer<typeof LabelsPutResponse>;
+
+// GET /api/fiscal?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv|json → file download (Content-Disposition attachment)
+export const FiscalQuery = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  format: z.enum(['csv', 'json']).default('csv'),
+});
+export type FiscalQuery = z.infer<typeof FiscalQuery>;
+
 /** Route table, for clients and docs. */
 export const API_ROUTES = {
   createInvoice: 'POST /api/invoices',
@@ -220,6 +249,10 @@ export const API_ROUTES = {
   walletReceive: 'POST /api/wallet/receive',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  scheduleList: 'GET /api/schedule',
+  scheduleCancel: 'POST /api/schedule/:jobId/cancel',
+  labelsPut: 'PUT /api/labels/:transferId',
+  fiscal: 'GET /api/fiscal',
   health: 'GET /api/health',
 } as const;
 
@@ -240,11 +273,24 @@ export function formatAssetAmount(baseUnits: string, precision: number): string 
 export function buildConfirmationSentence(
   plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
   asset: { ticker: string; precision: number } | undefined,
+  /** IANA zone for the date (default: this machine's zone, so the user reads their own clock time). */
+  timeZone?: string,
 ): string {
   const amount = asset
     ? `${formatAssetAmount(plan.amount, asset.precision)} ${asset.ticker}`
     : `${plan.amount} base units`;
   const when =
-    plan.executeAt === 'now' ? 'now' : `on ${new Date(plan.executeAt).toUTCString().replace(/:\d\d GMT$/, ' UTC')}`;
+    plan.executeAt === 'now'
+      ? 'now'
+      : `on ${new Date(plan.executeAt).toLocaleString('en-GB', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short',
+          ...(timeZone ? { timeZone } : {}),
+        })}`;
   return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
 }

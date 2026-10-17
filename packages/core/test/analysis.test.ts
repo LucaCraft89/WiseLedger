@@ -288,7 +288,11 @@ describe('confirmation sentence', () => {
   });
   it('names the date for a scheduled payment', () => {
     expect(
-      buildConfirmationSentence({ ...plan, executeAt: '2026-10-23T09:00:00.000Z' }, { ticker: 'TUSDT', precision: 6 }),
-    ).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, on Fri, 23 Oct 2026 09:00 UTC. Confirm?');
+      buildConfirmationSentence(
+        { ...plan, executeAt: '2026-10-23T09:00:00.000Z' },
+        { ticker: 'TUSDT', precision: 6 },
+        'UTC',
+      ),
+    ).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, on Fri, 23 Oct 2026, 09:00 UTC. Confirm?');
   });
 });
