@@ -406,6 +406,7 @@ export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
     return {
       invoiceId: inv.id,
       state: inv.state,
+      createdAt: inv.createdAt,
       ...(ex?.issuer.name ? { supplier: ex.issuer.name } : {}),
       ...(ex?.total ? { total: ex.total } : {}),
       ...(ex?.currency ? { currency: ex.currency } : {}),
