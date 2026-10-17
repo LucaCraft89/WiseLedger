@@ -71,10 +71,13 @@ describe('Scheduler', () => {
       jobs,
       now: () => new Date('2026-10-19T08:00:00Z'),
       hasConfirmation: async () => true,
-      execute: async (job) =>
-        job.planId === 'p2'
-          ? { planId: 'p2', status: 'failed', error: { code: 'already_executed', message: 'already paid' } }
-          : (paid.push(job.planId), { planId: job.planId, status: 'settled' }),
+      execute: async (job) => {
+        if (job.planId === 'p2') {
+          return { planId: 'p2', status: 'failed', error: { code: 'already_executed', message: 'already paid' } };
+        }
+        paid.push(job.planId);
+        return { planId: job.planId, status: 'settled' };
+      },
     });
     expect(await s2.tick()).toBe(2);
     expect(paid).toEqual(['p2-before-crash', 'p1']);

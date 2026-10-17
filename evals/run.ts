@@ -97,7 +97,7 @@ function outboundNow(): string[] {
       .toString()
       .split('\n')
       .filter((l) => mine.some((p) => l.includes(`pid=${p},`)))
-      .filter((l) => !/\s(127\.\d+\.\d+\.\d+|\[::1\]|::1):\d+\s+\S+\s*$/.test(l.replace(/users:.*/, '').trim() + ' x'))
+      .filter((l) => !/\s(127\.\d+\.\d+\.\d+|\[::1\]|::1):\d+\s+\S+\s*$/.test(`${l.replace(/users:.*/, '').trim()} x`))
       .map((l) => l.replace(/\s+/g, ' ').trim());
   } catch {
     return ['(ss not available)'];
