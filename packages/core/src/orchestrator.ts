@@ -91,6 +91,8 @@ export const ExecutionResultSchema = z.object({
   status: z.enum(['submitted', 'settled', 'scheduled', 'failed']),
   transferId: z.string().optional(),
   txid: z.string().optional(),
+  /** Lightning payments: shown instead of a txid. */
+  paymentHash: z.string().optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
 });
 export type ExecutionResult = z.infer<typeof ExecutionResultSchema>;

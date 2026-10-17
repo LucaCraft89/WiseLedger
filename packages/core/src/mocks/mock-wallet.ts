@@ -9,6 +9,7 @@ import {
   InvalidInvoice,
   InvoiceExpired,
   type IssueNiaRequest,
+  type LightningStatus,
   type OnboardingInfo,
   type PaymentRequest,
   type PayResult,
@@ -25,10 +26,23 @@ import {
 
 export const MOCK_ASSET_ID = 'rgb:mock-tusdt';
 export const MOCK_INVOICE_PREFIX = 'rgb:mock/';
+/** Mock RGB Lightning invoice: same shape (`lnrgb:mock/<assetId>/<amount>/<expiry>`), paid instantly over a channel. */
+export const MOCK_LN_INVOICE_PREFIX = 'lnrgb:mock/';
 /** pay() with this amount throws TransferFailed. */
 export const MOCK_FAIL_AMOUNT = '13130000';
 /** pay() with this amount throws SubmitTimeout, but the transfer really goes out (as on chain). */
 export const MOCK_TIMEOUT_AMOUNT = '13140000';
+
+/** Deterministic fake payment hash (64 hex) for a mock Lightning invoice. */
+function mockHash(invoice: string): string {
+  let out = '';
+  for (let k = 0; k < 8; k++) {
+    let h = 2166136261 ^ k;
+    for (const c of invoice) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+    out += h.toString(16).padStart(8, '0');
+  }
+  return out;
+}
 
 export interface MockWalletOptions {
   /** Duration of each status step in ms (default 3000, 0 = settled immediately). */
@@ -52,6 +66,7 @@ interface MockTransfer {
   direction: TransferInfo['direction'];
   rgbInvoice?: string;
   txid?: string;
+  paymentHash?: string;
   createdAt: number;
   failed: boolean;
 }
@@ -134,8 +149,9 @@ export class MockWallet implements WalletPort {
   }
 
   async decodeInvoice(rgbInvoice: string): Promise<DecodedInvoice> {
-    if (!rgbInvoice.startsWith(MOCK_INVOICE_PREFIX)) throw new InvalidInvoice();
-    const parts = rgbInvoice.slice(MOCK_INVOICE_PREFIX.length).split('/');
+    const ln = rgbInvoice.startsWith(MOCK_LN_INVOICE_PREFIX);
+    if (!ln && !rgbInvoice.startsWith(MOCK_INVOICE_PREFIX)) throw new InvalidInvoice();
+    const parts = rgbInvoice.slice((ln ? MOCK_LN_INVOICE_PREFIX : MOCK_INVOICE_PREFIX).length).split('/');
     const [assetId, amount, expiry] = parts;
     if (parts.length !== 3 || !assetId || !amount || !expiry || !/^\d+$/.test(expiry)) throw new InvalidInvoice();
     if (amount !== 'any' && !/^(0|[1-9]\d*)$/.test(amount)) throw new InvalidInvoice();
@@ -146,7 +162,8 @@ export class MockWallet implements WalletPort {
       ...(amount !== 'any' ? { amount } : {}),
       network: 'mock',
       expiresAt: new Date(Number(expiry) * 1000).toISOString(),
-      transportEndpoints: ['mock://transport'],
+      transportEndpoints: ln ? [] : ['mock://transport'],
+      ...(ln ? { rail: 'lightning' as const, paymentHash: mockHash(rgbInvoice) } : {}),
     };
   }
 
@@ -157,10 +174,20 @@ export class MockWallet implements WalletPort {
 
   async pay(req: PaymentRequest): Promise<PayResult> {
     await this.validate(req);
+    if (req.rgbInvoice.startsWith(MOCK_LN_INVOICE_PREFIX)) {
+      const local = BigInt((await this.lightningStatus()).channels[0]?.localAsset ?? '0');
+      if (BigInt(req.amount) > local) {
+        throw new InsufficientFunds('Not enough in the Lightning channel for this payment. Pay on-chain instead.');
+      }
+    }
     if (req.amount === this.failAmount) throw new TransferFailed('Simulated transfer failure (mock failure amount).');
     const t = this.record(req.assetId, BigInt(req.amount), 'outgoing', req.rgbInvoice);
     if (req.amount === this.timeoutAmount) throw new SubmitTimeout();
-    return { transferId: t.transferId, ...(t.txid ? { txid: t.txid } : {}) };
+    return {
+      transferId: t.transferId,
+      ...(t.txid ? { txid: t.txid } : {}),
+      ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
+    };
   }
 
   async getTransfer(transferId: string): Promise<TransferInfo | null> {
@@ -173,6 +200,28 @@ export class MockWallet implements WalletPort {
   }
 
   async sync(): Promise<void> {}
+
+  /** One usable mock channel to a mock LSP, its TUSDT on our side minus what was paid over Lightning. */
+  async lightningStatus(): Promise<LightningStatus> {
+    const paid = this.transfers
+      .filter((t) => t.paymentHash && t.direction === 'outgoing' && !t.failed)
+      .reduce((s, t) => s + t.amount, 0n);
+    const local = 50_000_000n - paid;
+    return {
+      enabled: true,
+      nodePubkey: `02${'c'.repeat(64)}`,
+      channels: [
+        {
+          channelId: 'mock-channel-1',
+          peer: `03${'a'.repeat(64)}`,
+          assetId: MOCK_ASSET_ID,
+          localAsset: (local > 0n ? local : 0n).toString(),
+          remoteAsset: paid.toString(),
+          usable: true,
+        },
+      ],
+    };
+  }
 
   private async validate(req: PaymentRequest): Promise<void> {
     const inv = await this.decodeInvoice(req.rgbInvoice);
@@ -197,7 +246,11 @@ export class MockWallet implements WalletPort {
       createdAt: this.now(),
       failed: false,
       ...(rgbInvoice ? { rgbInvoice } : {}),
-      ...(direction !== 'issuance' ? { txid: n.toString(16).padStart(64, 'a') } : {}),
+      ...(rgbInvoice?.startsWith(MOCK_LN_INVOICE_PREFIX)
+        ? { paymentHash: mockHash(rgbInvoice) }
+        : direction !== 'issuance'
+          ? { txid: n.toString(16).padStart(64, 'a') }
+          : {}),
     };
     this.transfers.push(t);
     return t;
@@ -205,7 +258,7 @@ export class MockWallet implements WalletPort {
 
   private status(t: MockTransfer): TransferStatus {
     if (t.failed) return 'Failed';
-    if (t.direction === 'issuance') return 'Settled';
+    if (t.direction === 'issuance' || t.paymentHash) return 'Settled'; // Lightning: instant
     const elapsed = this.now() - t.createdAt;
     if (elapsed < this.stepMs) return 'WaitingCounterparty';
     if (elapsed < 2 * this.stepMs) return 'WaitingConfirmations';
@@ -222,6 +275,7 @@ export class MockWallet implements WalletPort {
       direction: t.direction,
       status,
       ...(t.txid ? { txid: t.txid } : {}),
+      ...(t.paymentHash ? { rail: 'lightning' as const, paymentHash: t.paymentHash } : {}),
       ...(t.rgbInvoice
         ? { rgbInvoice: t.rgbInvoice, recipientId: `mock-recipient-${t.rgbInvoice.split('/').at(-1)}` }
         : {}),

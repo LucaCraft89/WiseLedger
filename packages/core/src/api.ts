@@ -116,8 +116,44 @@ export const WalletResponse = z.object({
   /** BTC balance in sats as a decimal string. */
   btcBalanceSats: BaseUnits.optional(),
   assets: z.array(WalletAssetDto),
+  /** The spending rules every payment must pass (WDK policy engine on the real wallet, PaymentGuard everywhere). */
+  spending: z
+    .object({
+      /** Max per payment, base units. */
+      paymentCap: BaseUnits,
+      /** Max per asset in any 24 h, base units. */
+      dailyCap: BaseUnits.optional(),
+      /** Approved asset IDs; empty = any asset. */
+      assetAllowlist: z.array(z.string()),
+      /** Sent (not failed) in the last 24 h, per asset, base units. */
+      spentLast24h: z.array(z.object({ assetId: z.string(), amount: BaseUnits })),
+      /** 'wdk-policy' when the Tether WDK policy engine also enforces the rules on the wallet itself. */
+      enforcedBy: z.enum(['wdk-policy', 'guard']),
+    })
+    .optional(),
 });
 export type WalletResponse = z.infer<typeof WalletResponse>;
+
+// GET /api/wallet/btc: on-chain Bitcoin (sats) movements of the wallet, newest first. Sats pay network fees and
+// carry the RGB tokens; they are not the TUSDT balance.
+export const BtcTransactionDto = z.object({
+  txid: z.string(),
+  /** received = test bitcoin came in; sent = test bitcoin went out to someone else; internal = only the fee left. */
+  direction: z.enum(['received', 'sent', 'internal']),
+  /** Why the wallet made it: a token payment, preparing coins for tokens, emptying the wallet, or a plain send. */
+  purpose: z.enum(['token_payment', 'utxo_setup', 'drain', 'bitcoin']),
+  /** Sats that moved to or from the wallet, fee excluded. Decimal string. */
+  amountSats: BaseUnits,
+  /** Network fee in sats. Decimal string; "0" when the wallet did not pay it. */
+  feeSats: BaseUnits,
+  confirmed: z.boolean(),
+  /** Absent while unconfirmed. */
+  createdAt: IsoDateTime.optional(),
+});
+export type BtcTransactionDto = z.infer<typeof BtcTransactionDto>;
+
+export const BtcTransactionsResponse = z.object({ transactions: z.array(BtcTransactionDto) });
+export type BtcTransactionsResponse = z.infer<typeof BtcTransactionsResponse>;
 
 // POST /api/wallet/receive
 export const WalletReceiveRequest = z.object({
@@ -129,6 +165,8 @@ export const WalletReceiveRequest = z.object({
     .positive()
     .max(60 * 24 * 7)
     .optional(),
+  /** Who should pay or what for ("Acme, refund October"); shown in the payment request list (M4). */
+  note: z.string().trim().max(120).optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -149,6 +187,8 @@ export const TransferDto = z.object({
   direction: z.enum(['in', 'out']),
   status: TransferStatusSchema,
   txid: z.string().optional(),
+  /** Lightning payments: no txid, the payment hash identifies the payment. */
+  paymentHash: z.string().optional(),
   explorerUrl: z.string().optional(),
   invoiceId: z.string().optional(),
   labels: z.array(z.string()),
@@ -192,6 +232,16 @@ export const ChatResponse = z.object({
     .optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
+
+/** One line of the chat stream (newline-delimited JSON). */
+export const ChatStreamLine = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('token'), text: z.string() }),
+  /** The model starts a new turn (after a tool call): drop the live text shown so far. */
+  z.object({ t: z.literal('reset') }),
+  z.object({ t: z.literal('reply'), reply: ChatResponse }),
+  z.object({ t: z.literal('error'), code: z.string(), message: z.string() }),
+]);
+export type ChatStreamLine = z.infer<typeof ChatStreamLine>;
 // ChatResponse and AgentReply must stay the same shape.
 const _chatShape: (r: AgentReply) => ChatResponse = (r) => r;
 void _chatShape;
@@ -284,6 +334,54 @@ export const FiscalQuery = z.object({
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
 /** Route table, for clients and docs. */
+// GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
+export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed']);
+export type ReceiveStatus = z.infer<typeof ReceiveStatus>;
+export const ReceiveRequestDto = z.object({
+  receiveId: z.string(),
+  rgbInvoice: z.string(),
+  recipientId: z.string(),
+  assetId: z.string().optional(),
+  amount: BaseUnits.optional(),
+  note: z.string().optional(),
+  status: ReceiveStatus,
+  transferId: z.string().optional(),
+  txid: z.string().optional(),
+  receivedAmount: BaseUnits.optional(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
+export const ReceivesListResponse = z.object({ receives: z.array(ReceiveRequestDto) });
+export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
+
+// POST /api/agent/transcribe: body = raw audio bytes (Content-Type audio/wav, 16 kHz mono preferred), max 2 MB / 30 s.
+// The text only fills the chat box; the user edits and sends it through POST /api/agent/chat.
+export const TranscribeResponse = z.object({ text: z.string(), ms: z.number().int().nonnegative() });
+export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
+
+// GET /api/wallet/lightning — mirrors WalletPort.lightningStatus(); `enabled: false` when Lightning is off.
+export const LightningChannelDto = z.object({
+  channelId: z.string(),
+  peer: z.string(),
+  assetId: z.string().optional(),
+  /** Asset we can send over this channel, base units. */
+  localAsset: BaseUnits,
+  /** Asset we can receive over this channel, base units. */
+  remoteAsset: BaseUnits,
+  usable: z.boolean(),
+});
+export type LightningChannelDto = z.infer<typeof LightningChannelDto>;
+export const LightningStatusResponse = z.object({
+  enabled: z.boolean(),
+  nodePubkey: z.string().optional(),
+  channels: z.array(LightningChannelDto),
+  /** Plain words when enabled but not working ("No channel yet: requested from the LSP"). */
+  problem: z.string().optional(),
+});
+export type LightningStatusResponse = z.infer<typeof LightningStatusResponse>;
+
 export const API_ROUTES = {
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
@@ -293,8 +391,14 @@ export const API_ROUTES = {
   rejectInvoice: 'POST /api/invoices/:id/reject',
   wallet: 'GET /api/wallet',
   walletReceive: 'POST /api/wallet/receive',
+  walletReceives: 'GET /api/wallet/receives',
+  walletLightning: 'GET /api/wallet/lightning',
+  walletBtc: 'GET /api/wallet/btc',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */
+  agentChatStream: 'POST /api/agent/chat/stream',
+  agentTranscribe: 'POST /api/agent/transcribe',
   scheduleList: 'GET /api/schedule',
   scheduleCancel: 'POST /api/schedule/:jobId/cancel',
   labelsPut: 'PUT /api/labels/:transferId',
@@ -318,11 +422,20 @@ export function formatAssetAmount(baseUnits: string, precision: number): string 
 }
 
 /**
+ * RGB Lightning invoices are BOLT11 strings (lnbc mainnet, lntb testnet, lntbs signet, lnbcrt regtest; the mock
+ * wallet uses lnrgb…), optionally behind "lightning:". On-chain RGB invoices start with "rgb:".
+ */
+export const LN_INVOICE_RE = /\b(?:lightning:)?(ln(?:bcrt|tbs|tb|bc|rgb)[^\s"'<>]{8,})/gi;
+export function isLightningInvoice(invoice: string | undefined): boolean {
+  return !!invoice && /^(?:lightning:)?ln(?:bcrt|tbs|tb|bc|rgb)[^\s"'<>]{8,}$/i.test(invoice.trim());
+}
+
+/**
  * The one sentence the user confirms, built by code from the plan (never by the LLM). Server and web both use this.
- * "Pay 25.00 TUSDT (asset rgb:…) to Acme Srl, now. Confirm?"
+ * "Pay 25.00 TUSDT (asset rgb:…) to Acme Srl, now. Confirm?"; a Lightning invoice adds "via Lightning (instant)".
  */
 export function buildConfirmationSentence(
-  plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
+  plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'> & { rgbInvoice?: string },
   asset: { ticker: string; precision: number } | undefined,
   /** IANA zone for the date (default: this machine's zone, so the user reads their own clock time). */
   timeZone?: string,
@@ -343,5 +456,6 @@ export function buildConfirmationSentence(
           timeZoneName: 'short',
           ...(timeZone ? { timeZone } : {}),
         })}`;
-  return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
+  const rail = isLightningInvoice(plan.rgbInvoice) ? ' via Lightning (instant)' : '';
+  return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}${rail}, ${when}. Confirm?`;
 }
