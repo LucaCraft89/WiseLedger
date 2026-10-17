@@ -1,0 +1,16 @@
+# Secret patterns (POSIX extended regex, one per line, `#` comments). Used by scripts/secret-scan.sh (pnpm check)
+# and by every publish. A single match fails the run. Placeholders in .env.example are written
+# so that they do NOT match (empty values or the word REPLACE_ME).
+-----BEGIN ([A-Z]+ )?PRIVATE KEY-----
+gh[pousr]_[A-Za-z0-9]{30,}
+github_pat_[A-Za-z0-9_]{30,}
+sk-[A-Za-z0-9_-]{20,}
+AKIA[0-9A-Z]{16}
+xox[baprs]-[A-Za-z0-9-]{10,}
+[xtv]prv[1-9A-HJ-NP-Za-km-z]{50,}
+# 12 or 24 lowercase words on one line (BIP-39 style mnemonic). It can hit ordinary prose: reword that line.
+# scripts/secret-scan.sh skips docs/refs/ (private third-party docs); the publish scan has no exceptions.
+^[[:space:]]*([a-z]{3,8}[[:space:]]+){11}[a-z]{3,8}[[:space:]]*$
+^[[:space:]]*([a-z]{3,8}[[:space:]]+){23}[a-z]{3,8}[[:space:]]*$
+# assignments of secrets to a non-empty, non-placeholder value
+(MNEMONIC|SEED|SEED_HEX|PRIVATE_KEY|API_KEY|SECRET|TOKEN|PASSPHRASE|PASSWORD)[A-Z_]*[[:space:]]*[=:][[:space:]]*["']?[A-Za-z0-9+/_-]{12,}
