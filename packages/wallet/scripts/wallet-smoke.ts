@@ -1,6 +1,7 @@
 // Smoke test on the real chain. Without flags: both wallets' BTC, assets and UTXOs.
 // With --pay [amount]: payee creates a blind invoice, payer pays TUSDT (explicit feeRate), both refresh until
 // Settled (or --timeout seconds, default 600). Prints transfer ID, txid and explorer link. No retry after a timeout.
+// With --fund-payee <sats>: the payer sends test sats to the payee (the supplier needs sats for new invoice UTXOs).
 import { NoUtxo, SubmitTimeout } from 'core';
 import { fundRegtest, log, mine, openWallet, readAssetId, sleep, tokens } from './common.js';
 
@@ -19,6 +20,18 @@ if (args.includes('--fund-regtest')) {
   log('both', 'funded from the local regtest miner');
 }
 await Promise.all([payer.sync(), payee.sync()]);
+const fIdx = args.indexOf('--fund-payee');
+if (fIdx >= 0) {
+  const sats = Number(args[fIdx + 1] ?? '10000');
+  if (!Number.isInteger(sats) || sats < 1000) throw new Error('--fund-payee takes a number of sats ≥ 1000');
+  const txid = await payer.rgb.sendBtc({
+    address: await payee.receiveAddress(),
+    amount: sats,
+    feeRate: payer.config.feeRate,
+  });
+  log('payer', `sent ${sats} sats to the payee · txid ${txid} · ${payer.config.explorerUrl}/tx/${txid}`);
+  mine(1);
+}
 for (const [role, w] of [
   ['payer', payer],
   ['payee', payee],

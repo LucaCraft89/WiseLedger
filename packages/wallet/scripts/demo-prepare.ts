@@ -38,6 +38,9 @@ interface DemoInvoice {
 
 const payee = await openWallet('payee');
 await payee.sync();
+// Each blind invoice needs a free colorable UTXO on the supplier side.
+const made = await payee.createUtxosIfNeeded();
+if (made.created) log('payee', `created ${made.created} colorable UTXOs`);
 const fresh = async (amount: string) =>
   (await payee.createReceiveInvoice({ amount, expirySec: EXPIRY_SEC })).rgbInvoice;
 const good = await fresh('25000000');
