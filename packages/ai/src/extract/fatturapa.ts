@@ -1,8 +1,8 @@
 // FatturaPA (Italian e-invoice XML) → InvoiceExtraction, deterministically: no model reads these fields.
 // Only the summary (call 2) uses the LLM. Values are still untrusted text: rules check them like any other invoice.
-import { InvoiceExtraction, type LineItem } from 'core';
+import { InvoiceExtraction, isLightningInvoice, type LineItem } from 'core';
 import { XMLParser } from 'fast-xml-parser';
-import { normalizeDecimal } from '../analyst/extract.js';
+import { normalizeDecimal, paymentRequestsIn } from '../analyst/extract.js';
 
 type Node = Record<string, unknown>;
 
@@ -24,8 +24,6 @@ const obj = (v: unknown): Node => (v && typeof v === 'object' && !Array.isArray(
 const str = (v: unknown): string | undefined =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : undefined;
 const path = (n: unknown, ...keys: string[]): unknown => keys.reduce<unknown>((cur, k) => obj(cur)[k], n);
-
-const RGB_INVOICE_RE = /rgb:[^\s"'<>]+/g;
 
 /** Parses the first invoice body. Undefined when the document is not a readable FatturaPA. */
 export function parseFatturaPA(xml: string): InvoiceExtraction | undefined {
@@ -81,7 +79,7 @@ export function parseFatturaPA(xml: string): InvoiceExtraction | undefined {
       ? (lines.reduce((s, l) => s + Math.round(Number(l.amount) * 100), 0) / 100).toFixed(2)
       : undefined);
 
-  const rgbCandidates = [...new Set(xml.match(RGB_INVOICE_RE) ?? [])];
+  const rgbCandidates = paymentRequestsIn(xml);
   const rgbInvoice = rgbCandidates.length === 1 ? rgbCandidates[0] : undefined;
   const iban = str(pay.IBAN);
 
@@ -107,7 +105,7 @@ export function parseFatturaPA(xml: string): InvoiceExtraction | undefined {
     ...(total ? { total } : {}),
     lineItems: lines,
     payment: {
-      method: rgbInvoice ? 'rgb' : iban ? 'iban' : 'unknown',
+      method: rgbInvoice ? (isLightningInvoice(rgbInvoice) ? 'ln' : 'rgb') : iban ? 'iban' : 'unknown',
       ...(rgbInvoice ? { rgbInvoice } : {}),
       ...(iban ? { iban } : {}),
     },

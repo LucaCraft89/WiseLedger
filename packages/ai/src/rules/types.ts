@@ -1,4 +1,12 @@
-import type { AssetBalance, DecodedInvoice, HistoryMatch, InvoiceExtraction, PayeeBookEntry, RiskFlag } from 'core';
+import {
+  type AssetBalance,
+  type DecodedInvoice,
+  type HistoryMatch,
+  type InvoiceExtraction,
+  isLightningInvoice,
+  type PayeeBookEntry,
+  type RiskFlag,
+} from 'core';
 
 export interface RuleConfig {
   /** Asset IDs the user accepts to pay with (ASSET_ALLOWLIST). First = default when the invoice lets the payer choose. */
@@ -33,6 +41,13 @@ export interface RuleInput {
 export type Rule = (input: RuleInput) => RiskFlag[];
 
 export const isDecoded = (d: RuleInput['decoded']): d is DecodedInvoice => !!d && !('error' in d);
+
+/** Payment rail the wallet decoded (DecodedInvoice.rail, absent = on-chain); the invoice prefix when the wallet is silent. */
+export function railOf(d: DecodedInvoice): 'onchain' | 'lightning' {
+  const rail = (d as { rail?: unknown }).rail;
+  if (rail === 'onchain' || rail === 'lightning') return rail;
+  return isLightningInvoice(d.rgbInvoice) ? 'lightning' : 'onchain';
+}
 
 /** The asset this payment would use: from the RGB invoice, else the hint, else the default allowed asset. */
 export function paymentAsset(input: RuleInput): string | undefined {
