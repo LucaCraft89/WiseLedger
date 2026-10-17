@@ -100,7 +100,7 @@ export type WalletAssetDto = z.infer<typeof WalletAssetDto>;
 
 export const WalletResponse = z.object({
   backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
-  network: z.enum(['mutinynet', 'regtest']),
+  network: z.enum(['mutinynet', 'regtest', 'mock']),
   ready: z.boolean(),
   /** BTC receive address (fees, UTXOs). */
   address: z.string().optional(),
@@ -198,7 +198,7 @@ export const HealthResponse = z.object({
   }),
   wallet: z.object({
     backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
-    network: z.enum(['mutinynet', 'regtest']),
+    network: z.enum(['mutinynet', 'regtest', 'mock']),
     ready: z.boolean(),
     blockHeight: z.number().int().optional(),
   }),
