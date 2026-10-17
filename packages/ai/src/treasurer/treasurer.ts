@@ -278,14 +278,22 @@ export class Treasurer implements TreasurerAgent {
   }
 
   async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
-    const at = this.at;
-    const invoiceId = plan.invoiceId;
     if (confirmation.planId !== plan.planId) {
       return fail(plan.planId, 'hash_mismatch', 'The confirmation does not match this payment.');
     }
     if (plan.executeAt !== 'now') {
-      // Scheduler lands in M3; the plan stays confirmed and is executed by the job runner through the guard.
+      // The plan stays confirmed; the Scheduler runs it when due through executeNow (and the guard).
       return { planId: plan.planId, status: 'scheduled' };
+    }
+    return this.executeNow(plan, confirmation, emit);
+  }
+
+  /** Executes a confirmed plan now, whatever its executeAt (used by the Scheduler when the job is due). */
+  async executeNow(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
+    const at = this.at;
+    const invoiceId = plan.invoiceId;
+    if (confirmation.planId !== plan.planId) {
+      return fail(plan.planId, 'hash_mismatch', 'The confirmation does not match this payment.');
     }
     const tool = this.tools({ invoiceId, emit }).find((t) => t.name === 'execute_plan') as AnyTool;
     const facts = [
