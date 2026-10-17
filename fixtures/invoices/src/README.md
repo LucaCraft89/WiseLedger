@@ -1,0 +1,1 @@
+Text sources of the rendered fixtures. Regenerate: `ok-eur.png` with ImageMagick (DejaVu Sans Mono 18 pt, 1000x560), `scam-bank-change.pdf` with headless Chromium `--print-to-pdf` from the text in a `<pre>` (keeps a text layer).
