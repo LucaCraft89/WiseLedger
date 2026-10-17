@@ -90,6 +90,27 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX plans_plan_id ON plans(plan_id);
   `,
+  // 3: labels (per transfer, per invoice, or per payee as `payee:<name lowercased>`) and scheduled payment jobs.
+  `
+  CREATE TABLE labels (
+    target_id TEXT PRIMARY KEY,
+    labels_json TEXT NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE jobs (
+    job_id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    invoice_id TEXT NOT NULL,
+    run_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    result_json TEXT,
+    last_error TEXT
+  );
+  CREATE INDEX jobs_status_run_at ON jobs(status, run_at);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -364,4 +385,31 @@ export class InvoiceStore {
     this.bus.on(key, listener);
     return () => this.bus.off(key, listener);
   }
+}
+
+/** Invoice summary the Treasurer's chat sees (B's `ChatInvoice` in the ai package; structured fields only). */
+export interface ChatInvoice {
+  invoiceId: string;
+  supplier?: string;
+  total?: string;
+  currency?: string;
+  state: InvoiceState;
+  /** report.proposedPayment when payable (present and verdict not `block`). */
+  payment?: { amount: string; assetId: string };
+}
+
+/** Every invoice as a ChatInvoice, newest first. Never includes raw invoice text. */
+export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
+  return store.list().map((inv) => {
+    const ex = inv.report?.extraction;
+    const pp = inv.report?.proposedPayment;
+    return {
+      invoiceId: inv.id,
+      state: inv.state,
+      ...(ex?.issuer.name ? { supplier: ex.issuer.name } : {}),
+      ...(ex?.total ? { total: ex.total } : {}),
+      ...(ex?.currency ? { currency: ex.currency } : {}),
+      ...(pp && inv.report?.verdict !== 'block' ? { payment: { amount: pp.amount, assetId: pp.assetId } } : {}),
+    };
+  });
 }

@@ -9,10 +9,13 @@ import type {
   Confirmation,
   EmitFn,
   ExecutionResult,
+  FiscalService,
   GuardResult,
   HistoryPort,
   InvoiceAnalyzer,
   InvoiceSource,
+  JobStore,
+  LabelStore,
   LlmInfo,
   LlmProvider,
   PaymentGuard,
@@ -20,9 +23,10 @@ import type {
   TreasurerAgent,
   WalletPort,
 } from 'core';
-import { MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
+import { MemoryJobStore, MemoryLabelStore, MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
 import { createWallet, type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
 import { ConfigError, type ServerConfig } from './config.js';
+import { WalletFiscalService } from './fiscal.js';
 
 export interface Providers {
   wallet: WalletPort;
@@ -33,6 +37,12 @@ export interface Providers {
   llmInfo: () => LlmInfo;
   /** Background sync for the real wallet; null on the mock wallet. */
   sync: SyncLoop | null;
+  /** Labels (SqliteLabelStore in the server), for the Treasurer's label tools once B's ai package takes them. */
+  labels: LabelStore;
+  /** Scheduled payments (SqliteJobStore in the server), for B's Scheduler. */
+  jobs: JobStore;
+  /** Fiscal report (WalletFiscalService in the server), for the Treasurer's report tool. */
+  fiscal: FiscalService;
   /** Plain-language problems to show in /api/health. */
   problems: () => string[];
   close(): Promise<void>;
@@ -44,6 +54,11 @@ export interface ProviderOptions {
   guardStore: GuardStore;
   /** Called after every successful wallet sync (the orchestrator settles EXECUTING invoices). */
   onSynced?: () => void;
+  /** Persistent stores from the server (in-memory ones when absent, e.g. in provider unit tests). */
+  labels?: LabelStore;
+  jobs?: JobStore;
+  /** Builds the fiscal service once the wallet exists. */
+  fiscalFor?: (wallet: WalletPort) => FiscalService;
   env?: NodeJS.ProcessEnv;
   log?: { info(msg: string): void; warn(obj: unknown, msg?: string): void };
   /** Test seams: use these instead of building from config. */
@@ -271,8 +286,15 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
   // Load the model in the background: /api/health shows `loading` until it is warm.
   ai.warmUp();
   const llmInfo = ai.llmStatus;
+  // TODO(after B's ai merge): pass labels, fiscal and chatInvoices to runtime.treasurer(), and jobs to the Scheduler.
+  const labels = opts.labels ?? new MemoryLabelStore();
+  const jobs = opts.jobs ?? new MemoryJobStore();
+  const fiscal = opts.fiscalFor?.(wallet) ?? new WalletFiscalService({ wallet });
 
   return {
+    labels,
+    jobs,
+    fiscal,
     wallet,
     analyzer: ai.analyzer,
     treasurer,
