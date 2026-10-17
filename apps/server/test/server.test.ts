@@ -25,7 +25,7 @@ async function upload(filename: string, text: string): Promise<string> {
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'wiseledger-server-'));
-  built = await createApp({ uploadDir: dir, mockStepMs: 0 });
+  built = await createApp({ uploadDir: dir, dbPath: ':memory:', mockStepMs: 0 });
 });
 
 afterEach(async () => {
