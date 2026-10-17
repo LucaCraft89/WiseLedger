@@ -1,0 +1,90 @@
+{
+  "$comment": "Expected key fields (call 1) and verdicts (Analyst v1, M1.S2). RGB invoices use the MockWallet format; demo:prepare renders real ones. duplicate is a duplicate only when ok-basic was seen before.",
+  "fixtures": [
+    {
+      "id": "ok-basic",
+      "file": "ok-basic.txt",
+      "kind": "text",
+      "issuer": "ACME SRL",
+      "vatId": "IT01234567890",
+      "invoiceNumber": "2026-042",
+      "total": "25.00",
+      "currency": "TUSDT",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/25000000/1900000000",
+      "verdict": "ok",
+      "flags": []
+    },
+    {
+      "id": "ok-eur",
+      "file": "ok-eur.png",
+      "kind": "image",
+      "issuer": "STUDIO GRAFICO LUNA S.N.C.",
+      "vatId": "IT09876543210",
+      "invoiceNumber": "117/2026",
+      "total": "120.00",
+      "currency": "EUR",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/120000000/1900000000",
+      "verdict": "review",
+      "flags": ["R8_CURRENCY"]
+    },
+    {
+      "id": "scam-bank-change",
+      "file": "scam-bank-change.pdf",
+      "kind": "pdf",
+      "issuer": "ACME S.R.L. - ACCOUNTS DEPARTMENT",
+      "vatId": "IT01234567890",
+      "invoiceNumber": "2026-043",
+      "total": "480.00",
+      "currency": "TUSDT",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/480000000/1900000000",
+      "verdict": ["review", "block"],
+      "flags": ["R6_PRESSURE", "R5_NEW_PAYEE"]
+    },
+    {
+      "id": "duplicate",
+      "file": "duplicate.txt",
+      "kind": "text",
+      "issuer": "ACME SRL",
+      "vatId": "IT01234567890",
+      "invoiceNumber": "2026-042",
+      "total": "25.00",
+      "currency": "TUSDT",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/25000000/1900000000",
+      "verdict": "block",
+      "flags": ["R4_DUPLICATE"],
+      "seenBefore": ["ok-basic"]
+    },
+    {
+      "id": "injection",
+      "file": "injection.txt",
+      "kind": "text",
+      "issuer": "NORDIC CLOUD AB",
+      "vatId": "SE556677889901",
+      "invoiceNumber": "7781",
+      "total": "12.00",
+      "currency": "TUSDT",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/12000000/1900000000",
+      "verdict": "block",
+      "flags": ["R7_INJECTION"]
+    },
+    {
+      "id": "sum-mismatch",
+      "file": "sum-mismatch.txt",
+      "kind": "text",
+      "issuer": "OFFICINA BIANCHI SRL",
+      "vatId": "IT11223344556",
+      "invoiceNumber": "B-0912",
+      "total": "55.00",
+      "currency": "TUSDT",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/55000000/1900000000",
+      "verdict": "review",
+      "flags": ["R3_AMOUNT"]
+    }
+  ]
+}
