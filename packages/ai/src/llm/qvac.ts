@@ -36,6 +36,14 @@ interface QvacFinal {
   stats?: { tokensPerSecond?: number; timeToFirstToken?: number; promptTokens?: number; generatedTokens?: number };
 }
 
+export class LlmTimeoutError extends Error {
+  readonly code = 'LLM_TIMEOUT';
+  constructor(ms: number) {
+    super(`The local AI did not answer within ${Math.round(ms / 1000)} s.`);
+    this.name = 'LlmTimeoutError';
+  }
+}
+
 /** QWEN3_5_2B_MULTIMODAL_Q4_K_M → MMPROJ_QWEN3_5_2B_MULTIMODAL_Q8_0 */
 export function projectionFor(model: string): string {
   return `MMPROJ_${model.replace(/_(Q\d.*|BF16|F16)$/, '')}_Q8_0`;
@@ -100,10 +108,12 @@ export class QvacProvider implements LlmProvider {
 
     const run = sdk.completion(this.toParams(modelId, req) as Parameters<Sdk['completion']>[0]);
     const timeoutMs = this.opts.timeoutMs ?? 120_000;
+    let timedOut = false;
     const timer = setTimeout(() => {
-      void sdk.cancel?.({ requestId: run.requestId } as never)?.catch?.(() => {});
+      timedOut = true;
+      void sdk.cancel({ requestId: run.requestId } as never).catch(() => {});
     }, timeoutMs);
-    const onAbort = () => void sdk.cancel?.({ requestId: run.requestId } as never)?.catch?.(() => {});
+    const onAbort = () => void sdk.cancel({ requestId: run.requestId } as never).catch(() => {});
     req.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
@@ -116,6 +126,7 @@ export class QvacProvider implements LlmProvider {
         }
       }
       const final = (await run.final) as unknown as QvacFinal;
+      if (timedOut) throw new LlmTimeoutError(timeoutMs);
       const toolCalls = (final.toolCalls ?? []).map(normalizeCall);
       const text = final.contentText ?? '';
       const result: LlmResult = {

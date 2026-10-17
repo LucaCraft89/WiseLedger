@@ -9,7 +9,12 @@ export type InvoiceInput =
 /** Characters kept from a document (keeps call 1 inside ctx 4096 with the prompt and the answer). */
 export const MAX_TEXT_CHARS = 6000;
 
-export async function loadInvoice(source: InvoiceSource): Promise<InvoiceInput> {
+export interface LoadOptions {
+  /** Image invoices: 'vision' (projector, default, b-001) or 'ocr' (OCR_LATIN → text). Env IMAGE_MODE. */
+  imageMode?: 'vision' | 'ocr';
+}
+
+export async function loadInvoice(source: InvoiceSource, opts: LoadOptions = {}): Promise<InvoiceInput> {
   switch (source.kind) {
     case 'text':
     case 'xml':
@@ -20,8 +25,14 @@ export async function loadInvoice(source: InvoiceSource): Promise<InvoiceInput> 
       if (text.trim().length < 20) throw new Error('This PDF has no readable text. Upload a photo or an image of it.');
       return { mode: 'text', text: clip(text), source };
     }
-    case 'image':
+    case 'image': {
+      const mode = opts.imageMode ?? (process.env.IMAGE_MODE === 'ocr' ? 'ocr' : 'vision');
+      if (mode === 'ocr') {
+        const { ocrImage } = await import('../ocr.js');
+        return { mode: 'text', text: clip((await ocrImage(source.path)).text), source };
+      }
       return { mode: 'image', imagePath: source.path, source };
+    }
   }
 }
 
