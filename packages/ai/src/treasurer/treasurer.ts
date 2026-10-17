@@ -78,6 +78,8 @@ export interface ChatInvoice {
   total?: string;
   currency?: string;
   state: string;
+  /** ISO upload time: chat lists invoices newest first and marks the latest ("pay the latest invoice"). */
+  createdAt?: string;
   /** Present when a payment can be made: the code-built proposed payment. */
   payment?: { amount: string; assetId: string };
 }
@@ -485,13 +487,13 @@ export class Treasurer implements TreasurerAgent {
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
-      'Invoices:',
+      'Invoices (newest first; the first one is the latest):',
       ...(invoices.length
-        ? invoices
+        ? newestFirst(invoices)
             .slice(0, 10)
             .map(
-              (i) =>
-                `- invoiceId=${i.invoiceId} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${i.payment ? '' : ' (cannot be paid)'}`,
+              (i, n) =>
+                `- invoiceId=${i.invoiceId}${n === 0 ? ' (latest)' : ''}${i.createdAt ? ` uploaded=${i.createdAt.slice(0, 10)}` : ''} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${i.payment ? '' : ' (cannot be paid)'}`,
             )
         : ['- none']),
       'Recent transfers (newest first):',
@@ -633,6 +635,12 @@ export class Treasurer implements TreasurerAgent {
 }
 
 /** Supplier names go into the tool prompt only as short, cleaned, validated fields; anything instruction-like is hidden. */
+/** Newest first by createdAt; invoices without a date keep the order the server gave (already newest first). */
+export function newestFirst(invoices: ChatInvoice[]): ChatInvoice[] {
+  if (!invoices.every((i) => i.createdAt)) return invoices;
+  return [...invoices].sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? ''));
+}
+
 export function safeName(name: string | undefined): string {
   const clean = (name ?? 'Unknown supplier')
     .replace(/["\n\r\t<>]/g, ' ')

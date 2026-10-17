@@ -47,7 +47,7 @@ export const r6Pressure: Rule = ({ extraction, sourceText }) => {
   if (bank)
     return flag('warn', 'The invoice says the payment details changed. Confirm with the supplier before paying.', bank);
   if (rush) return flag('warn', 'The invoice pushes you to pay in a hurry. Take your time and check it.', rush);
-  if (extraction.pressure?.detected && quote) {
+  if (extraction.pressure?.detected && quote && sourceText === undefined) {
     return flag('info', 'The AI noticed pushy wording in this invoice.', quote);
   }
   return [];
