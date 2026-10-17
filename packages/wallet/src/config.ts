@@ -23,9 +23,10 @@ const DEFAULTS: Record<RgbNetworkName, Pick<WalletConfig, 'indexerUrl' | 'transp
     explorerUrl: 'https://mutinynet.com',
   },
   regtest: {
-    indexerUrl: 'http://127.0.0.1:3002',
+    // infra/regtest/compose.yaml: electrs + rgb-proxy-server on localhost
+    indexerUrl: 'tcp://127.0.0.1:50001',
     transportEndpoint: 'rpc://127.0.0.1:3000/json-rpc',
-    explorerUrl: 'http://127.0.0.1:3002',
+    explorerUrl: '',
   },
 };
 
