@@ -39,7 +39,7 @@ export interface AppOptions {
   /** Test seams for the provider factory (an injected LLM or wallet). */
   providers?: Omit<
     ProviderOptions,
-    'history' | 'log' | 'guardStore' | 'onSynced' | 'labels' | 'jobs' | 'fiscalFor' | 'chatInvoices'
+    'history' | 'log' | 'guardStore' | 'onSynced' | 'syncBusy' | 'labels' | 'jobs' | 'fiscalFor' | 'chatInvoices'
   >;
   /** Scheduler runner period (default 30 s). */
   schedulerMs?: number;
@@ -65,6 +65,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       history: new StoreHistory(store),
       guardStore,
       onSynced: () => settle(),
+      syncBusy: () => receives.waitingRecently(),
       labels,
       jobs,
       chatInvoices: async () => chatInvoices(store),
