@@ -18,6 +18,13 @@ Node 22.x only (`nvm use`): the rgb-lib binding does not build on Node 24+. Test
 Stop `pnpm dev` and `payee watch`, then `pnpm demo:reset`: removes `.data/app.db*`, `.data/uploads`, `.data/demo`, keeps the wallets and seeds, reruns `demo:prepare` (new invoice numbers each run, so a repeat is not a duplicate). It refuses while the app holds the wallet, and `demo:prepare` refuses mock mode (`WALLET_BACKEND=wdk-rgb`, `LLM_PROVIDER=qvac`).
 - Supplier out of sats for new invoices (`NoUtxo` in demo:prepare): `pnpm wallet:smoke -- --fund-payee 10000` (payer → payee test sats).
 
+## Lightning (extra): our own LSP + the app's node
+Needs the RGB Lightning module built from source (docs/decisions a-003; `LN_MODULES`, default `~/prove/lightning/node_modules`).
+1. LSP (node A, one process): `pnpm -F wallet lsp fund 50000` once, then `pnpm -F wallet lsp` (keep it running: it forwards every payment).
+2. App: in `.env` `LN_ENABLED=true`, `LN_LSP_URL=http://127.0.0.1:8790`; start the server → node C asks the LSP for a channel (≈ 5 min to usable; `GET /api/wallet/lightning`).
+3. A supplier with a node: `pnpm -F wallet lsp-client b-receive 1` prints an `lntbs…` invoice and waits; put it on the invoice as `Lightning invoice: …`; upload → "via Lightning (instant)" → PAID in seconds.
+- `NoAvailableUtxos` on a channel open: the LSP moves sats into a colored UTXO itself; ask again after one block. `PrivateChannelForward` in the LSP log: start the LSP from this repo (it enables private forwarding).
+
 ## Moving the funded wallets to the demo machine
 Copy `.data/wallet/`, `.data/payee/` and `.data/tusdt.json` (USB, never git, never chat; keep mode 600). Run each wallet on **one machine only**: stop it on the old one first.
 

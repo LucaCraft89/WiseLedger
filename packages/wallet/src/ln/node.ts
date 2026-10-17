@@ -24,6 +24,12 @@ export interface LnNodeOptions {
   indexerUrl?: string;
   transportEndpoint?: string;
   modulesDir?: string;
+  /**
+   * Forward payments into private channels (the LSP's channels to app nodes are private). LDK refuses that by default
+   * (`PrivateChannelForward`); the SDK path of rgb-lightning-node ignores config.toml and only turns it on with
+   * virtual-channels-v0, which with no trusted virtual peers changes nothing else.
+   */
+  forwardToPrivateChannels?: boolean;
 }
 
 export interface LnChannel {
@@ -40,10 +46,20 @@ export interface LnChannel {
 
 export interface LnPayment {
   payment_hash: string;
+  /** Pending | Succeeded | Failed */
   status: string;
-  inbound: boolean;
+  /** e.g. InboundAutoClaim for a received payment (there is no `inbound` flag). */
+  payment_type?: string;
   asset_amount?: number;
   asset_id?: string;
+  /** Unix seconds */
+  created_at?: number;
+  updated_at?: number;
+}
+
+/** Received (or an invoice we issued), from rln's payment_type. */
+export function isInbound(p: Pick<LnPayment, 'payment_type'>): boolean {
+  return /^inbound/i.test(p.payment_type ?? '');
 }
 
 export class LnNode {
@@ -73,6 +89,7 @@ export class LnNode {
       network: 'signet',
       dataDir: path.join(o.dataDir, 'node'),
       ldkPeerListeningPort: o.peerPort,
+      ...(o.forwardToPrivateChannels ? { enableVirtualChannelsV0: true, virtualPeerPubkeys: [] } : {}),
     });
     const acct = await manager.getAccount(0);
     await acct.unlock?.({

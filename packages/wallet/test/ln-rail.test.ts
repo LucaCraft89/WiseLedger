@@ -10,8 +10,7 @@ const HASH = 'ab'.repeat(32);
 const LN = `lntbs20u1${'q'.repeat(60)}`;
 
 function fakeNode(local = 10_000_000) {
-  const payments: { payment_hash: string; status: string; inbound: boolean; asset_amount: number; asset_id: string }[] =
-    [];
+  const payments: Record<string, unknown>[] = [];
   const calls: string[] = [];
   const node = {
     pubkey: `02${'c'.repeat(64)}`,
@@ -29,7 +28,8 @@ function fakeNode(local = 10_000_000) {
         payments.push({
           payment_hash: HASH,
           status: 'Succeeded',
-          inbound: false,
+          payment_type: 'Outbound',
+          created_at: 1792250739,
           asset_amount: 2_000_000,
           asset_id: MOCK_ASSET_ID,
         });
@@ -98,6 +98,37 @@ describe('Lightning rail', () => {
       InsufficientFunds,
     );
     expect(calls).not.toContain('sendPayment');
+  });
+
+  it('a received payment is incoming; an unpaid invoice we issued is not a transfer', async () => {
+    const { node } = fakeNode();
+    const n = node as unknown as { payments: () => Promise<unknown[]> };
+    n.payments = async () => [
+      {
+        payment_hash: 'cd'.repeat(32),
+        status: 'Succeeded',
+        payment_type: 'InboundAutoClaim',
+        asset_amount: 1_000_000,
+        asset_id: MOCK_ASSET_ID,
+        created_at: 1792250739,
+      },
+      {
+        payment_hash: 'ef'.repeat(32),
+        status: 'Pending',
+        payment_type: 'InboundAutoClaim',
+        asset_amount: 1_000_000,
+        asset_id: MOCK_ASSET_ID,
+      },
+    ];
+    const w = withLightning(new MockWallet({ stepMs: 0 }) as WalletPort, node);
+    const ln = (await w.listTransfers()).filter((t) => t.rail === 'lightning');
+    expect(ln).toEqual([
+      expect.objectContaining({
+        direction: 'incoming',
+        status: 'Settled',
+        createdAt: new Date(1792250739000).toISOString(),
+      }),
+    ]);
   });
 
   it('lightningStatus lists the channel; no problem when usable', async () => {

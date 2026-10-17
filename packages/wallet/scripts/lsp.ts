@@ -53,7 +53,7 @@ function saveRequests(r: Record<string, ChannelRequest>): void {
 const PUBKEY = /^0[23][0-9a-f]{64}$/;
 
 const [cmd = 'serve', arg] = process.argv.slice(2).filter((a) => a !== '--');
-const node = await LnNode.open({ name: 'lsp', dataDir, peerPort: PEER_PORT });
+const node = await LnNode.open({ name: 'lsp', dataDir, peerPort: PEER_PORT, forwardToPrivateChannels: true });
 log('lsp', `node ${node.pubkey} · peer port ${PEER_PORT}`);
 
 async function status(): Promise<void> {

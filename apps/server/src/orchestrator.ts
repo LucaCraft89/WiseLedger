@@ -498,6 +498,11 @@ export class Orchestrator {
         result = { planId: plan.planId, status: 'failed', error: { code: 'SCHEDULE_FAILED', message: messageOf(err) } };
       }
     }
+    // A Lightning payment is identified by its hash: fill it from the wallet when the executor did not pass it.
+    if (result.transferId && !result.txid && !result.paymentHash) {
+      const t = await this.deps.wallet.getTransfer(result.transferId).catch(() => null);
+      if (t?.paymentHash) result = { ...result, paymentHash: t.paymentHash };
+    }
     this.store.update(id, { result });
     if (result.transferId) this.store.linkTransfer(result.transferId, id);
     // Something else (e.g. a wallet sync) already settled it while we waited.

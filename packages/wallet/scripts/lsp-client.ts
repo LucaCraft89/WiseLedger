@@ -4,11 +4,13 @@
 //   pnpm -F wallet lsp-client pay-via-b [tusdt]  C creates an RGB LN invoice (default 1 TUSDT); node B pays it,
 //                                                routed B → A (LSP) → C; waits for Succeeded on both sides
 //   pnpm -F wallet lsp-client status             C's channels and payments
+//   pnpm -F wallet lsp-client b-receive [tusdt]  node B (a Lightning supplier) prints an RGB LN invoice and waits
+//                                                until it is paid (e.g. by the app, whose node is C)
 //
 // LSP_URL (default http://127.0.0.1:8790), LN_C_PEER_PORT (9737), LN_B_PEER_PORT (9736). B is the a-003 spike node
 // (.data/ln/b, channel with A). Each node folder is opened by one process only; the LSP runs in its own process.
 import path from 'node:path';
-import { LnNode, type LnNode as Node } from '../src/ln/node.js';
+import { isInbound, LnNode, type LnNode as Node } from '../src/ln/node.js';
 import { loadDotEnv, log, readAssetId, repoRoot, sleep, tokens } from './common.js';
 
 loadDotEnv();
@@ -42,17 +44,23 @@ async function show(n: Node): Promise<void> {
   for (const p of await n.payments())
     log(
       `ln-${n.name}`,
-      `payment ${p.payment_hash.slice(0, 16)}… ${p.status} ${p.inbound ? 'in' : 'out'} ${tokens(String(p.asset_amount ?? 0))} TUSDT`,
+      `payment ${p.payment_hash.slice(0, 16)}… ${p.status} ${isInbound(p) ? 'in' : 'out'} ${tokens(String(p.asset_amount ?? 0))} TUSDT`,
     );
 }
 
-const C = await LnNode.open({
-  name: 'C',
-  dataDir: path.join(repoRoot, '.data/ln/c'),
-  peerPort: Number(process.env.LN_C_PEER_PORT ?? 9737),
-});
-log('ln-C', `node ${C.pubkey}`);
-const opened: Node[] = [C];
+const opened: Node[] = [];
+const C =
+  cmd === 'b-receive'
+    ? (undefined as unknown as Node)
+    : await LnNode.open({
+        name: 'C',
+        dataDir: path.join(repoRoot, '.data/ln/c'),
+        peerPort: Number(process.env.LN_C_PEER_PORT ?? 9737),
+      });
+if (C) {
+  opened.push(C);
+  log('ln-C', `node ${C.pubkey}`);
+}
 try {
   switch (cmd) {
     case 'status':
@@ -111,7 +119,20 @@ try {
       opened.push(B);
       for (const n of [B, C])
         await n.call('connectPeer', `${info.pubkey}@${info.host}:${info.peerPort}`).catch(() => undefined);
-      await sleep(5_000);
+      // Both channels must be re-established after the nodes come online (B's with the LSP, the LSP's with C).
+      for (let i = 0; i < 30; i++) {
+        const ready = await Promise.all(
+          [B, C].map(async (n) => (await n.channels()).some((c) => c.peer_pubkey === info.pubkey && c.is_usable)),
+        );
+        if (ready.every(Boolean)) break;
+        await sleep(2_000);
+      }
+      for (const n of [B, C])
+        for (const c of await n.channels())
+          log(
+            `ln-${n.name}`,
+            `channel with ${c.peer_pubkey.slice(0, 12)}… usable=${c.is_usable} TUSDT ${tokens(String(c.asset_local_amount ?? 0))} local`,
+          );
       const inv = await C.call<{ invoice: string }>('createInvoice', {
         amt_msat: 3_000_000,
         expiry_sec: 3600,
@@ -133,6 +154,36 @@ try {
         `B: ${st} · C: ${got?.status ?? 'not seen'} · ${((Date.now() - t0) / 1000).toFixed(1)} s · hash ${sent.payment_hash}`,
       );
       await show(C);
+      break;
+    }
+    case 'b-receive': {
+      // Node B as a Lightning supplier: an RGB LN invoice (default 1 TUSDT) for the app to pay; B stays online until
+      // it is paid (10 min). Node C is not opened here, so the app server can hold it.
+      const amount = Math.round(Number(arg ?? '1') * 1_000_000);
+      const info = await lsp<LspInfo>('/info');
+      const B = await LnNode.open({
+        name: 'B',
+        dataDir: path.join(repoRoot, '.data/ln/b'),
+        peerPort: Number(process.env.LN_B_PEER_PORT ?? 9736),
+      });
+      opened.push(B);
+      await B.call('connectPeer', `${info.pubkey}@${info.host}:${info.peerPort}`).catch(() => undefined);
+      const inv = await B.call<{ invoice: string }>('createInvoice', {
+        amt_msat: 3_000_000,
+        expiry_sec: 3600,
+        asset_id: assetId,
+        asset_amount: amount,
+      });
+      console.log(`INVOICE ${inv.invoice}`);
+      const hash = ((await B.call<{ payment_hash: string }>('decodeInvoice', inv.invoice)) ?? {}).payment_hash;
+      for (let i = 0; i < 300; i++) {
+        const p = (await B.payments()).find((x) => x.payment_hash === hash);
+        if (p && /succeeded|failed/i.test(p.status)) {
+          log('ln-B', `invoice ${p.status} · ${tokens(String(p.asset_amount ?? 0))} TUSDT · hash ${hash}`);
+          break;
+        }
+        await sleep(2_000);
+      }
       break;
     }
     default:

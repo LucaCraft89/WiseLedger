@@ -16,7 +16,7 @@ import {
   type TransferStatus,
   type WalletPort,
 } from 'core';
-import type { LnNode, LnPayment } from './node.js';
+import { isInbound, type LnNode, type LnPayment } from './node.js';
 
 export const LN_TRANSFER_PREFIX = 'ln:';
 
@@ -79,23 +79,28 @@ export function withLightning(onchain: WalletPort, node: LnNode, opts: Lightning
     };
   };
 
+  const iso = (s?: number) => (s ? new Date(s * 1000).toISOString() : undefined);
   const toTransfer = (p: LnPayment): TransferInfo => {
-    const at = createdAt.get(p.payment_hash) ?? new Date().toISOString();
+    const at = iso(p.created_at) ?? createdAt.get(p.payment_hash) ?? new Date().toISOString();
     return {
       transferId: `${LN_TRANSFER_PREFIX}${p.payment_hash}`,
       ...(p.asset_id ? { assetId: p.asset_id } : {}),
       amount: String(p.asset_amount ?? 0),
-      direction: p.inbound ? 'incoming' : 'outgoing',
+      direction: isInbound(p) ? 'incoming' : 'outgoing',
       status: lnStatus(p.status),
       rail: 'lightning',
       paymentHash: p.payment_hash,
       createdAt: at,
-      updatedAt: new Date().toISOString(),
+      updatedAt: iso(p.updated_at) ?? at,
     };
   };
 
+  // An inbound entry is an invoice we issued: it is a transfer only once paid.
   const lnTransfers = async (assetId?: string): Promise<TransferInfo[]> =>
-    (await node.payments()).map(toTransfer).filter((t) => !assetId || t.assetId === assetId);
+    (await node.payments())
+      .filter((p) => !isInbound(p) || /succeeded/i.test(p.status))
+      .map(toTransfer)
+      .filter((t) => !assetId || t.assetId === assetId);
 
   const payLn = async (req: PaymentRequest): Promise<PayResult> => {
     const d = await decodeLn(req.rgbInvoice);
