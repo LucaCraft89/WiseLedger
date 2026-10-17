@@ -179,7 +179,8 @@ export function printedTotal(text: string): string | undefined {
 /** "1.250,00" | "1,250.00" | "€ 25" | "25.00 TUSDT" → "1250.00" | "25". Undefined when not a number. */
 export function normalizeDecimal(v: string | null | undefined): string | undefined {
   if (!v) return undefined;
-  let s = v.replace(/[^\d.,-]/g, '');
+  // Keep digits and separators, then drop separators stuck to the ends ("So.30.00" → "30.00", "25.-" → "25").
+  let s = v.replace(/[^\d.,-]/g, '').replace(/^[^\d-]+|[^\d]+$/g, '').replace(/^-[^\d]+/, '-');
   if (!/\d/.test(s)) return undefined;
   const lastComma = s.lastIndexOf(',');
   const lastDot = s.lastIndexOf('.');

@@ -57,6 +57,8 @@ describe('extract: deterministic clean-up', () => {
     expect(normalizeDecimal('1,250.00')).toBe('1250.00');
     expect(normalizeDecimal('EUR 25')).toBe('25');
     expect(normalizeDecimal('n/a')).toBeUndefined();
+    expect(normalizeDecimal('So.30.00')).toBe('30.00');
+    expect(normalizeDecimal('25.-')).toBe('25');
   });
   it('drops an RGB invoice not printed in the document and falls back to the single printed one', () => {
     const text = 'Pay to rgb:mock/rgb:mock-tusdt/25000000/1900000000 thanks';
