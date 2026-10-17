@@ -1,5 +1,5 @@
 // Retry with backoff for READS that reach the indexer or the proxy (sync, refresh). Never wrap a send with this:
-// after a send timeout the rule is sync-and-check, not resend (AGENTS.md, a-002).
+// after a send timeout the rule is sync-and-check, not resend.
 import { NetworkUnavailable } from 'core';
 
 /** Errors that mean "the network service did not answer", as rgb-lib, electrum and fetch phrase them. */
