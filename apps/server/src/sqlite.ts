@@ -13,7 +13,7 @@ process.emitWarning = function emitWarning(this: NodeJS.Process, warning: string
       ? first
       : ((first as { type?: string } | undefined)?.type ?? (typeof warning === 'string' ? undefined : warning.name));
   if (type === 'ExperimentalWarning' && /SQLite/i.test(message)) return;
-  return (original as (...args: unknown[]) => void).call(this, warning, ...rest);
+  (original as (...args: unknown[]) => void).call(this, warning, ...rest);
 } as typeof process.emitWarning;
 
 export const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as Sqlite;
