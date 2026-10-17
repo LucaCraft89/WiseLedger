@@ -30,6 +30,7 @@ import { ZodError } from 'zod';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import { streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
+import { checkUpload, tooLarge } from './uploads.js';
 
 export interface RouteDeps {
   store: InvoiceStore;
@@ -40,6 +41,34 @@ export interface RouteDeps {
   walletBackend: WalletResponse['backend'];
   network: WalletResponse['network'];
   problems: () => string[];
+  /** Largest accepted upload in MB. */
+  uploadMaxMb: number;
+  /** Background sync state (nulls on the mock wallet). */
+  walletSync: () => WalletSyncState;
+}
+
+export interface WalletSyncState {
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+/** /api/health body: the core DTO plus the wallet sync state (not in HealthResponse yet: core gap). */
+export type HealthBody = HealthResponse & { walletSync: WalletSyncState };
+
+/** BTC balance in sats when the backend exposes one (WdkRgbWallet.btcBalance(); not part of WalletPort). */
+function btcBalanceSats(wallet: WalletPort): string | undefined {
+  const w = wallet as { btcBalance?: () => { vanilla?: { spendable?: number } } };
+  try {
+    const sats = w.btcBalance?.().vanilla?.spendable;
+    return typeof sats === 'number' && Number.isSafeInteger(sats) && sats >= 0 ? String(sats) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isTooLarge(err: unknown): boolean {
+  const e = err as { statusCode?: number; code?: string };
+  return e.statusCode === 413 || e.code === 'FST_REQ_FILE_TOO_LARGE' || e.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
 }
 
 type Method = 'GET' | 'POST';
@@ -103,6 +132,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
       return reply.status(400).send(apiError('VALIDATION', `The request is not valid${where}: ${first?.message}`));
     }
+    if (isTooLarge(err)) {
+      const f = tooLarge(deps.uploadMaxMb);
+      return reply.status(f.status).send(apiError(f.code, f.message));
+    }
     const e = err as { statusCode?: number; code?: string; message?: string };
     if (e.statusCode && e.statusCode >= 400 && e.statusCode < 500) {
       return reply.status(e.statusCode).send(apiError(e.code ?? 'BAD_REQUEST', e.message ?? 'Bad request.'));
@@ -113,13 +146,15 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   app.setNotFoundHandler((_req, reply) => reply.status(404).send(apiError('NOT_FOUND', 'This page does not exist.')));
 
-  route(app, API_ROUTES.health, async (): Promise<HealthResponse> => {
+  route(app, API_ROUTES.health, async (): Promise<HealthBody> => {
     const llm = deps.llmInfo();
     return {
       ok: llm.state !== 'error',
       time: new Date().toISOString(),
       llm: { provider: llm.provider, model: llm.model, state: llm.state, onDevice: llm.onDevice },
+      // blockHeight: WalletPort exposes no chain tip yet (core gap), so it is omitted.
       wallet: { backend: deps.walletBackend, network: deps.network, ready: true },
+      walletSync: deps.walletSync(),
       problems: deps.problems(),
     };
   });
@@ -129,13 +164,17 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     if (req.isMultipart()) {
       const file = await req.file();
       if (!file) throw new ApiFailure(400, 'NO_FILE', 'Please choose an invoice file to upload (field "file").');
-      const data = await file.toBuffer();
+      let data: Buffer;
+      try {
+        data = await file.toBuffer();
+      } catch (err) {
+        if (isTooLarge(err)) throw tooLarge(deps.uploadMaxMb);
+        throw err;
+      }
       if (data.length === 0) throw new ApiFailure(400, 'EMPTY_FILE', 'The uploaded file is empty.');
-      created = await orchestrator.createInvoice({
-        filename: file.filename || 'invoice',
-        mimeType: file.mimetype,
-        data,
-      });
+      const filename = file.filename || 'invoice';
+      const kind = checkUpload(filename, data);
+      created = await orchestrator.createInvoice({ filename, mimeType: file.mimetype, data, kind });
     } else {
       const body = CreateInvoiceTextRequest.parse(req.body);
       created = await orchestrator.createInvoice({
@@ -184,11 +223,13 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.wallet, async (): Promise<WalletResponse> => {
     const [assets, address] = await Promise.all([wallet.listAssets(), wallet.receiveAddress()]);
+    const sats = btcBalanceSats(wallet);
     return {
       backend: deps.walletBackend,
       network: deps.network,
       ready: true,
       address,
+      ...(sats ? { btcBalanceSats: sats } : {}),
       assets: assets.map((a) => ({
         assetId: a.assetId,
         ticker: a.ticker,

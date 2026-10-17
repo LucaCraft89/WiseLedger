@@ -65,6 +65,8 @@ export interface NewUpload {
   filename: string;
   mimeType?: string;
   data: Buffer;
+  /** Kind already established by the upload checks; otherwise guessed from name and MIME type. */
+  kind?: InvoiceSourceKind;
 }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
@@ -147,7 +149,7 @@ export class Orchestrator {
 
   async createInvoice(upload: NewUpload): Promise<StoredInvoice> {
     const id = `inv_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
-    const kind = detectKind(upload.filename, upload.mimeType);
+    const kind = upload.kind ?? detectKind(upload.filename, upload.mimeType);
     const ext = safeExt(upload.filename) || (kind === 'text' ? '.txt' : '');
     const sha256 = createHash('sha256').update(upload.data).digest('hex');
     // Content-addressed: the same file uploaded twice is stored once; the record keeps the original filename.
