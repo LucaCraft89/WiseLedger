@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+// Google Sans Flex, bundled (works offline: the desk demo turns Wi-Fi off). OFL-1.1.
+import '@fontsource-variable/google-sans-flex';
 import { App } from './App.js';
 import './brand.css';
 import './material.css';

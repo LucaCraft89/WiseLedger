@@ -13,6 +13,7 @@ import {
   toolChipText,
 } from './lib/ledger.js';
 import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type VoiceRecording } from './lib/voice.js';
+import { Markdown } from './Markdown.js';
 import { ErrorBox, errorText, useToast } from './ui.js';
 
 interface Message extends ChatTurn {
@@ -27,7 +28,7 @@ const bubble = (role: ChatTurn['role']) =>
     borderRadius: 8,
     padding: '8px 12px',
     maxWidth: '85%',
-    whiteSpace: 'pre-wrap',
+    whiteSpace: role === 'user' ? 'pre-wrap' : 'normal',
   }) as const;
 
 let nextMsgId = 0;
@@ -76,7 +77,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         {messages.length === 0 && <p style={{ color: '#555', fontStyle: 'italic' }}>Try one of these:</p>}
         {messages.map((m) => (
           <div key={m.id} style={bubble(m.role)}>
-            <div>{m.text}</div>
+            {m.role === 'assistant' ? <Markdown text={m.text} /> : <div>{m.text}</div>}
             {m.reply && <ReplyExtras api={api} reply={m.reply} />}
           </div>
         ))}

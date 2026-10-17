@@ -29,8 +29,8 @@
   --wl-block: #b3261e;
   --wl-info-bg: #eef1f4;
   /* type and shape */
-  --wl-font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --wl-font-head: "DM Serif Display", Georgia, "Times New Roman", serif;
+  --wl-font-body: "Google Sans Flex Variable", "Google Sans Flex", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --wl-font-head: "Google Sans Flex Variable", "Google Sans Flex", system-ui, -apple-system, "Segoe UI", sans-serif;
   --wl-radius: 8px;
   --wl-tap: 44px;
 }
