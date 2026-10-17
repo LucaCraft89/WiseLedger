@@ -1,10 +1,12 @@
 import type { AnalysisReport } from './api/contracts.js';
 import { FlagList } from './FlagCard.js';
 import { VERDICT_ACCENT, VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_ICON, VERDICT_LABELS } from './lib/format.js';
+import { splitFlags } from './lib/payment.js';
 
 /** The Analyst's report: verdict banner, flags by severity, plain-language summary, questions. */
 export function ReportView({ report }: { report: AnalysisReport }) {
   const ex = report.extraction;
+  const { alerts, notes } = splitFlags(report.flags);
   return (
     <div>
       <h3>What we found</h3>
@@ -38,7 +40,13 @@ export function ReportView({ report }: { report: AnalysisReport }) {
       </ul>
 
       <h4>Checks</h4>
-      {report.flags.length === 0 ? <p>All checks passed.</p> : <FlagList flags={report.flags} />}
+      {alerts.length === 0 ? <p>All checks passed.</p> : <FlagList flags={alerts} />}
+      {notes.length > 0 && (
+        <>
+          <h4>Good to know</h4>
+          <FlagList flags={notes} />
+        </>
+      )}
 
       {report.questionsForUser.length > 0 && (
         <>

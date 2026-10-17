@@ -171,3 +171,89 @@ textarea {
     transition: none !important;
   }
 }
+
+/* layout: one column, readable width, no horizontal scroll down to small laptops (900 px) and phones */
+.wl-shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .wl-shell {
+    padding: 16px;
+  }
+}
+.wl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wl-nav {
+  display: flex;
+  gap: 4px 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wl-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--wl-tap);
+}
+.wl-nav a[aria-current="page"] {
+  font-weight: 700;
+  color: var(--wl-navy);
+  text-decoration-thickness: 3px;
+}
+main:focus {
+  outline: none;
+}
+img,
+table,
+pre {
+  max-width: 100%;
+}
+code,
+pre {
+  overflow-wrap: anywhere;
+}
+pre {
+  white-space: pre-wrap;
+}
+
+/* "Skip to content": hidden until focused with the keyboard */
+.wl-skip {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  background: var(--wl-white);
+  padding: 8px 12px;
+  border-radius: var(--wl-radius);
+  z-index: 100;
+}
+.wl-skip:focus {
+  top: 8px;
+}
+
+/* recovery words: numbered grid, shown once at wallet creation */
+.wl-words {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.wl-words li {
+  background: var(--wl-info-bg);
+  border: 1px solid var(--wl-line);
+  border-radius: var(--wl-radius);
+  padding: 8px 12px;
+  font-size: 18px;
+}
+.wl-words-n {
+  color: var(--wl-muted);
+  font-size: 14px;
+}
