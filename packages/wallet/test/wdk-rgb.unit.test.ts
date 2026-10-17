@@ -7,7 +7,13 @@ import { walletConfigFromEnv } from '../src/config.js';
 const ASSET = 'rgb:asset-test';
 const now = Math.floor(Date.now() / 1000);
 
-function fake(opts: { spendable?: number; expiry?: number; transfer?: () => Promise<{ hash: string; fee: bigint }> }) {
+function fake(opts: {
+  spendable?: number;
+  expiry?: number;
+  transfer?: () => Promise<{ hash: string; fee: bigint }>;
+  noUtxoFirst?: boolean;
+}) {
+  let noUtxo = opts.noUtxoFirst ?? false;
   const transfers: SdkTransfer[] = [];
   const send: SdkTransfer = {
     idx: 7,
@@ -32,8 +38,14 @@ function fake(opts: { spendable?: number; expiry?: number; transfer?: () => Prom
     listTransfers: () => [...transfers],
     refreshWallet: vi.fn(),
     syncWallet: vi.fn(),
+    listUnspents: () => [],
+    createUtxos: vi.fn(async () => 5),
   };
   const transfer = vi.fn(async () => {
+    if (noUtxo) {
+      noUtxo = false;
+      throw new Error('InsufficientAllocationSlots');
+    }
     transfers.push(send); // the send went out, whatever the call returns
     if (opts.transfer) return opts.transfer();
     return { hash: send.txid as string, fee: 155n };
@@ -67,6 +79,13 @@ describe('WdkRgbWallet.pay', () => {
     expect((err as SubmitTimeout).transferId).toBe('7');
     expect(transfer).toHaveBeenCalledTimes(1);
     expect(sdk.syncWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it('on NoUtxo before signing: creates UTXOs and sends once more', async () => {
+    const { wallet, transfer, sdk } = fake({ noUtxoFirst: true });
+    expect(await wallet.pay(req)).toMatchObject({ transferId: '7' });
+    expect(sdk.createUtxos).toHaveBeenCalledTimes(1);
+    expect(transfer).toHaveBeenCalledTimes(2);
   });
 
   it('refuses an expired invoice before sending', async () => {

@@ -3,6 +3,7 @@
 import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { loadConfig, type ServerConfig } from './config.js';
+import { SqliteGuardStore } from './guard-store.js';
 import { StoreHistory } from './history.js';
 import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
@@ -20,7 +21,7 @@ export interface App {
 export interface AppOptions {
   logger?: boolean;
   /** Test seams for the provider factory (an injected LLM or wallet). */
-  providers?: Omit<ProviderOptions, 'history' | 'log'>;
+  providers?: Omit<ProviderOptions, 'history' | 'log' | 'guardStore' | 'onSynced'>;
 }
 
 export async function createApp(overrides: Partial<ServerConfig> = {}, opts: AppOptions = {}): Promise<App> {
@@ -29,11 +30,15 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: maxUploadBytes, forceCloseConnections: true });
 
   const store = new InvoiceStore(config.dbPath);
+  // Bound once the orchestrator exists: every wallet sync settles EXECUTING invoices from the wallet's transfers.
+  let settle: () => void = () => undefined;
   let providers: Providers;
   try {
     providers = await createProviders(config, {
       ...opts.providers,
       history: new StoreHistory(store),
+      guardStore: new SqliteGuardStore(store),
+      onSynced: () => settle(),
       log: { info: (m) => app.log.info(m), warn: (o, m) => app.log.warn(o, m) },
     });
   } catch (err) {
@@ -42,6 +47,12 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   }
   const { wallet, analyzer, treasurer } = providers;
   const orchestrator = new Orchestrator({ store, analyzer, treasurer, wallet, uploadDir: config.uploadDir });
+  settle = () => {
+    orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
+  };
+  // The mock wallet has no sync loop: settle on a timer instead (e.g. a timed-out mock payment).
+  const mockSettle = providers.sync ? null : setInterval(settle, Math.max(1000, config.mockStepMs));
+  mockSettle?.unref();
 
   await app.register(multipart, { limits: { fileSize: maxUploadBytes, files: 1 } });
   registerRoutes(app, {
@@ -68,6 +79,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     ],
   });
   app.addHook('onClose', async () => {
+    if (mockSettle) clearInterval(mockSettle);
     await orchestrator.idle();
     await providers.close();
     store.close();

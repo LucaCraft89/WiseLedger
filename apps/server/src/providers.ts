@@ -1,30 +1,35 @@
 // Provider factory: LLM_PROVIDER (qvac | openai | mock) and WALLET_BACKEND (mock | wdk-rgb) → analyzer, treasurer,
-// wallet and the background sync loop. The mock LLM path keeps core's MockAnalyzer/MockTreasurer so tests and
-// `pnpm demo:mock` stay hermetic; qvac/openai build B's real Analyst and Treasurer on one shared model.
-import { Analyst, confirmationGuard, createLlm, type RuleConfig, Treasurer } from 'ai';
+// wallet, PaymentGuard and the background sync loop. The mock LLM path keeps core's MockAnalyzer/MockTreasurer so
+// tests and `pnpm demo:mock` stay hermetic; qvac/openai use B's createAiRuntime() (one shared model).
+// Every execution goes through A's WalletGuard (SQLite claims = idempotency), on both paths.
+import { type AiRuntime, createAiRuntime, type RuleConfig } from 'ai';
 import type {
   AnalysisReport,
   AnalyzeContext,
   Confirmation,
   EmitFn,
   ExecutionResult,
+  GuardResult,
   HistoryPort,
   InvoiceAnalyzer,
   InvoiceSource,
   LlmInfo,
   LlmProvider,
+  PaymentGuard,
   PaymentPlan,
   TreasurerAgent,
   WalletPort,
 } from 'core';
 import { MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
-import { createWallet, type SyncLoop, startSyncLoop, walletConfigFromEnv } from 'wallet';
+import { createWallet, type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
 import { ConfigError, type ServerConfig } from './config.js';
 
 export interface Providers {
   wallet: WalletPort;
   analyzer: InvoiceAnalyzer;
   treasurer: TreasurerAgent;
+  /** The PaymentGuard every execution goes through. */
+  guard: LiveGuard;
   llmInfo: () => LlmInfo;
   /** Background sync for the real wallet; null on the mock wallet. */
   sync: SyncLoop | null;
@@ -35,6 +40,10 @@ export interface Providers {
 
 export interface ProviderOptions {
   history: HistoryPort;
+  /** Where the guard reads plans/confirmations and keeps its claims (SqliteGuardStore in the server). */
+  guardStore: GuardStore;
+  /** Called after every successful wallet sync (the orchestrator settles EXECUTING invoices). */
+  onSynced?: () => void;
   env?: NodeJS.ProcessEnv;
   log?: { info(msg: string): void; warn(obj: unknown, msg?: string): void };
   /** Test seams: use these instead of building from config. */
@@ -65,10 +74,46 @@ export function buildRuleConfig(
   };
 }
 
+/**
+ * A's WalletGuard with limits from the server config. The allowlist is resolved per check with the same fallback as
+ * buildRuleConfig (empty ASSET_ALLOWLIST + one NIA asset held → that asset), so an asset issued later is known.
+ */
+export class LiveGuard implements PaymentGuard {
+  constructor(
+    private readonly deps: {
+      store: GuardStore;
+      wallet: WalletPort;
+      config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork' | 'assetAllowlist' | 'paymentCap'>;
+    },
+  ) {}
+
+  private async guard(): Promise<WalletGuard> {
+    const { store, wallet, config } = this.deps;
+    let assetAllowlist = [...config.assetAllowlist];
+    if (assetAllowlist.length === 0) {
+      try {
+        assetAllowlist = buildRuleConfig(config, await wallet.listAssets()).assetAllowlist;
+      } catch {
+        // Could not read the assets: the cap still applies and the balance check fails closed.
+      }
+    }
+    return new WalletGuard({ store, wallet, limits: { paymentCap: config.paymentCap, assetAllowlist } });
+  }
+
+  async check(planId: string): Promise<GuardResult<PaymentPlan>> {
+    return (await this.guard()).check(planId);
+  }
+
+  /** Frees the claim only when nothing can have left the wallet (wallet RELEASE_ON_FAILURE). */
+  async recordOutcome(result: ExecutionResult): Promise<void> {
+    await (await this.guard()).recordOutcome(result);
+  }
+}
+
 /** The real Analyst with a RuleConfig rebuilt per invoice, so an asset issued after startup is known. */
 class LiveAnalyst implements InvoiceAnalyzer {
   constructor(
-    private readonly llm: LlmProvider,
+    private readonly runtime: AiRuntime,
     private readonly wallet: WalletPort,
     private readonly history: HistoryPort,
     private readonly config: ServerConfig,
@@ -76,26 +121,56 @@ class LiveAnalyst implements InvoiceAnalyzer {
 
   async analyze(src: InvoiceSource, ctx: AnalyzeContext, emit: EmitFn): Promise<AnalysisReport> {
     const rules = buildRuleConfig(this.config, await this.wallet.listAssets());
-    return new Analyst({ llm: this.llm, wallet: this.wallet, history: this.history, config: rules }).analyze(
-      src,
-      ctx,
-      emit,
-    );
+    return this.runtime.analyst({ wallet: this.wallet, history: this.history, config: rules }).analyze(src, ctx, emit);
   }
 }
 
-/** Registers the confirmed plan with the guard stub (until A's PaymentGuard lands), then syncs after the payment. */
+/**
+ * Mock path: MockTreasurer pays without a guard, so the plan goes through the guard first (confirmed, hash, cap,
+ * asset, balance, claimed once). The plan paid is the one the guard resolved from the store.
+ */
+export class GuardedMockTreasurer implements TreasurerAgent {
+  constructor(
+    private readonly inner: TreasurerAgent,
+    private readonly guard: PaymentGuard,
+  ) {}
+
+  async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
+    // Scheduling moves no money; the job runner goes through the guard when the payment is due.
+    if (plan.executeAt !== 'now') return this.inner.execute(plan, confirmation, emit);
+    const g = await this.guard.check(plan.planId);
+    if (!g.ok) {
+      emit({
+        type: 'toolCall',
+        invoiceId: plan.invoiceId,
+        at: new Date().toISOString(),
+        agent: 'treasurer',
+        name: 'execute_plan',
+        args: { planId: plan.planId },
+        status: 'rejected',
+        message: g.message,
+      });
+      return { planId: plan.planId, status: 'failed', error: { code: g.reason, message: g.message } };
+    }
+    return this.inner.execute(g.plan, confirmation, emit);
+  }
+
+  chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
+}
+
+/** Records every outcome with the guard (frees the claim when nothing was sent), then syncs after the payment. */
 class GuardedTreasurer implements TreasurerAgent {
   constructor(
     private readonly inner: TreasurerAgent,
-    private readonly beforeExecute: (plan: PaymentPlan, c: Confirmation) => Promise<void>,
+    private readonly guard: LiveGuard,
     private readonly afterExecute: () => void,
   ) {}
 
   async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
-    await this.beforeExecute(plan, confirmation);
     try {
-      return await this.inner.execute(plan, confirmation, emit);
+      const result = await this.inner.execute(plan, confirmation, emit);
+      await this.guard.recordOutcome(result);
+      return result;
     } finally {
       this.afterExecute();
     }
@@ -122,50 +197,50 @@ async function openWallet(config: ServerConfig, env: NodeJS.ProcessEnv): Promise
 }
 
 /**
- * Everything the server needs from B's `ai` package, behind one small interface, so the wiring can move to
- * `createAiRuntime()` without touching the rest of the server.
+ * Everything the server needs from B's `ai` package, behind one small interface (createAiRuntime() on the real path,
+ * core mocks on the hermetic one).
  */
 export interface AiProviders {
   analyzer: InvoiceAnalyzer;
   treasurer: TreasurerAgent;
-  /** Called with the human-confirmed plan before treasurer.execute (registers it with the guard). */
-  beforeExecute: (plan: PaymentPlan, confirmation: Confirmation) => Promise<void>;
   llmStatus: () => LlmInfo;
   /** Starts loading the model in the background; never rejects. */
   warmUp: () => void;
   close: () => Promise<void>;
 }
 
-/** Hermetic path: core's MockAnalyzer + MockTreasurer (tests, `pnpm demo:mock`). */
-function mockAi(config: ServerConfig, wallet: WalletPort): AiProviders {
+/** Hermetic path: core's MockAnalyzer + MockTreasurer (tests, `pnpm demo:mock`), behind the guard. */
+function mockAi(config: ServerConfig, wallet: WalletPort, guard: PaymentGuard): AiProviders {
   const step = config.mockStepMs;
+  const inner = new MockTreasurer(wallet, { pollMs: Math.max(10, Math.min(step / 4, 250)) });
   return {
     analyzer: new MockAnalyzer({ stageDelayMs: Math.min(step, 300) }),
-    treasurer: new MockTreasurer(wallet, { pollMs: Math.max(10, Math.min(step / 4, 250)) }),
-    beforeExecute: async () => undefined,
+    treasurer: new GuardedMockTreasurer(inner, guard),
     llmStatus: () => ({ provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true }),
     warmUp: () => undefined,
     close: async () => undefined,
   };
 }
 
-/** B's real Analyst + Treasurer on one shared model (qvac | openai, or an injected test LLM). */
-function realAi(config: ServerConfig, wallet: WalletPort, opts: ProviderOptions): AiProviders {
-  const model = opts.llm ?? createLlm(config.llmProvider);
-  const guard = confirmationGuard();
+/** B's real Analyst + Treasurer on one shared model via createAiRuntime() (qvac | openai, or an injected test LLM). */
+function realAi(config: ServerConfig, wallet: WalletPort, guard: PaymentGuard, opts: ProviderOptions): AiProviders {
+  const runtime = createAiRuntime({ provider: config.llmProvider, ...(opts.llm ? { llm: opts.llm } : {}) });
   return {
-    analyzer: new LiveAnalyst(model, wallet, opts.history, config),
-    treasurer: new Treasurer({ llm: model, wallet, guard }),
-    beforeExecute: (plan, c) => guard.add(plan, c),
-    llmStatus: () => model.info(),
+    analyzer: new LiveAnalyst(runtime, wallet, opts.history, config),
+    treasurer: runtime.treasurer({ wallet, guard }),
+    llmStatus: () => {
+      const { warmUpMs: _ms, ...info } = runtime.status();
+      return info;
+    },
     warmUp: () => {
-      model.warmUp?.().then(
-        () => opts.log?.info(`Model ${model.info().model} is ready`),
-        (err: unknown) => opts.log?.warn({ err }, 'Model warm-up failed'),
-      );
+      void runtime.warmUp().then(() => {
+        const info = runtime.status();
+        if (info.state === 'error') opts.log?.warn({ err: info.error }, 'Model warm-up failed');
+        else opts.log?.info(`Model ${info.model} is ready${info.warmUpMs ? ` (warm-up ${info.warmUpMs} ms)` : ''}`);
+      });
     },
     close: async () => {
-      await model.unload?.().catch(() => undefined);
+      await runtime.close().catch(() => undefined);
     },
   };
 }
@@ -180,6 +255,7 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
       ? null
       : startSyncLoop(wallet, {
           intervalMs: config.walletSyncMs,
+          onSynced: () => opts.onSynced?.(),
           onError: (err, next) => opts.log?.warn({ err, nextDelayMs: next }, 'Wallet sync failed; will retry'),
         });
   const kick = () => {
@@ -188,17 +264,19 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
   // First sync right away (background), so /api/health shows a sync time without waiting a full interval.
   kick();
 
-  const ai = opts.llm || config.llmProvider !== 'mock' ? realAi(config, wallet, opts) : mockAi(config, wallet);
-  const treasurer = new GuardedTreasurer(ai.treasurer, ai.beforeExecute, kick);
+  const guard = new LiveGuard({ store: opts.guardStore, wallet, config });
+  const ai =
+    opts.llm || config.llmProvider !== 'mock' ? realAi(config, wallet, guard, opts) : mockAi(config, wallet, guard);
+  const treasurer = new GuardedTreasurer(ai.treasurer, guard, kick);
   // Load the model in the background: /api/health shows `loading` until it is warm.
   ai.warmUp();
   const llmInfo = ai.llmStatus;
-  const analyzer = ai.analyzer;
 
   return {
     wallet,
-    analyzer,
+    analyzer: ai.analyzer,
     treasurer,
+    guard,
     llmInfo,
     sync,
     problems: () => {
