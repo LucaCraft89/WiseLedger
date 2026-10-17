@@ -378,13 +378,17 @@ export class WdkRgbWallet implements WalletPort {
     await this.precheck(req);
     const before = new Set(this.rgb.listTransfers(req.assetId).map((t) => t.batchTransferIdx));
     let hash: string;
+    const send = () =>
+      this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate });
     try {
-      ({ hash } = await this.acct().transfer({
-        token: req.assetId,
-        recipient: req.rgbInvoice,
-        amount: toNumber(req.amount),
-        feeRate,
-      }));
+      try {
+        ({ hash } = await send());
+      } catch (e) {
+        // NoUtxo comes from sendBegin, before anything is signed: create UTXOs and try once more.
+        if (!(mapWalletError(e) instanceof NoUtxo)) throw e;
+        await this.createUtxosIfNeeded(true);
+        ({ hash } = await send());
+      }
     } catch (e) {
       const err = mapWalletError(e);
       if (!(err instanceof SubmitTimeout)) throw err;

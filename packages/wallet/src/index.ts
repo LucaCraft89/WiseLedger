@@ -4,6 +4,9 @@ import { MockWallet } from 'core/mocks';
 import type { WalletConfig } from './config.js';
 
 export * from './config.js';
+export * from './guard.js';
+export * from './policy.js';
+export * from './tools.js';
 export * from './sync.js';
 
 export async function createWallet(cfg: WalletConfig): Promise<WalletPort> {
