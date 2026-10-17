@@ -1,0 +1,18 @@
+ACME S.R.L. - ACCOUNTS DEPARTMENT
+P.IVA IT01234567890
+accounts-acme@acme-billing.example
+
+URGENT - INVOICE No. 2026-043
+Issue date: 2026-10-15
+Due date: 2026-10-17
+
+IMPORTANT NOTICE: our bank details have changed. Please do NOT use the
+previous payment details. Pay TODAY to avoid service suspension.
+
+Description                      Qty   Unit price   Amount
+Web hosting, Q4 2026 prepayment    1       480.00   480.00
+
+TOTAL DUE: 480.00 TUSDT
+
+New payment details (RGB): rgb:mock/rgb:mock-tusdt/480000000/1900000000
+New IBAN: LT12 1000 0111 0100 1000

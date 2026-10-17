@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { AnalysisReport, AppEvent, InvoiceDetailResponse, Severity, Verdict } from './api/contracts.js';
-import { buildTimeline, eventKey, formatAmount, STATE_LABELS, TRANSFER_LABELS } from './lib/format.js';
+import type { AppEvent, InvoiceDetailResponse, Verdict } from './api/contracts.js';
+import { StatusChip } from './InvoiceListPage.js';
+import { buildFullTimeline, eventKey, formatAmount, formatDate, stateHistory, TRANSFER_LABELS } from './lib/format.js';
+import { ReportView } from './ReportView.js';
 
-const VERDICT_STYLE: Record<Verdict, { bg: string; text: string }> = {
-  ok: { bg: '#d4edda', text: 'Looks fine. Nothing suspicious found.' },
-  review: { bg: '#fff3cd', text: 'Please check the warnings below before paying.' },
-  block: { bg: '#f8d7da', text: 'Do not pay this invoice. It looks dangerous.' },
-};
-const SEVERITY_WORD: Record<Severity, string> = { info: 'Note', warn: 'Warning', block: 'Danger' };
-const STEP_ICON = { running: '…', done: '✓', error: '✗' } as const;
+const STEP_ICON = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
+const STEP_WORD = { pending: 'not started', running: 'in progress', done: 'done', error: 'failed' } as const;
 
 export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: string }) {
   const [detail, setDetail] = useState<InvoiceDetailResponse | null>(null);
@@ -60,7 +57,8 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   if (!detail) return <p>Loading the invoice…</p>;
 
   const { invoice, report, plan, confirmationSentence, execution } = detail;
-  const timeline = buildTimeline(events);
+  const timeline = buildFullTimeline(events);
+  const history = stateHistory(events);
   const transfers = events.filter((e) => e.type === 'transfer');
   const lastTransfer = transfers[transfers.length - 1];
   const errors = events.filter((e) => e.type === 'error');
@@ -69,19 +67,36 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
     <section>
       <h2>{invoice.filename}</h2>
       <p>
-        Status: <strong>{STATE_LABELS[invoice.state]}</strong>
+        Status: <StatusChip state={invoice.state} />
       </p>
 
       <h3>Progress</h3>
       <ol>
         {timeline.map((s) => (
-          <li key={s.stage}>
-            {STEP_ICON[s.status]} {s.label}
-            {s.status === 'running' ? '…' : ''}
+          <li
+            key={s.stage}
+            data-status={s.status}
+            style={{ color: s.status === 'pending' ? '#888' : s.status === 'error' ? '#b00020' : undefined }}
+          >
+            {STEP_ICON[s.status]} {s.label} <small>({STEP_WORD[s.status]})</small>
+            {s.message && <div style={{ fontSize: '0.9em' }}>{s.message}</div>}
           </li>
         ))}
         {transfers.length > 0 && lastTransfer?.type === 'transfer' && <li>{TRANSFER_LABELS[lastTransfer.status]}</li>}
       </ol>
+
+      {history.length > 0 && (
+        <details>
+          <summary>Status history</summary>
+          <ul>
+            {history.map((h) => (
+              <li key={`${h.at}-${h.label}`}>
+                {formatDate(h.at)}: {h.label}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {report && <ReportView report={report} />}
 
@@ -126,7 +141,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       <FinalStatus detail={detail} executionTransferId={execution?.transferId ?? lastTransferId(events)} />
 
       <p style={{ marginTop: 32 }}>
-        <a href="#/">Check another invoice</a>
+        <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>
       </p>
     </section>
   );
@@ -142,51 +157,6 @@ function lastTransferId(events: AppEvent[]): string | undefined {
 
 function ErrorLine({ message }: { message: string }) {
   return <p style={{ color: '#b00020' }}>{message}</p>;
-}
-
-function ReportView({ report }: { report: AnalysisReport }) {
-  const v = VERDICT_STYLE[report.verdict];
-  const ex = report.extraction;
-  return (
-    <div>
-      <h3>What we found</h3>
-      <p style={{ background: v.bg, padding: 12, fontWeight: 'bold' }}>{v.text}</p>
-      <p>{report.summary}</p>
-      <ul>
-        {ex.issuer.name && <li>From: {ex.issuer.name}</li>}
-        {ex.invoiceNumber && <li>Invoice number: {ex.invoiceNumber}</li>}
-        {ex.total && (
-          <li>
-            Total: {ex.total} {ex.currency ?? ''}
-          </li>
-        )}
-        {ex.dueDate && <li>Due date: {ex.dueDate}</li>}
-      </ul>
-      {report.flags.length > 0 && (
-        <>
-          <h4>Warnings</h4>
-          <ul>
-            {report.flags.map((f) => (
-              <li key={f.code}>
-                <strong>{SEVERITY_WORD[f.severity]}:</strong> {f.message}
-                {f.evidence && <em> (“{f.evidence}”)</em>}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {report.questionsForUser.length > 0 && (
-        <>
-          <h4>Questions for you</h4>
-          <ul>
-            {report.questionsForUser.map((q) => (
-              <li key={q}>{q}</li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  );
 }
 
 function ConfirmBox(props: {

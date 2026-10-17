@@ -6,6 +6,7 @@ import {
   type CreateInvoiceResponse,
   type HealthResponse,
   type InvoiceDetailResponse,
+  type InvoiceListResponse,
   type RejectResponse,
   SSE_EVENT_NAME,
 } from './contracts.js';
@@ -17,6 +18,8 @@ export interface ApiClient {
   readonly mode: 'server' | 'fake';
   health(): Promise<HealthResponse>;
   createInvoice(input: InvoiceInput): Promise<CreateInvoiceResponse>;
+  /** All invoices, newest first. */
+  listInvoices(): Promise<InvoiceListResponse>;
   getInvoice(id: string): Promise<InvoiceDetailResponse>;
   /** Live events for one invoice. Returns an unsubscribe function. */
   subscribe(id: string, onEvent: (e: AppEvent) => void): () => void;
@@ -68,6 +71,7 @@ export function createHttpClient(base = ''): ApiClient {
       }
       return call(`${base}/api/invoices`, json({ text: input.text, filename: input.filename }));
     },
+    listInvoices: () => call(`${base}/api/invoices`),
     getInvoice: (id) => call(`${base}/api/invoices/${encodeURIComponent(id)}`),
     subscribe(id, onEvent) {
       const es = new EventSource(`${base}/api/invoices/${encodeURIComponent(id)}/events`);

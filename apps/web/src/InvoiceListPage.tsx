@@ -1,0 +1,94 @@
+import { useEffect, useState } from 'react';
+import type { ApiClient } from './api/client.js';
+import type { InvoiceState, InvoiceSummaryDto } from './api/contracts.js';
+import { formatDate, STATE_LABELS, stateTone, TONE_COLORS, VERDICT_LABELS } from './lib/format.js';
+
+const cell = { padding: '6px 8px', borderBottom: '1px solid #ddd', textAlign: 'left' } as const;
+
+export function InvoiceListPage({ api }: { api: ApiClient }) {
+  const [invoices, setInvoices] = useState<InvoiceSummaryDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await api.listInvoices();
+        if (!alive) return;
+        setInvoices(r.invoices);
+        setError(null);
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : 'Could not load your invoices.');
+      }
+    };
+    void load();
+    // Keep statuses fresh while invoices are being checked or paid.
+    const timer = setInterval(() => void load(), 3000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [api]);
+
+  const open = (id: string) => {
+    window.location.hash = `#/invoice/${encodeURIComponent(id)}`;
+  };
+
+  return (
+    <section>
+      <h2>Your invoices</h2>
+      {error && <p style={{ color: '#b00020' }}>{error}</p>}
+      {!invoices && !error && <p>Loading your invoices…</p>}
+      {invoices && invoices.length === 0 && (
+        <p>
+          No invoices yet — <a href="#/">upload one</a>.
+        </p>
+      )}
+      {invoices && invoices.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={cell}>File</th>
+                <th style={cell}>Supplier</th>
+                <th style={cell}>Total</th>
+                <th style={cell}>Status</th>
+                <th style={cell}>Our check</th>
+                <th style={cell}>Added</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <tr key={inv.id} onClick={() => open(inv.id)} style={{ cursor: 'pointer' }}>
+                  <td style={cell}>
+                    <a href={`#/invoice/${encodeURIComponent(inv.id)}`}>{inv.filename}</a>
+                  </td>
+                  <td style={cell}>{inv.issuerName ?? '—'}</td>
+                  <td style={cell}>{inv.total ? `${inv.total} ${inv.currency ?? ''}`.trim() : '—'}</td>
+                  <td style={cell}>
+                    <StatusChip state={inv.state} />
+                  </td>
+                  <td style={cell}>{inv.verdict ? VERDICT_LABELS[inv.verdict] : 'Not checked yet'}</td>
+                  <td style={cell}>{formatDate(inv.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ marginTop: 24 }}>
+        <a href="#/">Check a new invoice</a>
+      </p>
+    </section>
+  );
+}
+
+export function StatusChip({ state }: { state: InvoiceState }) {
+  return (
+    <span
+      style={{ background: TONE_COLORS[stateTone(state)], padding: '2px 8px', borderRadius: 12, whiteSpace: 'nowrap' }}
+    >
+      {STATE_LABELS[state]}
+    </span>
+  );
+}
