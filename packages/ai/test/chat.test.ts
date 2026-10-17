@@ -63,7 +63,11 @@ describe('Treasurer chat (MockLlm)', () => {
     });
     const r = await treasurer(llm, await walletWithPayment()).chat('what is my TUSDT balance', [], () => {});
     expect(r.toolCalls).toEqual([expect.objectContaining({ name: 'get_balance', ok: true })]);
-    expect(((r.toolCalls[0]?.result ?? []) as { ticker: string }[])[0]?.ticker).toBe('TUSDT');
+    expect(((r.toolCalls[0]?.result ?? []) as { ticker: string; spendable: string }[])[0]).toMatchObject({
+      ticker: 'TUSDT',
+      spendable: '975.00 TUSDT',
+    });
+    expect(llm.calls[1]?.tools).toBeUndefined(); // the answer is phrased without tool schemas
     expect(r.text).toBe('You have 975.00 TUSDT.');
     expect(llm.calls[0]?.toolChoice).toBe('auto');
   });
@@ -82,6 +86,7 @@ describe('Treasurer chat (MockLlm)', () => {
     expect(r.toolCalls[0]).toMatchObject({ name: 'label_transfer', ok: true });
     expect((await labels.get(last?.transferId ?? ''))?.labels).toEqual(['hosting']);
     expect(String(llm.calls[0]?.messages[0]?.content)).toContain(`transferId=${last?.transferId}`);
+    expect(String(llm.calls[0]?.messages[0]?.content)).toContain('Friday 2026-10-23');
   });
 
   it('"report for September" → fiscal_report summary (file comes from the UI)', async () => {

@@ -151,9 +151,9 @@ export class Treasurer implements TreasurerAgent {
             .map((a) => ({
               assetId: a.assetId,
               ticker: a.ticker,
-              precision: a.precision,
-              spendable: a.balance.spendable,
-              settled: a.balance.settled,
+              // Display amounts formatted by code: small models misread base units (975000000 → "975,000,000 TUSDT").
+              spendable: `${formatAssetAmount(a.balance.spendable, a.precision)} ${a.ticker}`,
+              settled: `${formatAssetAmount(a.balance.settled, a.precision)} ${a.ticker}`,
             }));
         },
       } as ToolDef<never>,
@@ -208,12 +208,17 @@ export class Treasurer implements TreasurerAgent {
             .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
             .slice(0, 10);
           const labels = this.deps.labels;
+          const assets = await wallet.listAssets().catch(() => []);
+          const show = (amount: string, id?: string) => {
+            const a = assets.find((x) => x.assetId === id);
+            return a ? `${formatAssetAmount(amount, a.precision)} ${a.ticker}` : `${amount} base units`;
+          };
           return Promise.all(
             rows.map(async (t) => ({
               transferId: t.transferId,
               date: t.createdAt.slice(0, 10),
               direction: t.direction,
-              amount: t.amount,
+              amount: show(t.amount, t.assetId),
               assetId: t.assetId,
               status: t.status,
               labels: labels ? ((await labels.get(t.transferId))?.labels ?? []) : [],
@@ -419,17 +424,36 @@ export class Treasurer implements TreasurerAgent {
         ok: out.ok,
         ...(out.ok ? { result: out.result } : { error: out.error ?? 'failed' }),
       });
-      messages.push({
-        role: 'assistant',
-        content: `Calling ${call.name} ${JSON.stringify(call.arguments).slice(0, 200)}`,
-      });
-      messages.push({
-        role: 'tool',
-        content: JSON.stringify(out.ok ? out.result : { error: out.error }).slice(0, 1500),
-        toolCallId: call.id,
-      });
+      // Read tools answer in one short call without tool schemas (much faster than another tool turn).
+      return { text: await this.phrase(message, call.name, out), toolCalls: records };
     }
     return { text: 'Done.', toolCalls: records };
+  }
+
+  /** One sentence in the user's language from the tool result (numbers already formatted by code). */
+  private async phrase(
+    question: string,
+    tool: string,
+    out: { ok: boolean; result?: unknown; error?: string },
+  ): Promise<string> {
+    const facts = JSON.stringify(out.ok ? out.result : { error: out.error }).slice(0, 1200);
+    try {
+      const r = await this.deps.llm.complete({
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Answer the question in one or two short sentences, in the same language as the question, using only the facts given. Copy amounts exactly as written.',
+          },
+          { role: 'user', content: `Question: ${question.slice(0, 300)}\nTool ${tool} result: ${facts}` },
+        ],
+        temperature: 0.2,
+        maxTokens: 90,
+      });
+      return r.text.trim() || (out.ok ? 'Done.' : `That did not work: ${out.error ?? 'unknown error'}.`);
+    } catch {
+      return out.ok ? 'Done.' : `That did not work: ${out.error ?? 'unknown error'}.`;
+    }
   }
 
   /** System prompt with today's date and the context the model may refer to (IDs + short validated fields). */
@@ -450,6 +474,11 @@ export class Treasurer implements TreasurerAgent {
     return [
       'You are the Treasurer of a small business wallet (RGB assets on Bitcoin). You act only through tools.',
       `Today is ${now.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })} ${now.toISOString().slice(0, 10)}. Dates for tools are ISO (YYYY-MM-DD or full ISO time).`,
+      // Small models get weekday arithmetic wrong ("Friday" → last Friday): give them the next 7 dates.
+      `Next days: ${Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(now.getTime() + (i + 1) * 86_400_000);
+        return `${d.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })} ${d.toISOString().slice(0, 10)}`;
+      }).join(', ')}. A payment "on <weekday>" means the next one, at 09:00.`,
       'Use IDs exactly as written in CONTEXT. Spend tools only prepare a payment; the user confirms it on screen.',
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
       'CONTEXT',
