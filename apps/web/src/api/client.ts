@@ -25,6 +25,7 @@ import {
   type ScheduleCancelResponse,
   type ScheduleListResponse,
   SSE_EVENT_NAME,
+  type TranscribeResponse,
   type TransfersResponse,
   type WalletReceiveRequest,
   type WalletReceiveResponse,
@@ -57,6 +58,8 @@ export interface ApiClient {
   setLabels(transferId: string, req: LabelsPutRequest): Promise<LabelsPutResponse>;
   /** Talk to the Treasurer (local AI with wallet tools). */
   chat(req: ChatRequest): Promise<ChatResponse>;
+  /** Speech to text on this computer (QVAC Parakeet). Audio: 16 kHz mono WAV. The text only fills the chat box. */
+  transcribe(audio: Blob): Promise<TranscribeResponse>;
   /** Scheduled payments. */
   schedule(): Promise<ScheduleListResponse>;
   cancelJob(jobId: string): Promise<ScheduleCancelResponse>;
@@ -153,6 +156,24 @@ export function createHttpClient(base = ''): ApiClient {
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
     chat: (req) => call(`${base}/api/agent/chat`, json(req)),
+    async transcribe(audio) {
+      try {
+        return await call<TranscribeResponse>(`${base}/api/agent/transcribe`, {
+          method: 'POST',
+          headers: { 'content-type': audio.type || 'audio/wav' },
+          body: audio,
+        });
+      } catch (err) {
+        if (err instanceof ApiCallError && err.status === 404) {
+          throw new ApiCallError(
+            'VOICE_UNAVAILABLE',
+            'Voice input is not available on this WiseLedger yet. Please type your request.',
+            404,
+          );
+        }
+        throw err;
+      }
+    },
     schedule: () => call(`${base}/api/schedule`),
     cancelJob: (jobId) => call(`${base}/api/schedule/${encodeURIComponent(jobId)}/cancel`, json({})),
     fiscalUrl: (q) => fiscalUrl(q, base),
