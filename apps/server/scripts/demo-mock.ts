@@ -42,6 +42,9 @@ async function main(): Promise<void> {
     // Hermetic by default: a throwaway in-memory DB unless DB_PATH is set.
     const started = await startServer({
       port: 0,
+      // Always the mocks, whatever .env or the shell say: this script is the hermetic test path.
+      llmProvider: 'mock',
+      walletBackend: 'mock',
       dbPath: process.env.DB_PATH ?? ':memory:',
       mockStepMs: Number(process.env.MOCK_STEP_MS ?? 500),
     });
