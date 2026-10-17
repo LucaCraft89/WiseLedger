@@ -42,7 +42,7 @@ export class MockTreasurer implements TreasurerAgent {
       return {
         planId: plan.planId,
         status: 'failed',
-        error: { code: 'ConfirmationMismatch', message: 'Confirmation does not match the plan.' },
+        error: { code: 'hash_mismatch', message: 'Confirmation does not match the plan.' },
       };
     }
     if (plan.executeAt !== 'now') {
@@ -67,6 +67,7 @@ export class MockTreasurer implements TreasurerAgent {
       txid = sent.txid;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const code = (err as { code?: unknown })?.code;
       emit({
         type: 'toolCall',
         invoiceId,
@@ -77,8 +78,11 @@ export class MockTreasurer implements TreasurerAgent {
         status: 'error',
         message,
       });
-      const code = err instanceof Error ? ((err as { code?: string }).code ?? err.name) : 'Error';
-      return { planId: plan.planId, status: 'failed', error: { code, message } };
+      return {
+        planId: plan.planId,
+        status: 'failed',
+        error: { code: typeof code === 'string' ? code : 'TransferFailed', message },
+      };
     }
     emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'ok' });
     emit({ type: 'transfer', invoiceId, at: at(), transferId, status: 'WaitingCounterparty', txid });

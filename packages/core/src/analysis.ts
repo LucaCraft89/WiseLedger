@@ -150,7 +150,7 @@ export interface InvoiceAnalyzer {
   analyze(src: InvoiceSource, ctx: AnalyzeContext, emit: EmitFn): Promise<AnalysisReport>;
 }
 
-export const Payee = z.object({
+export const PayeeBookEntry = z.object({
   name: z.string(),
   vatId: z.string().optional(),
   /** RGB invoices (or recipient IDs) this payee was paid on. */
@@ -158,7 +158,7 @@ export const Payee = z.object({
   timesPaid: z.number().int().nonnegative(),
   lastPaidAt: IsoDateTime.optional(),
 });
-export type Payee = z.infer<typeof Payee>;
+export type PayeeBookEntry = z.infer<typeof PayeeBookEntry>;
 
 export interface HistoryQuery {
   issuer?: string;
@@ -178,5 +178,5 @@ export interface HistoryMatch {
 export interface HistoryPort {
   /** Empty array = never seen. */
   seen(by: HistoryQuery): Promise<HistoryMatch[]>;
-  payeeBook(): Promise<Payee[]>;
+  payeeBook(): Promise<PayeeBookEntry[]>;
 }

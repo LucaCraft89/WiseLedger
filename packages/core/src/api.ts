@@ -3,14 +3,12 @@ import { z } from 'zod';
 import { AnalysisReport, BaseUnits, InvoiceSourceKind, IsoDateTime, LlmProviderName, Verdict } from './analysis.js';
 import { AppEvent } from './events.js';
 import type { AgentReply } from './llm.js';
-import type { ExecutionResult, InvoiceState, PaymentPlan } from './orchestrator.js';
-import { TransferStatusSchema } from './wallet.js';
+import { ExecutionResultSchema, InvoiceStateSchema, PaymentPlanSchema } from './orchestrator.js';
+import { AssetBalanceSchema, TransferStatusSchema } from './wallet.js';
 
-const isObject = (v: unknown) => typeof v === 'object' && v !== null;
-/** Owned by orchestrator.ts (A); checked structurally there. */
-const InvoiceStateDto = z.custom<InvoiceState>((v) => typeof v === 'string' && v.length > 0);
-const PaymentPlanDto = z.custom<PaymentPlan>(isObject);
-const ExecutionResultDto = z.custom<ExecutionResult>(isObject);
+const InvoiceStateDto = InvoiceStateSchema;
+const PaymentPlanDto = PaymentPlanSchema;
+const ExecutionResultDto = ExecutionResultSchema;
 
 export const ApiError = z.object({
   error: z.object({
@@ -90,7 +88,7 @@ export const RejectResponse = z.object({ invoiceId: z.string(), state: InvoiceSt
 export type RejectResponse = z.infer<typeof RejectResponse>;
 
 // GET /api/wallet
-export const BalanceDto = z.object({ settled: BaseUnits, future: BaseUnits, spendable: BaseUnits });
+export const BalanceDto = AssetBalanceSchema;
 export const WalletAssetDto = z.object({
   assetId: z.string(),
   ticker: z.string(),
@@ -102,7 +100,7 @@ export type WalletAssetDto = z.infer<typeof WalletAssetDto>;
 
 export const WalletResponse = z.object({
   backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
-  network: z.enum(['mutinynet', 'regtest']),
+  network: z.enum(['mutinynet', 'regtest', 'mock']),
   ready: z.boolean(),
   /** BTC receive address (fees, UTXOs). */
   address: z.string().optional(),
@@ -113,7 +111,7 @@ export const WalletResponse = z.object({
 export type WalletResponse = z.infer<typeof WalletResponse>;
 
 // POST /api/wallet/receive
-export const ReceiveRequest = z.object({
+export const WalletReceiveRequest = z.object({
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
   expiryMinutes: z
@@ -123,15 +121,15 @@ export const ReceiveRequest = z.object({
     .max(60 * 24 * 7)
     .optional(),
 });
-export type ReceiveRequest = z.infer<typeof ReceiveRequest>;
+export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
-export const ReceiveResponse = z.object({
+export const WalletReceiveResponse = z.object({
   rgbInvoice: z.string(),
   expiresAt: IsoDateTime,
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
 });
-export type ReceiveResponse = z.infer<typeof ReceiveResponse>;
+export type WalletReceiveResponse = z.infer<typeof WalletReceiveResponse>;
 
 // GET /api/transfers
 export const TransferDto = z.object({
@@ -200,7 +198,7 @@ export const HealthResponse = z.object({
   }),
   wallet: z.object({
     backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
-    network: z.enum(['mutinynet', 'regtest']),
+    network: z.enum(['mutinynet', 'regtest', 'mock']),
     ready: z.boolean(),
     blockHeight: z.number().int().optional(),
   }),

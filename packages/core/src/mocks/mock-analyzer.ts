@@ -11,6 +11,7 @@ import {
   type RiskFlag,
 } from '../analysis.js';
 import type { Stage } from '../events.js';
+import { MOCK_ASSET_ID, mockInvoice } from './mock-wallet.js';
 
 export interface MockAnalyzerOptions {
   /** Gap between stage events. Default 300 ms; 0 in tests. */
@@ -22,19 +23,10 @@ export interface MockAnalyzerOptions {
   now?: () => Date;
 }
 
-import { MOCK_ASSET_ID } from './mock-wallet.js';
-
-export { MOCK_ASSET_ID };
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function baseName(src: InvoiceSource): string {
   return (src.filename ?? src.path.split(/[\\/]/).pop() ?? '').toLowerCase();
-}
-
-/** Same format as MockWallet: rgb:mock/<assetId>/<amount>/<expiryEpoch>. */
-export function mockRgbInvoice(assetId: string, amount: string, expiryEpoch: number): string {
-  return `rgb:mock/${assetId}/${amount}/${expiryEpoch}`;
 }
 
 export function mockFlagsFor(name: string): RiskFlag[] {
@@ -90,7 +82,7 @@ export class MockAnalyzer implements InvoiceAnalyzer {
     const assetId = this.opts.assetId ?? MOCK_ASSET_ID;
     const amount = this.opts.amount ?? '25000000';
     const isEur = name.includes('eur');
-    const rgbInvoice = mockRgbInvoice(assetId, amount, Math.floor(now().getTime() / 1000) + 24 * 3600);
+    const rgbInvoice = mockInvoice(assetId, amount, Math.floor(now().getTime() / 1000) + 24 * 3600);
 
     await stage('reading');
     await stage('extracting');

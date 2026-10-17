@@ -11,11 +11,11 @@ import {
   HealthResponse,
   InvoiceDetailResponse,
   InvoiceListResponse,
-  ReceiveRequest,
-  ReceiveResponse,
   RejectRequest,
   RejectResponse,
   TransfersResponse,
+  WalletReceiveRequest,
+  WalletReceiveResponse,
   WalletResponse,
 } from '../src/api.js';
 import { AppEvent } from '../src/events.js';
@@ -142,8 +142,8 @@ describe('API DTOs', () => {
       },
       { backend: 'mock', network: 'mainnet', ready: true, assets: [] },
     ],
-    ['ReceiveRequest', ReceiveRequest, { amount: '5000000', expiryMinutes: 60 }, { amount: '5.0' }],
-    ['ReceiveResponse', ReceiveResponse, { rgbInvoice: 'rgb:…', expiresAt: NOW }, { rgbInvoice: 'rgb:…' }],
+    ['WalletReceiveRequest', WalletReceiveRequest, { amount: '5000000', expiryMinutes: 60 }, { amount: '5.0' }],
+    ['WalletReceiveResponse', WalletReceiveResponse, { rgbInvoice: 'rgb:…', expiresAt: NOW }, { rgbInvoice: 'rgb:…' }],
     [
       'TransfersResponse',
       TransfersResponse,
