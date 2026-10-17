@@ -31,12 +31,16 @@ export function App() {
 
   const invoiceId = hash.match(/^#\/invoice\/(.+)$/)?.[1];
   return (
-    <main
-      style={{ maxWidth: 720, margin: '0 auto', padding: 24, fontFamily: 'system-ui, sans-serif', lineHeight: 1.5 }}
-    >
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+    <main style={{ maxWidth: 720, margin: '0 auto', padding: 24 }}>
+      <header
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}
+      >
         <h1 style={{ margin: 0 }}>
-          <a href="#/" style={{ color: 'inherit', textDecoration: 'none' }}>
+          <a
+            href="#/"
+            style={{ color: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 10 }}
+          >
+            <img src="/brand/owl-192.png" width={40} height={40} alt="" />
             WiseLedger
           </a>
         </h1>
