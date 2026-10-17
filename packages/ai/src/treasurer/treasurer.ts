@@ -82,6 +82,26 @@ async function streamTurn(
   throw new Error('The local AI stopped without an answer.');
 }
 
+/**
+ * What WiseLedger is, how to do things in the app and how it is built: written by us, added to the chat prompt only
+ * when the message looks like a question about the app (it costs prompt time on a small local model).
+ */
+export const PLATFORM_GUIDE = [
+  'ABOUT WISELEDGER (use this to answer questions about the app, how to do things, or how it is built; keep answers short)',
+  '- What it is: a self-custodial wallet for small businesses that checks every invoice for fraud with an AI running on this computer, then pays it with RGB tokens on Bitcoin. Built by team Coin³ at a hackathon; test networks only (Mutinynet), test token TUSDT, no real money.',
+  '- Check and pay an invoice: "Check an invoice" → drop the PDF, photo, text or FatturaPA XML → read the verdict (Looks fine / Check before paying / Do not pay) → "Confirm and pay". A blocked invoice cannot be paid.',
+  '- Get paid: Wallet → Get paid → amount, note, how long it stays valid → share the payment request; or ask me "create an invoice for 50 TUSDT".',
+  '- Scheduled payments: ask me "pay the Acme invoice on Friday", confirm the card; see them under My invoices → Scheduled payments.',
+  '- Labels and fiscal report: Wallet → Recent transfers → "All transfers and fiscal report" (or ask me to label a payment or make a report).',
+  '- Spending rules: Wallet → Overview → Spending rules (max per payment, max per 24 h, approved tokens). Settings shows the local AI and wallet status. Dark mode: switch at the top.',
+  "- How it is built: the Analyst (local AI, no tools) reads the invoice; ten rules in code (R1–R10: payment request valid, token, amount, duplicate, new supplier, pressure, hidden orders to the AI, currency, missing fields, dates) decide the verdict; the user confirms a sentence written by code; the Treasurer (me, same model) pays only confirmed plans, through a payment guard and the wallet's spending rules. I never see the invoice text.",
+  '- Stack: QVAC by Tether runs the AI on this computer (Qwen3.5 2B; Parakeet for voice), nothing leaves the machine. Tether WDK is the wallet (keys on this computer, spend-policy engine). RGB v0.11 (rgb-lib, UTEXO packages) for the token transfers on Bitcoin (Mutinynet signet), plus RGB Lightning for instant payments. TypeScript: Fastify server, React web app, SQLite.',
+].join('\n');
+
+/** Questions about the app, its use or its stack (English and Italian). */
+export const ASKS_ABOUT_APP =
+  /\b(what|how|why|who|which|help|explain|tell me|can you|project|platform|app|wiseledger|stack|built|made|technolog\w*|qvac|rgb|wdk|tether|lightning|bitcoin|safe\w*|secur\w*|rules?|works?|features?|cosa|come|perch[eé]|aiuto|progetto|funziona)\b/i;
+
 export const TREASURER_SYSTEM = [
   'You are the Treasurer of a small business wallet. You move money only through tools.',
   'You receive a payment plan that a human has already confirmed. Execute exactly that plan by calling execute_plan with its planId.',
@@ -462,7 +482,7 @@ export class Treasurer implements TreasurerAgent {
       parameters: z.toJSONSchema(t.params) as Record<string, unknown>,
     }));
     const messages: ChatMessage[] = [
-      { role: 'system', content: await this.chatSystem() },
+      { role: 'system', content: await this.chatSystem(message) },
       ...history.slice(-10).map((h) => ({ role: h.role, content: h.text.slice(0, 600) }) as ChatMessage),
       { role: 'user', content: message.slice(0, 1000) },
     ];
@@ -557,7 +577,7 @@ export class Treasurer implements TreasurerAgent {
   }
 
   /** System prompt with today's date and the context the model may refer to (IDs + short validated fields). */
-  private async chatSystem(): Promise<string> {
+  private async chatSystem(message = ''): Promise<string> {
     const now = (this.deps.now ?? (() => new Date()))();
     const assets = await this.deps.wallet.listAssets().catch(() => []);
     const invoices = (await this.deps.invoices?.().catch(() => [])) ?? [];
@@ -586,6 +606,7 @@ export class Treasurer implements TreasurerAgent {
       'Your tools: get_balance; create_receive_invoice ("create/make an invoice", "request a payment", "I want to get paid": a payment request someone else pays into this wallet; it needs no address); schedule_payment and execute_plan for uploaded invoices; label_transfer; list_transfers; fiscal_report. Never say you cannot do what a tool does: call it.',
       'Only the tokens under Assets exist in this wallet. If the user names another one (e.g. USDC), say this wallet holds only those and offer them. Paying a Bitcoin address is not possible here: payments go to invoices the user uploads.',
       'You already know every asset ID (under Assets): never ask the user for one. For a payment request call create_receive_invoice right away with the amount and expiry the user gave; if they also gave an address, create the request anyway and say in one sentence that a payment request needs no address.',
+      ...(ASKS_ABOUT_APP.test(message) ? [PLATFORM_GUIDE] : []),
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
       'Invoices (newest first; the first one is the latest):',

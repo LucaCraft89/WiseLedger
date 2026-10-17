@@ -3,7 +3,14 @@ import { MemoryLabelStore, MOCK_ASSET_ID, MockLlm, MockWallet, mockInvoice } fro
 import { describe, expect, it } from 'vitest';
 import type { ChatInvoice } from '../src/index.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { checkText, confirmationGuard, newestFirst, safeName, Treasurer } from '../src/treasurer/treasurer.js';
+import {
+  ASKS_ABOUT_APP,
+  checkText,
+  confirmationGuard,
+  newestFirst,
+  safeName,
+  Treasurer,
+} from '../src/treasurer/treasurer.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z'); // Saturday
 const INVOICES: ChatInvoice[] = [
@@ -242,6 +249,20 @@ describe('Treasurer chat (MockLlm)', () => {
     const llm2 = new MockLlm({ replies: [{ text: '{"name":"get_balance","arguments":{}}' }] });
     await treasurer(llm2, await walletWithPayment()).chat('x', [], () => {}, { onToken: (t) => json.push(t) });
     expect(json).toEqual([]);
+  });
+
+  it('questions about the app get the platform guide; plain wallet requests do not pay its prompt cost', async () => {
+    const llm = new MockLlm({ fallback: { text: 'WiseLedger checks invoices with local AI.' } });
+    const t = new Treasurer({ llm, wallet: new MockWallet({ stepMs: 0 }), guard: confirmationGuard(), now: () => NOW });
+    await t.chat('How is this project built? Which stack?', [], () => {});
+    await t.chat('Come funziona?', [], () => {});
+    await t.chat('Label my last payment as hosting', [], () => {});
+    const sys = llm.calls.map((c) => String(c.messages[0]?.content));
+    expect(sys[0]).toContain('ABOUT WISELEDGER');
+    expect(sys[0]).toMatch(/QVAC by Tether .* Tether WDK .* RGB v0\.11/s);
+    expect(sys[1]).toContain('ABOUT WISELEDGER');
+    expect(sys.at(-1)).not.toContain('ABOUT WISELEDGER');
+    expect(ASKS_ABOUT_APP.test('pay the Acme invoice on Friday')).toBe(false);
   });
 
   it('safeName strips quotes, newlines and instruction-like names', () => {
