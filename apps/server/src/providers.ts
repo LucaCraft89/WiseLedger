@@ -2,7 +2,7 @@
 // wallet, PaymentGuard and the background sync loop. The mock LLM path keeps core's MockAnalyzer/MockTreasurer so
 // tests and `pnpm demo:mock` stay hermetic; qvac/openai use B's createAiRuntime() (one shared model).
 // Every execution goes through A's WalletGuard (SQLite claims = idempotency), on both paths.
-import { type AiRuntime, createAiRuntime, type RuleConfig } from 'ai';
+import { type AiRuntime, type ChatInvoice, createAiRuntime, type RuleConfig, Treasurer } from 'ai';
 import type {
   AnalysisReport,
   AnalyzeContext,
@@ -27,17 +27,19 @@ import { MemoryJobStore, MemoryLabelStore, MockAnalyzer, MockTreasurer, MockWall
 import { createWallet, type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
 import { ConfigError, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
+import type { ExecuteNowFn } from './orchestrator.js';
 
 export interface Providers {
   wallet: WalletPort;
   analyzer: InvoiceAnalyzer;
-  treasurer: TreasurerAgent;
+  /** Guarded Treasurer; executeNow is what the Scheduler runs when a job is due. */
+  treasurer: SchedulingTreasurer;
   /** The PaymentGuard every execution goes through. */
   guard: LiveGuard;
   llmInfo: () => LlmInfo;
   /** Background sync for the real wallet; null on the mock wallet. */
   sync: SyncLoop | null;
-  /** Labels (SqliteLabelStore in the server), for the Treasurer's label tools once B's ai package takes them. */
+  /** Labels (SqliteLabelStore in the server), for the Treasurer's label tools. */
   labels: LabelStore;
   /** Scheduled payments (SqliteJobStore in the server), for B's Scheduler. */
   jobs: JobStore;
@@ -59,6 +61,8 @@ export interface ProviderOptions {
   jobs?: JobStore;
   /** Builds the fiscal service once the wallet exists. */
   fiscalFor?: (wallet: WalletPort) => FiscalService;
+  /** Open invoices for the Treasurer chat (IDs and short validated fields only). */
+  chatInvoices?: () => Promise<ChatInvoice[]>;
   env?: NodeJS.ProcessEnv;
   log?: { info(msg: string): void; warn(obj: unknown, msg?: string): void };
   /** Test seams: use these instead of building from config. */
@@ -67,6 +71,10 @@ export interface ProviderOptions {
 }
 
 type AssetLike = Awaited<ReturnType<WalletPort['listAssets']>>[number];
+
+export interface SchedulingTreasurer extends TreasurerAgent {
+  executeNow: ExecuteNowFn;
+}
 
 /** Networks the rules accept for RGB invoices, as the wallet's decodeInvoice reports them. */
 export function ruleNetworks(config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork'>): string[] {
@@ -154,7 +162,7 @@ class LiveAnalyst implements InvoiceAnalyzer {
  * Mock path: MockTreasurer pays without a guard, so the plan goes through the guard first (confirmed, hash, cap,
  * asset, balance, claimed once). The plan paid is the one the guard resolved from the store.
  */
-export class GuardedMockTreasurer implements TreasurerAgent {
+export class GuardedMockTreasurer implements SchedulingTreasurer {
   constructor(
     private readonly inner: TreasurerAgent,
     private readonly guard: PaymentGuard,
@@ -163,6 +171,11 @@ export class GuardedMockTreasurer implements TreasurerAgent {
   async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
     // Scheduling moves no money; the job runner goes through the guard when the payment is due.
     if (plan.executeAt !== 'now') return this.inner.execute(plan, confirmation, emit);
+    return this.executeNow(plan, confirmation, emit);
+  }
+
+  /** Pays now whatever executeAt says (a due scheduled job): guard first, then the mock pays the guard's plan. */
+  async executeNow(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
     const g = await this.guard.check(plan.planId);
     if (!g.ok) {
       emit({
@@ -177,23 +190,32 @@ export class GuardedMockTreasurer implements TreasurerAgent {
       });
       return { planId: plan.planId, status: 'failed', error: { code: g.reason, message: g.message } };
     }
-    return this.inner.execute(g.plan, confirmation, emit);
+    // MockTreasurer only schedules when executeAt is a date; the planId (and so the claim) stays the guard's.
+    return this.inner.execute({ ...g.plan, executeAt: 'now' }, confirmation, emit);
   }
 
   chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
 }
 
 /** Records every outcome with the guard (frees the claim when nothing was sent), then syncs after the payment. */
-class GuardedTreasurer implements TreasurerAgent {
+class GuardedTreasurer implements SchedulingTreasurer {
   constructor(
-    private readonly inner: TreasurerAgent,
+    private readonly inner: SchedulingTreasurer,
     private readonly guard: LiveGuard,
     private readonly afterExecute: () => void,
   ) {}
 
-  async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
+  execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
+    return this.recorded(() => this.inner.execute(plan, confirmation, emit));
+  }
+
+  executeNow(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
+    return this.recorded(() => this.inner.executeNow(plan, confirmation, emit));
+  }
+
+  private async recorded(run: () => Promise<ExecutionResult>): Promise<ExecutionResult> {
     try {
-      const result = await this.inner.execute(plan, confirmation, emit);
+      const result = await run();
       await this.guard.recordOutcome(result);
       return result;
     } finally {
@@ -227,7 +249,7 @@ async function openWallet(config: ServerConfig, env: NodeJS.ProcessEnv): Promise
  */
 export interface AiProviders {
   analyzer: InvoiceAnalyzer;
-  treasurer: TreasurerAgent;
+  treasurer: SchedulingTreasurer;
   llmStatus: () => LlmInfo;
   /** Starts loading the model in the background; never rejects. */
   warmUp: () => void;
@@ -248,11 +270,25 @@ function mockAi(config: ServerConfig, wallet: WalletPort, guard: PaymentGuard): 
 }
 
 /** B's real Analyst + Treasurer on one shared model via createAiRuntime() (qvac | openai, or an injected test LLM). */
-function realAi(config: ServerConfig, wallet: WalletPort, guard: PaymentGuard, opts: ProviderOptions): AiProviders {
+function realAi(
+  config: ServerConfig,
+  wallet: WalletPort,
+  guard: PaymentGuard,
+  opts: ProviderOptions,
+  stores: { labels: LabelStore; fiscal: FiscalService },
+): AiProviders {
   const runtime = createAiRuntime({ provider: config.llmProvider, ...(opts.llm ? { llm: opts.llm } : {}) });
   return {
     analyzer: new LiveAnalyst(runtime, wallet, opts.history, config),
-    treasurer: runtime.treasurer({ wallet, guard }),
+    // Built directly (same shared model as runtime.treasurer) to pass the chat tools' stores.
+    treasurer: new Treasurer({
+      llm: runtime.llm,
+      wallet,
+      guard,
+      labels: stores.labels,
+      fiscal: stores.fiscal,
+      ...(opts.chatInvoices ? { invoices: opts.chatInvoices } : {}),
+    }),
     llmStatus: () => {
       const { warmUpMs: _ms, ...info } = runtime.status();
       return info;
@@ -289,17 +325,18 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
   // First sync right away (background), so /api/health shows a sync time without waiting a full interval.
   kick();
 
+  const labels = opts.labels ?? new MemoryLabelStore();
+  const jobs = opts.jobs ?? new MemoryJobStore();
+  const fiscal = opts.fiscalFor?.(wallet) ?? new WalletFiscalService({ wallet });
   const guard = new LiveGuard({ store: opts.guardStore, wallet, config });
   const ai =
-    opts.llm || config.llmProvider !== 'mock' ? realAi(config, wallet, guard, opts) : mockAi(config, wallet, guard);
+    opts.llm || config.llmProvider !== 'mock'
+      ? realAi(config, wallet, guard, opts, { labels, fiscal })
+      : mockAi(config, wallet, guard);
   const treasurer = new GuardedTreasurer(ai.treasurer, guard, kick);
   // Load the model in the background: /api/health shows `loading` until it is warm.
   ai.warmUp();
   const llmInfo = ai.llmStatus;
-  // TODO(after B's ai merge): pass labels, fiscal and chatInvoices to runtime.treasurer(), and jobs to the Scheduler.
-  const labels = opts.labels ?? new MemoryLabelStore();
-  const jobs = opts.jobs ?? new MemoryJobStore();
-  const fiscal = opts.fiscalFor?.(wallet) ?? new WalletFiscalService({ wallet });
 
   return {
     labels,

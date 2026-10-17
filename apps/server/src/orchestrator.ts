@@ -9,15 +9,18 @@ import {
   type AppEvent,
   assertTransition,
   buildConfirmationSentence,
+  type Confirmation,
   type ConfirmRequest,
   type ConfirmResponse,
   canTransition,
+  type EmitFn,
   type ExecutionResult,
   FLAG_CODES,
   IllegalTransition,
   type InvoiceAnalyzer,
   type InvoiceSourceKind,
   type InvoiceState,
+  type Job,
   makePlan,
   type PaymentPlan,
   type RejectRequest,
@@ -43,12 +46,17 @@ export class ApiFailure extends Error {
   }
 }
 
+/** Runs a confirmed plan now whatever its executeAt (B's Treasurer.executeNow behind the guard). */
+export type ExecuteNowFn = (plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn) => Promise<ExecutionResult>;
+
 export interface OrchestratorDeps {
   store: InvoiceStore;
   analyzer: InvoiceAnalyzer;
-  treasurer: TreasurerAgent;
+  treasurer: TreasurerAgent & { executeNow?: ExecuteNowFn };
   wallet: WalletPort;
   uploadDir: string;
+  /** Stores the job of a scheduled payment (B's Scheduler.schedule). Without it, scheduled confirms are refused. */
+  schedule?: (input: { planId: string; invoiceId: string; runAt: string }) => Promise<Job>;
   now?: () => Date;
 }
 
@@ -306,7 +314,7 @@ export class Orchestrator {
       .filter((inv): inv is StoredInvoice => inv?.state === 'EXECUTING' || inv?.state === 'CONFIRMED');
   }
 
-  private async planFromReport(id: string, report: AnalysisReport): Promise<PaymentPlan> {
+  private async planFromReport(id: string, report: AnalysisReport, executeAt?: string): Promise<PaymentPlan> {
     const p = report.proposedPayment;
     if (!p) throw new ApiFailure(409, 'NO_PAYMENT', 'This invoice has no payment we can make.');
     return makePlan({
@@ -315,7 +323,7 @@ export class Orchestrator {
       assetId: p.assetId,
       amount: p.amount,
       payee: { name: p.payee },
-      executeAt: p.executeAt ? new Date(p.executeAt).toISOString() : 'now',
+      executeAt: executeAt ?? (p.executeAt ? new Date(p.executeAt).toISOString() : 'now'),
       labels: [],
     });
   }
@@ -365,6 +373,15 @@ export class Orchestrator {
         'This invoice needs your review. Read the warnings, then confirm again with override.',
       );
     }
+    const executeAt = req.executeAt ? new Date(req.executeAt).toISOString() : undefined;
+    if (executeAt) {
+      if (!this.deps.schedule) {
+        throw new ApiFailure(409, 'SCHEDULING_UNAVAILABLE', 'Scheduled payments are not available. Pay now instead.');
+      }
+      if (Date.parse(executeAt) <= this.now().getTime()) {
+        throw new ApiFailure(400, 'IN_THE_PAST', 'The payment date must be in the future.');
+      }
+    }
     // Rebuild the plan from the report: the planId the user saw must match what we would pay now.
     const plan = await this.planFromReport(id, report);
     if (plan.planId !== inv.plan.planId || req.planId !== plan.planId) {
@@ -374,28 +391,75 @@ export class Orchestrator {
         'The payment changed after you saw it. Reload the invoice and check it again.',
       );
     }
-    const confirmation = { planId: plan.planId, confirmedAt: this.at() };
-    this.store.update(id, { plan, confirmation });
+    // Scheduled: the same payment with the chosen date (its own planId); the job runs it through the guard when due.
+    const toPay = executeAt ? await this.planFromReport(id, report, executeAt) : plan;
+    const confirmation = { planId: toPay.planId, confirmedAt: this.at() };
+    this.store.update(id, { plan: toPay, confirmation });
     this.transition(id, 'CONFIRMED');
     this.transition(id, 'EXECUTING');
-    this.background(() => this.execute(id, plan, confirmation));
-    return { invoiceId: id, state: 'EXECUTING', planId: plan.planId };
+    this.background(async () => {
+      await this.execute(id, toPay, confirmation);
+    });
+    return { invoiceId: id, state: 'EXECUTING', planId: toPay.planId };
   }
 
-  private async execute(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
+  private async execute(
+    id: string,
+    plan: PaymentPlan,
+    confirmation: Confirmation,
+    run: ExecuteNowFn = (p, c, e) => this.deps.treasurer.execute(p, c, e),
+  ): Promise<ExecutionResult> {
     this.executing.add(id);
     try {
-      await this.runExecution(id, plan, confirmation);
+      return await this.runExecution(id, plan, confirmation, run);
     } finally {
       this.executing.delete(id);
     }
   }
 
-  private async runExecution(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
+  /**
+   * The Scheduler's executor: a due job pays its SCHEDULED invoice now (SCHEDULED → EXECUTING → Treasurer.executeNow
+   * through the guard). Anything else (cancelled, rejected, already started before a crash) is refused, never re-sent.
+   */
+  async runScheduled(job: Job): Promise<ExecutionResult> {
+    const inv = this.store.get(job.invoiceId);
+    const refuse = (code: string, message: string): ExecutionResult => ({
+      planId: job.planId,
+      status: 'failed',
+      error: { code, message },
+    });
+    if (!inv || inv.plan?.planId !== job.planId || inv.confirmation?.planId !== job.planId) {
+      return refuse('NOT_SCHEDULED', 'This scheduled payment no longer matches its invoice. Nothing was sent.');
+    }
+    if (inv.state === 'EXECUTING' || inv.state === 'PAID') {
+      return refuse(
+        'already_executed',
+        'This payment was already started. It was not sent again; the wallet sync shows whether it went through.',
+      );
+    }
+    if (inv.state !== 'SCHEDULED') {
+      return refuse('NOT_SCHEDULED', `This payment is no longer scheduled (it is ${inv.state}). Nothing was sent.`);
+    }
+    const treasurer = this.deps.treasurer;
+    if (!treasurer.executeNow) {
+      return refuse('SCHEDULING_UNAVAILABLE', 'Scheduled payments are not available. Nothing was sent.');
+    }
+    this.transition(inv.id, 'EXECUTING');
+    return this.execute(inv.id, inv.plan, inv.confirmation, (p, c, e) =>
+      (treasurer.executeNow as ExecuteNowFn).call(treasurer, p, c, e),
+    );
+  }
+
+  private async runExecution(
+    id: string,
+    plan: PaymentPlan,
+    confirmation: Confirmation,
+    run: ExecuteNowFn,
+  ): Promise<ExecutionResult> {
     this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'start' });
     let result: ExecutionResult;
     try {
-      result = await this.deps.treasurer.execute(plan, confirmation, this.emit);
+      result = await run(plan, confirmation, this.emit);
     } catch (err) {
       result = { planId: plan.planId, status: 'failed', error: { code: 'EXECUTION_ERROR', message: messageOf(err) } };
     }
@@ -409,23 +473,31 @@ export class Orchestrator {
         error: result.error,
       };
     }
+    if (result.status === 'scheduled') {
+      try {
+        if (!this.deps.schedule || plan.executeAt === 'now') throw new Error('Scheduled payments are not available.');
+        await this.deps.schedule({ planId: plan.planId, invoiceId: id, runAt: plan.executeAt });
+      } catch (err) {
+        result = { planId: plan.planId, status: 'failed', error: { code: 'SCHEDULE_FAILED', message: messageOf(err) } };
+      }
+    }
     this.store.update(id, { result });
     if (result.transferId) this.store.linkTransfer(result.transferId, id);
     // Something else (e.g. a wallet sync) already settled it while we waited.
-    if (this.mustGet(id).state !== 'EXECUTING') return;
+    if (this.mustGet(id).state !== 'EXECUTING') return result;
     switch (result.status) {
       case 'settled':
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
         this.transition(id, 'PAID');
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'done', status: 'end' });
-        return;
+        return result;
       case 'scheduled':
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
         this.transition(id, 'SCHEDULED');
-        return;
+        return result;
       case 'failed':
         this.fail(id, result.error?.code ?? 'PAYMENT_FAILED', result.error?.message ?? 'The payment failed.');
-        return;
+        return result;
       case 'submitted':
         // Sent (or maybe sent, after a timeout) but not settled yet: stay EXECUTING; the wallet sync settles it.
         this.emit({
@@ -438,7 +510,7 @@ export class Orchestrator {
             ? 'The payment was submitted but the wallet did not answer in time. It will not be sent again; the next wallet sync will show whether it went through.'
             : 'The payment was sent and is waiting for confirmation on chain.',
         });
-        return;
+        return result;
     }
   }
 
