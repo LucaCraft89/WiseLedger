@@ -1,6 +1,7 @@
 // Pure helpers for the wallet screens: labels, transfers, scheduled payments, chat and the fiscal report.
 import type { ApiClient } from '../api/client.js';
 import type { ChatResponse, FiscalQuery, Job, TransferDto } from '../api/contracts.js';
+import { TOOL_WORDS } from './live.js';
 
 // ---------- labels ----------
 
@@ -62,8 +63,8 @@ export function labelEditReducer(s: LabelEditState, a: LabelEditAction): LabelEd
 export const DIRECTION_WORDS: Record<TransferDto['direction'], string> = { in: 'Received', out: 'Sent' };
 
 export const TRANSFER_STATUS_WORDS: Record<TransferDto['status'], string> = {
-  WaitingCounterparty: 'Waiting for the other side',
-  WaitingConfirmations: 'Waiting for the network',
+  WaitingCounterparty: 'Waiting for the other wallet',
+  WaitingConfirmations: 'Waiting for a block confirmation',
   Settled: 'Completed',
   Failed: 'Failed',
 };
@@ -118,8 +119,9 @@ export const scheduledSentence = (iso: string): string => `Scheduled for ${forma
 export type ToolCall = ChatResponse['toolCalls'][number];
 export type NeedsConfirmation = NonNullable<ChatResponse['needsConfirmation']>;
 
-/** Small chip text for a tool call: "get_balance ✓" or "get_balance ✗". */
-export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string => `${c.name} ${c.ok ? '✓' : '✗'}`;
+/** Small chip text for a tool call in plain words: "Checking the balance ✓" or "… ✗ failed". */
+export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string =>
+  `${TOOL_WORDS[c.name] ?? c.name} ${c.ok ? '✓' : '✗ failed'}`;
 
 /** executeAt of the schedule_payment call that asked for the confirmation (last one wins). */
 export function scheduleExecuteAt(calls: readonly ToolCall[]): string | undefined {

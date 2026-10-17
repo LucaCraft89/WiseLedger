@@ -14,7 +14,7 @@ import {
   showsProgress,
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
-import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallLine } from './lib/live.js';
+import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallParts } from './lib/live.js';
 import { FailureCard, ResultCard } from './PaymentCards.js';
 import { ReportView } from './ReportView.js';
 import { errorText, useToast } from './ui.js';
@@ -120,8 +120,19 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       {toolCalls.length > 0 && (
         <div data-testid="tool-calls">
           <h3>What the Treasurer did</h3>
-          <ul style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.9em' }}>
-            {toolCalls.map((e) => (e.type === 'toolCall' ? <li key={eventKey(e)}>{toolCallLine(e)}</li> : null))}
+          <ul style={{ overflowWrap: 'anywhere' }}>
+            {toolCalls.map((e) => {
+              if (e.type !== 'toolCall') return null;
+              const p = toolCallParts(e);
+              return (
+                <li key={eventKey(e)}>
+                  {p.text}{' '}
+                  <small>
+                    (tool: <code>{p.tech}</code>)
+                  </small>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
