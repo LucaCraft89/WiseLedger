@@ -421,7 +421,9 @@ export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
       ...(ex?.issuer.name ? { supplier: ex.issuer.name } : {}),
       ...(ex?.total ? { total: ex.total } : {}),
       ...(ex?.currency ? { currency: ex.currency } : {}),
-      ...(pp && inv.report?.verdict !== 'block' ? { payment: { amount: pp.amount, assetId: pp.assetId } } : {}),
+      ...(pp && inv.report?.verdict !== 'block'
+        ? { payment: { amount: pp.amount, assetId: pp.assetId, rgbInvoice: pp.rgbInvoice } }
+        : {}),
     };
   });
 }

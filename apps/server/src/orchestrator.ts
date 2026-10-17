@@ -589,7 +589,13 @@ export class Orchestrator {
       this.emitTransferChange(id, t);
       if (t.status === 'Settled') {
         this.store.update(id, {
-          result: { planId: inv.plan.planId, status: 'settled', transferId, ...(t.txid ? { txid: t.txid } : {}) },
+          result: {
+            planId: inv.plan.planId,
+            status: 'settled',
+            transferId,
+            ...(t.txid ? { txid: t.txid } : {}),
+            ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
+          },
         });
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
         this.transition(id, 'PAID');
@@ -630,6 +636,7 @@ export class Orchestrator {
       transferId: t.transferId,
       status: t.status,
       ...(t.txid ? { txid: t.txid } : {}),
+      ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
     });
   }
 
@@ -649,6 +656,7 @@ export class Orchestrator {
         transferId: t.transferId,
         status: t.status,
         ...(t.txid ? { txid: t.txid } : {}),
+        ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
       });
     }
   }
