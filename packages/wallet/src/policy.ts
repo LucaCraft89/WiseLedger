@@ -53,9 +53,7 @@ export function buildSpendPolicy(limits: SpendLimits, spentLast24h?: SpentLast24
               reason: 'This payment would go over your daily spending limit.',
               operation: 'transfer',
               action: 'DENY' as const,
-              conditions: [
-                (ctx: Ctx) => spentLast24h(first(ctx).token ?? '') + (first(ctx).amount ?? 0) > daily,
-              ],
+              conditions: [(ctx: Ctx) => spentLast24h(first(ctx).token ?? '') + (first(ctx).amount ?? 0) > daily],
             },
           ]
         : []),

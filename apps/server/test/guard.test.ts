@@ -188,6 +188,35 @@ describe('SubmitTimeout', () => {
     store.close();
   });
 
+  it('after a crash mid-follow: links a send that carries no invoice string by its recipient ID, then PAID', async () => {
+    const store = new InvoiceStore(':memory:');
+    const wallet = new MockWallet({ stepMs: 0 });
+    await wallet.init();
+    const guard = new LiveGuard({ store: new SqliteGuardStore(store), wallet, config: loadConfig({}) });
+    const treasurer = new GuardedMockTreasurer(new MockTreasurer(wallet, { pollMs: 10 }), guard);
+    const orch = new Orchestrator({
+      store,
+      analyzer: new MockAnalyzer({ amount: MOCK_TIMEOUT_AMOUNT, stageDelayMs: 0 }),
+      treasurer,
+      wallet,
+      uploadDir: dir,
+    });
+    const inv = await orch.createInvoice({ filename: 'crash.txt', data: Buffer.from('Invoice, 13.14 TUSDT') });
+    await orch.idle();
+    await orch.confirm(inv.id, { planId: store.get(inv.id)?.plan?.planId as string });
+    await orch.idle();
+    expect(store.get(inv.id)?.result?.transferId).toBeUndefined();
+    // rgb-lib style: outgoing transfers have a recipient ID but no invoice string.
+    const real = wallet.listTransfers.bind(wallet);
+    wallet.listTransfers = async (a?: string) => (await real(a)).map(({ rgbInvoice: _drop, ...t }) => t);
+    // the link may already exist from a transfer event seen before the crash
+    const [sent] = (await wallet.listTransfers()).filter((t) => t.direction === 'outgoing');
+    store.linkTransfer(sent?.transferId as string, inv.id);
+    expect(await orch.settleFromTransfers()).toMatchObject({ paid: [inv.id], linked: [inv.id] });
+    expect(store.get(inv.id)?.state).toBe('PAID');
+    store.close();
+  });
+
   it('a transfer that fails on chain moves the invoice to FAILED', async () => {
     const store = new InvoiceStore(':memory:');
     const wallet = new MockWallet({ stepMs: 0 });

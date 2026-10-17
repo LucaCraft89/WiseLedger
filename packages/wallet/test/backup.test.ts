@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import WDK from '@tetherto/wdk';
 import { describe, expect, it } from 'vitest';
-import { backupWallet, restoreWallet } from '../src/backup.js';
 import { WdkRgbWallet } from '../src/backend/wdk-rgb.js';
+import { backupWallet, restoreWallet } from '../src/backup.js';
 import { walletConfigFromEnv } from '../src/config.js';
 
 const root = path.resolve(import.meta.dirname, '../../..');
@@ -61,9 +61,19 @@ describe.skipIf(process.env.LIVE_WALLET !== '1')('backup → restore round trip 
     const mnemonic = fs.readFileSync(path.join(root, '.data/regtest/wallet/mnemonic'), 'utf8');
     const target = path.join(tmp(), 'restored');
     await expect(
-      restoreWallet({ cfg: cfgFor(path.join(tmp(), 'bad')), mnemonic, backupFile: file, passphrase: 'wrong passphrase' }),
+      restoreWallet({
+        cfg: cfgFor(path.join(tmp(), 'bad')),
+        mnemonic,
+        backupFile: file,
+        passphrase: 'wrong passphrase',
+      }),
     ).rejects.toThrow();
-    const restored = await restoreWallet({ cfg: cfgFor(target), mnemonic, backupFile: file, passphrase: 'correct horse battery' });
+    const restored = await restoreWallet({
+      cfg: cfgFor(target),
+      mnemonic,
+      backupFile: file,
+      passphrase: 'correct horse battery',
+    });
     await restored.init();
     await restored.sync();
     const after = await restored.listAssets();

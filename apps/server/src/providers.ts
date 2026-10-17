@@ -98,7 +98,9 @@ export class LiveGuard implements PaymentGuard {
     private readonly deps: {
       store: GuardStore;
       wallet: WalletPort;
-      config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork' | 'assetAllowlist' | 'paymentCap'>;
+      config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork' | 'assetAllowlist' | 'paymentCap'> & {
+        dailyCap?: string;
+      };
     },
   ) {}
 
@@ -112,7 +114,15 @@ export class LiveGuard implements PaymentGuard {
         // Could not read the assets: the cap still applies and the balance check fails closed.
       }
     }
-    return new WalletGuard({ store, wallet, limits: { paymentCap: config.paymentCap, assetAllowlist } });
+    return new WalletGuard({
+      store,
+      wallet,
+      limits: {
+        paymentCap: config.paymentCap,
+        assetAllowlist,
+        ...(config.dailyCap ? { dailyCap: config.dailyCap } : {}),
+      },
+    });
   }
 
   async check(planId: string): Promise<GuardResult<PaymentPlan>> {
