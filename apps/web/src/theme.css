@@ -183,3 +183,19 @@
     right: 16px;
   }
 }
+
+/* Blinking caret after the Treasurer's reply while it is still being written. */
+.wl-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: wl-blink 1s steps(2, start) infinite;
+}
+@keyframes wl-blink {
+  to {
+    visibility: hidden;
+  }
+}

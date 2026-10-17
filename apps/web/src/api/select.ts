@@ -8,14 +8,28 @@ function fakeOnboarding(): OnboardingState | undefined {
   return v === 'needs_setup' || v === 'locked' ? v : undefined;
 }
 
-/** VITE_FAKE_API=1 → in-browser fake. Otherwise the real server, falling back to the fake if /api/health fails. */
-export async function selectClient(): Promise<ApiClient> {
-  if (import.meta.env.VITE_FAKE_API === '1') return createFakeClient({ onboarding: fakeOnboarding() });
+/** The in-browser demo backend: only when asked for (VITE_FAKE_API=1 or the "demo without a server" button). */
+export const demoClient = (): ApiClient => createFakeClient({ onboarding: fakeOnboarding() });
+export const demoRequested = (): boolean => import.meta.env.VITE_FAKE_API === '1';
+
+/**
+ * The real server, retried until it answers: never a silent switch to the demo backend, which would look normal
+ * while nothing is real. `onWaiting(attempt)` lets the screen say "Server not reachable, retrying…".
+ */
+export async function connectServer(
+  onWaiting: (attempt: number) => void,
+  opts: { signal?: AbortSignal; delayMs?: (attempt: number) => number } = {},
+): Promise<ApiClient> {
   const http = createHttpClient();
-  try {
-    await http.health();
-    return http;
-  } catch {
-    return createFakeClient({ onboarding: fakeOnboarding() });
+  const delay = opts.delayMs ?? ((n: number) => Math.min(1000 * n, 5000));
+  for (let attempt = 1; ; attempt++) {
+    if (opts.signal?.aborted) throw new Error('aborted');
+    try {
+      await http.health();
+      return http;
+    } catch {
+      onWaiting(attempt);
+      await new Promise((r) => setTimeout(r, delay(attempt)));
+    }
   }
 }

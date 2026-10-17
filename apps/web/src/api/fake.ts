@@ -520,6 +520,15 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       return labels.set(transferId, clean);
     },
     chat: (req) => fakeChat(req.message),
+    async chatStream(req, hooks) {
+      const reply = await fakeChat(req.message);
+      // Demo backend only: replay the canned reply word by word so the live typing can be seen without a model.
+      for (const piece of reply.text.match(/\S+\s*/g) ?? []) {
+        hooks.onToken(piece);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return reply;
+    },
     async transcribe(audio) {
       if (!audio.size) {
         throw new ApiCallError('AUDIO_EMPTY', 'We did not hear anything. Hold the button and speak, then try again.');

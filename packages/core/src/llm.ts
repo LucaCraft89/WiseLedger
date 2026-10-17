@@ -137,5 +137,11 @@ export interface AgentChatTurn {
 export interface TreasurerAgent {
   /** Executes a human-confirmed plan (through A's PaymentGuard). Never sees invoice text. */
   execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult>;
-  chat(message: string, history: AgentChatTurn[], emit: EmitFn): Promise<AgentReply>;
+  chat(message: string, history: AgentChatTurn[], emit: EmitFn, stream?: ChatStreamHooks): Promise<AgentReply>;
+}
+
+/** Live text of a chat reply (POST /api/agent/chat/stream). Tokens of one model turn; `reset` when a new turn starts. */
+export interface ChatStreamHooks {
+  onToken(text: string): void;
+  onReset?(): void;
 }

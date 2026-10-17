@@ -196,6 +196,16 @@ export const ChatResponse = z.object({
     .optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
+
+/** One line of the chat stream (newline-delimited JSON). */
+export const ChatStreamLine = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('token'), text: z.string() }),
+  /** The model starts a new turn (after a tool call): drop the live text shown so far. */
+  z.object({ t: z.literal('reset') }),
+  z.object({ t: z.literal('reply'), reply: ChatResponse }),
+  z.object({ t: z.literal('error'), code: z.string(), message: z.string() }),
+]);
+export type ChatStreamLine = z.infer<typeof ChatStreamLine>;
 // ChatResponse and AgentReply must stay the same shape.
 const _chatShape: (r: AgentReply) => ChatResponse = (r) => r;
 void _chatShape;
@@ -349,6 +359,8 @@ export const API_ROUTES = {
   walletLightning: 'GET /api/wallet/lightning',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */
+  agentChatStream: 'POST /api/agent/chat/stream',
   agentTranscribe: 'POST /api/agent/transcribe',
   scheduleList: 'GET /api/schedule',
   scheduleCancel: 'POST /api/schedule/:jobId/cancel',

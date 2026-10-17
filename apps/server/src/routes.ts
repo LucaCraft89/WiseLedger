@@ -7,6 +7,7 @@ import {
   type AppEvent,
   ChatRequest,
   type ChatResponse,
+  type ChatStreamLine,
   ConfirmRequest,
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
@@ -378,6 +379,37 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const body = ChatRequest.parse(req.body);
     const emit = (event: AppEvent) => store.appendEvent(event);
     return treasurer.chat(body.message, body.history ?? [], emit);
+  });
+
+  // The same chat, streamed: one JSON line per event (reply text as the model writes it, then the full reply).
+  // Tokens go only to this response, never into the event store.
+  route(app, API_ROUTES.agentChatStream, async (req, reply) => {
+    const body = ChatRequest.parse(req.body);
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-cache',
+      'x-accel-buffering': 'no',
+    });
+    const line = (l: ChatStreamLine) => {
+      if (!res.writableEnded) res.write(`${JSON.stringify(l)}\n`);
+    };
+    try {
+      const out = await treasurer.chat(body.message, body.history ?? [], (e) => store.appendEvent(e), {
+        onToken: (text) => line({ t: 'token', text }),
+        onReset: () => line({ t: 'reset' }),
+      });
+      line({ t: 'reply', reply: out });
+    } catch (err) {
+      line({
+        t: 'error',
+        code: 'CHAT_FAILED',
+        message: err instanceof Error ? err.message : 'The Treasurer did not answer. Try again in a minute.',
+      });
+    } finally {
+      res.end();
+    }
   });
 
   route(app, M3_ROUTES.scheduleList, async (req): Promise<ScheduleListResponse> => {

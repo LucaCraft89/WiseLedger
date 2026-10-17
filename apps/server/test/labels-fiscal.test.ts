@@ -359,6 +359,18 @@ describe('M3 routes', () => {
     expect((await inject('POST', '/api/agent/chat', { message: '' })).statusCode).toBe(400);
   });
 
+  it('agent chat stream: NDJSON lines ending with the reply; 400 before streaming on a bad body', async () => {
+    const res = await inject('POST', '/api/agent/chat/stream', { message: 'What is my balance?' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('application/x-ndjson');
+    const lines = res.body.trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines.at(-1);
+    expect(last.t).toBe('reply');
+    expect(typeof last.reply.text).toBe('string');
+    expect(lines.slice(0, -1).every((l: { t: string }) => l.t === 'token' || l.t === 'reset')).toBe(true);
+    expect((await inject('POST', '/api/agent/chat/stream', { message: '' })).statusCode).toBe(400);
+  });
+
   it('chatInvoices() gives structured fields only, with the payment when payable', async () => {
     const id = await payInvoice();
     const inv = chatInvoices(built.store).find((x) => x.invoiceId === id);
