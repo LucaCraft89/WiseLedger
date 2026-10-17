@@ -147,3 +147,67 @@ export function Qr({ value, size = 200, alt }: { value: string; size?: number; a
   if (!src) return <div style={{ width: size, height: size, background: '#f1f3f5' }} />;
   return <img src={src} width={size} height={size} alt={alt} style={{ imageRendering: 'pixelated' }} />;
 }
+
+/** Small "loading" line used by every list. */
+export function Loading({ text = 'Loading…' }: { text?: string }) {
+  return (
+    <p role="status" style={{ color: '#555' }}>
+      {text}
+    </p>
+  );
+}
+
+/** Plain empty state for a list. */
+export function Empty({ text }: { text: string }) {
+  return <p style={{ color: '#555', fontStyle: 'italic' }}>{text}</p>;
+}
+
+/** Error message in plain words with an optional "Try again" button. */
+export function ErrorBox({ error, retry }: { error: unknown; retry?: () => void }) {
+  return (
+    <div role="alert" style={{ background: '#f8d7da', padding: '8px 12px', borderRadius: 6, marginBottom: 12 }}>
+      <span>{typeof error === 'string' ? error : errorText(error)}</span>{' '}
+      {retry && (
+        <button type="button" onClick={retry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Loads data on mount and on `reload()`, tracking loading and error. `load` must be stable (useCallback). */
+export function useLoad<T>(load: () => Promise<T>): {
+  data: T | null;
+  error: unknown;
+  loading: boolean;
+  reload: () => void;
+} {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    void tick;
+    let live = true;
+    setLoading(true);
+    setError(null);
+    load().then(
+      (d) => {
+        if (!live) return;
+        setData(d);
+        setLoading(false);
+      },
+      (err: unknown) => {
+        if (!live) return;
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [load, tick]);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+  return { data, error, loading, reload };
+}
