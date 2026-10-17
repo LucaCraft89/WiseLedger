@@ -29,11 +29,32 @@ export class MockTreasurer implements TreasurerAgent {
     const args = { planId: plan.planId };
 
     if (confirmation.planId !== plan.planId) {
-      emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'rejected', message: 'Confirmation does not match the plan.' });
-      return { planId: plan.planId, status: 'failed', error: 'Confirmation does not match the plan.' };
+      emit({
+        type: 'toolCall',
+        invoiceId,
+        at: at(),
+        agent: 'treasurer',
+        name: 'execute_plan',
+        args,
+        status: 'rejected',
+        message: 'Confirmation does not match the plan.',
+      });
+      return {
+        planId: plan.planId,
+        status: 'failed',
+        error: { code: 'ConfirmationMismatch', message: 'Confirmation does not match the plan.' },
+      };
     }
     if (plan.executeAt !== 'now') {
-      emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'schedule_payment', args: { ...args, executeAt: plan.executeAt }, status: 'ok' });
+      emit({
+        type: 'toolCall',
+        invoiceId,
+        at: at(),
+        agent: 'treasurer',
+        name: 'schedule_payment',
+        args: { ...args, executeAt: plan.executeAt },
+        status: 'ok',
+      });
       return { planId: plan.planId, status: 'scheduled' };
     }
 
@@ -46,8 +67,18 @@ export class MockTreasurer implements TreasurerAgent {
       txid = sent.txid;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'error', message });
-      return { planId: plan.planId, status: 'failed', error: message };
+      emit({
+        type: 'toolCall',
+        invoiceId,
+        at: at(),
+        agent: 'treasurer',
+        name: 'execute_plan',
+        args,
+        status: 'error',
+        message,
+      });
+      const code = err instanceof Error ? ((err as { code?: string }).code ?? err.name) : 'Error';
+      return { planId: plan.planId, status: 'failed', error: { code, message } };
     }
     emit({ type: 'toolCall', invoiceId, at: at(), agent: 'treasurer', name: 'execute_plan', args, status: 'ok' });
     emit({ type: 'transfer', invoiceId, at: at(), transferId, status: 'WaitingCounterparty', txid });
@@ -59,6 +90,7 @@ export class MockTreasurer implements TreasurerAgent {
     while (Date.now() < deadline) {
       await sleep(this.opts.pollMs ?? 250);
       const t = await this.wallet.getTransfer(transferId);
+      if (!t) continue;
       txid = t.txid ?? txid;
       if (t.status !== last) {
         last = t.status;
@@ -67,7 +99,14 @@ export class MockTreasurer implements TreasurerAgent {
       if (TERMINAL.includes(last)) break;
     }
     if (last === 'Settled') return { planId: plan.planId, status: 'settled', transferId, txid };
-    if (last === 'Failed') return { planId: plan.planId, status: 'failed', transferId, txid, error: 'The transfer failed.' };
+    if (last === 'Failed')
+      return {
+        planId: plan.planId,
+        status: 'failed',
+        transferId,
+        txid,
+        error: { code: 'TransferFailed', message: 'The transfer failed.' },
+      };
     return { planId: plan.planId, status: 'submitted', transferId, txid };
   }
 

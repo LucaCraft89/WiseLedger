@@ -63,12 +63,12 @@ export const PaymentRequestSchema = z.object({
 });
 export type PaymentRequest = z.infer<typeof PaymentRequestSchema>;
 
-export const ReceiveRequestSchema = z.object({
+export const CreateReceiveRequestSchema = z.object({
   assetId: z.string().optional(),
   amount: AmountSchema.optional(),
   expirySec: z.number().int().positive(),
 });
-export type ReceiveRequest = z.infer<typeof ReceiveRequestSchema>;
+export type CreateReceiveRequest = z.infer<typeof CreateReceiveRequestSchema>;
 
 export const ReceiveInvoiceSchema = z.object({
   rgbInvoice: z.string(),
@@ -113,7 +113,7 @@ export interface WalletPort {
   /** Creates colorable UTXOs when fewer than needed are free; returns how many were created. */
   createUtxosIfNeeded(): Promise<{ created: number }>;
   issueAssetNia(req: IssueNiaRequest): Promise<AssetInfo>;
-  createReceiveInvoice(req: ReceiveRequest): Promise<ReceiveInvoice>;
+  createReceiveInvoice(req: CreateReceiveRequest): Promise<ReceiveInvoice>;
   /** Throws InvalidInvoice. Does not check expiry (pay() does). */
   decodeInvoice(rgbInvoice: string): Promise<DecodedInvoice>;
   quotePay(req: PaymentRequest): Promise<QuoteResult>;

@@ -3,6 +3,7 @@
 import {
   type AssetBalance,
   type AssetInfo,
+  type CreateReceiveRequest,
   type DecodedInvoice,
   InsufficientFunds,
   InvalidInvoice,
@@ -12,7 +13,6 @@ import {
   type PayResult,
   type QuoteResult,
   type ReceiveInvoice,
-  type ReceiveRequest,
   SubmitTimeout,
   TransferFailed,
   type TransferInfo,
@@ -116,7 +116,7 @@ export class MockWallet implements WalletPort {
     return { ...info, balance: this.balanceOf(assetId) };
   }
 
-  async createReceiveInvoice(req: ReceiveRequest): Promise<ReceiveInvoice> {
+  async createReceiveInvoice(req: CreateReceiveRequest): Promise<ReceiveInvoice> {
     const expiry = Math.floor(this.now() / 1000) + req.expirySec;
     const rgbInvoice = mockInvoice(req.assetId, req.amount, expiry);
     return {
