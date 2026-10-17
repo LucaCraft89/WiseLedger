@@ -4,7 +4,7 @@ import { extractInvoice, normalizeDecimal, toExtraction } from '../src/analyst/e
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { EXPECTED, perfectAnswer, sourceOf } from './fixtures.js';
+import { EXPECTED, type ExpectedFixture, perfectAnswer, sourceOf } from './fixtures.js';
 
 describe('extract: input loading', () => {
   it('reads text and the PDF text layer, and passes images by path', async () => {
@@ -37,7 +37,7 @@ describe('extract: call 1 with MockLlm', () => {
   }
 
   it('repairs an invalid answer, then gives up after 2 retries', async () => {
-    const f = EXPECTED[0]!;
+    const f = EXPECTED[0] as ExpectedFixture;
     const ok = new MockLlm({ replies: [{ json: { nope: true } }, { json: perfectAnswer(f) }] });
     const r = await extractInvoice(await loadInvoice(sourceOf(f)), ok);
     expect(r.attempts).toBe(2);
@@ -49,7 +49,7 @@ describe('extract: call 1 with MockLlm', () => {
 });
 
 describe('extract: deterministic clean-up', () => {
-  const base = perfectAnswer(EXPECTED[0]!);
+  const base = perfectAnswer(EXPECTED[0] as ExpectedFixture);
   it('normalizes decimals', () => {
     expect(normalizeDecimal('1.250,00 €')).toBe('1250.00');
     expect(normalizeDecimal('1,250.00')).toBe('1250.00');
