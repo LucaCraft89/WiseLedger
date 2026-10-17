@@ -21,6 +21,8 @@ import {
   type PaymentPlan,
   type RejectRequest,
   type RejectResponse,
+  type TransferInfo,
+  type TransferStatus,
   type TreasurerAgent,
   type WalletPort,
 } from 'core';
@@ -60,6 +62,16 @@ export interface RecoveryReport {
   awaitingSync: string[];
 }
 
+/** What settleFromTransfers() did (invoice IDs). */
+export interface SettleReport {
+  paid: string[];
+  failed: string[];
+  /** Timed-out payments linked to the outgoing transfer found for their rgbInvoice. */
+  linked: string[];
+  /** Still waiting for the chain (or for the transfer to appear). */
+  pending: string[];
+}
+
 type Log = Pick<FastifyBaseLogger, 'info' | 'warn'>;
 
 export interface NewUpload {
@@ -96,6 +108,11 @@ export class Orchestrator {
   private readonly tasks = new Set<Promise<void>>();
   /** Invoices found mid-payment at startup; cleared when they leave EXECUTING. */
   private readonly interrupted = new Set<string>();
+  /** Invoices whose treasurer.execute() is still running: settleFromTransfers() leaves them alone. */
+  private readonly executing = new Set<string>();
+  /** Last status seen per transfer not linked to an invoice (null until the first settle pass). */
+  private knownTransfers: Map<string, TransferStatus> | null = null;
+  private settling: Promise<SettleReport> | null = null;
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.store = deps.store;
@@ -365,6 +382,15 @@ export class Orchestrator {
   }
 
   private async execute(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
+    this.executing.add(id);
+    try {
+      await this.runExecution(id, plan, confirmation);
+    } finally {
+      this.executing.delete(id);
+    }
+  }
+
+  private async runExecution(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
     this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'start' });
     let result: ExecutionResult;
     try {
@@ -372,8 +398,20 @@ export class Orchestrator {
     } catch (err) {
       result = { planId: plan.planId, status: 'failed', error: { code: 'EXECUTION_ERROR', message: messageOf(err) } };
     }
+    // A send timeout may be on chain: treat it as submitted (stay EXECUTING, never FAILED, never retried).
+    if (result.status === 'failed' && result.error?.code === 'SubmitTimeout') {
+      result = {
+        planId: result.planId,
+        status: 'submitted',
+        ...(result.transferId ? { transferId: result.transferId } : {}),
+        ...(result.txid ? { txid: result.txid } : {}),
+        error: result.error,
+      };
+    }
     this.store.update(id, { result });
     if (result.transferId) this.store.linkTransfer(result.transferId, id);
+    // Something else (e.g. a wallet sync) already settled it while we waited.
+    if (this.mustGet(id).state !== 'EXECUTING') return;
     switch (result.status) {
       case 'settled':
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
@@ -388,16 +426,134 @@ export class Orchestrator {
         this.fail(id, result.error?.code ?? 'PAYMENT_FAILED', result.error?.message ?? 'The payment failed.');
         return;
       case 'submitted':
-        // Sent but not settled yet: stay EXECUTING (never retry automatically).
+        // Sent (or maybe sent, after a timeout) but not settled yet: stay EXECUTING; the wallet sync settles it.
         this.emit({
           type: 'stage',
           invoiceId: id,
           at: this.at(),
           stage: 'executing',
           status: 'end',
-          message: 'The payment was sent and is waiting for confirmation on chain.',
+          message: result.error
+            ? 'The payment was submitted but the wallet did not answer in time. It will not be sent again; the next wallet sync will show whether it went through.'
+            : 'The payment was sent and is waiting for confirmation on chain.',
         });
         return;
+    }
+  }
+
+  /**
+   * Called after each wallet sync. EXECUTING invoices (not being executed right now) are settled from the wallet:
+   * the stored transferId (or, after a timeout without one, the outgoing transfer paying the plan's rgbInvoice) is
+   * read; Settled → PAID, Failed → FAILED. Emits `transfer` events on status changes (invoice-linked ones on the
+   * invoice stream, the others on the global stream) and `state` events through transition().
+   */
+  settleFromTransfers(): Promise<SettleReport> {
+    this.settling ??= this.settleOnce().finally(() => {
+      this.settling = null;
+    });
+    return this.settling;
+  }
+
+  private async settleOnce(): Promise<SettleReport> {
+    const out: SettleReport = { paid: [], failed: [], linked: [], pending: [] };
+    const transfers = await this.deps.wallet.listTransfers();
+    const byId = new Map(transfers.map((t) => [t.transferId, t]));
+
+    for (const inv of this.store.list({ states: ['EXECUTING'] })) {
+      const id = inv.id;
+      if (this.executing.has(id) || !inv.plan) continue;
+      let transferId = inv.result?.transferId;
+      if (!transferId) {
+        const match = transfers.find(
+          (t) =>
+            t.direction === 'outgoing' &&
+            t.rgbInvoice === inv.plan?.rgbInvoice &&
+            t.status !== 'Failed' &&
+            !this.store.invoiceForTransfer(t.transferId),
+        );
+        if (!match) {
+          out.pending.push(id);
+          continue;
+        }
+        transferId = match.transferId;
+        this.store.linkTransfer(transferId, id);
+        this.store.update(id, {
+          result: {
+            ...(inv.result ?? { planId: inv.plan.planId, status: 'submitted' }),
+            transferId,
+            ...(match.txid ? { txid: match.txid } : {}),
+          },
+        });
+        out.linked.push(id);
+      }
+      const t = byId.get(transferId) ?? (await this.deps.wallet.getTransfer(transferId));
+      if (!t) {
+        out.pending.push(id);
+        continue;
+      }
+      this.emitTransferChange(id, t);
+      if (t.status === 'Settled') {
+        this.store.update(id, {
+          result: { planId: inv.plan.planId, status: 'settled', transferId, ...(t.txid ? { txid: t.txid } : {}) },
+        });
+        this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
+        this.transition(id, 'PAID');
+        this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'done', status: 'end' });
+        out.paid.push(id);
+      } else if (t.status === 'Failed') {
+        this.store.update(id, {
+          result: {
+            planId: inv.plan.planId,
+            status: 'failed',
+            transferId,
+            ...(t.txid ? { txid: t.txid } : {}),
+            error: { code: 'TransferFailed', message: 'The transfer failed on chain.' },
+          },
+        });
+        this.fail(id, 'TransferFailed', 'The transfer failed. Nothing more will be sent for this invoice.');
+        out.failed.push(id);
+      } else {
+        out.pending.push(id);
+      }
+    }
+
+    this.emitUnlinkedTransferChanges(transfers);
+    return out;
+  }
+
+  /** Emits a `transfer` event on the invoice stream when the status differs from the last one emitted there. */
+  private emitTransferChange(invoiceId: string, t: TransferInfo): void {
+    const last = this.store
+      .eventsOf(invoiceId)
+      .filter((e) => e.type === 'transfer' && e.transferId === t.transferId)
+      .at(-1);
+    if (last?.type === 'transfer' && last.status === t.status) return;
+    this.emit({
+      type: 'transfer',
+      invoiceId,
+      at: this.at(),
+      transferId: t.transferId,
+      status: t.status,
+      ...(t.txid ? { txid: t.txid } : {}),
+    });
+  }
+
+  /** Global `transfer` events for transfers not linked to an invoice. The first pass only records the baseline. */
+  private emitUnlinkedTransferChanges(transfers: TransferInfo[]): void {
+    const first = this.knownTransfers === null;
+    const known = (this.knownTransfers ??= new Map());
+    for (const t of transfers) {
+      if (this.store.invoiceForTransfer(t.transferId)) continue;
+      const prev = known.get(t.transferId);
+      known.set(t.transferId, t.status);
+      if (first || prev === t.status) continue;
+      this.emit({
+        type: 'transfer',
+        at: this.at(),
+        transferId: t.transferId,
+        status: t.status,
+        ...(t.txid ? { txid: t.txid } : {}),
+      });
     }
   }
 

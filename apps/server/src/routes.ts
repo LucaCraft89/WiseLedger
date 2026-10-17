@@ -28,7 +28,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
-import { streamInvoiceEvents } from './sse.js';
+import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 import { checkUpload, tooLarge } from './uploads.js';
 
@@ -46,6 +46,9 @@ export interface RouteDeps {
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
 }
+
+/** Server-side route (not in core API_ROUTES yet). */
+export const GLOBAL_EVENTS_ROUTE = 'GET /api/events';
 
 export interface WalletSyncState {
   lastSyncAt: string | null;
@@ -243,7 +246,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
-      expirySec: (body.expiryMinutes ?? 60) * 60,
+      // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
+      expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
       ...(body.assetId ? { assetId: body.assetId } : {}),
       ...(body.amount ? { amount: body.amount } : {}),
     });
@@ -262,6 +266,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         .map((t) => toTransferDto(t, store.invoiceForTransfer(t.transferId)))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     };
+  });
+
+  // Global SSE stream: `transfer` status changes for transfers not linked to an invoice (invoice-linked ones go on
+  // /api/invoices/:id/events). Not in core API_ROUTES yet (core gap).
+  route(app, GLOBAL_EVENTS_ROUTE, async (req, reply) => {
+    streamGlobalEvents(store, req, reply);
   });
 
   route(app, API_ROUTES.agentChat, async (req): Promise<ChatResponse> => {

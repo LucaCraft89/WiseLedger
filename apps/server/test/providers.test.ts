@@ -5,6 +5,7 @@ import type { AssetInfo, InvoiceAnalyzer } from 'core';
 import { MockAnalyzer, MockLlm, MockTreasurer, MockWallet } from 'core/mocks';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { SqliteGuardStore } from '../src/guard-store.js';
 import { StoreHistory } from '../src/history.js';
 import { Orchestrator } from '../src/orchestrator.js';
 import { buildRuleConfig, createProviders, ruleNetworks } from '../src/providers.js';
@@ -23,7 +24,10 @@ const asset = (assetId: string, ticker = 'TUSDT'): AssetInfo => ({
 describe('provider factory', () => {
   it('mock path: core mocks, no sync loop, mock model info', async () => {
     const store = new InvoiceStore(':memory:');
-    const p = await createProviders(loadConfig({}), { history: new StoreHistory(store) });
+    const p = await createProviders(loadConfig({}), {
+      history: new StoreHistory(store),
+      guardStore: new SqliteGuardStore(store),
+    });
     expect(p.wallet).toBeInstanceOf(MockWallet);
     expect(p.analyzer).toBeInstanceOf(MockAnalyzer);
     expect(p.sync).toBeNull();
@@ -35,7 +39,10 @@ describe('provider factory', () => {
 
   it('mock path wraps the MockTreasurer', async () => {
     const store = new InvoiceStore(':memory:');
-    const p = await createProviders(loadConfig({}), { history: new StoreHistory(store) });
+    const p = await createProviders(loadConfig({}), {
+      history: new StoreHistory(store),
+      guardStore: new SqliteGuardStore(store),
+    });
     expect(p.treasurer).not.toBeInstanceOf(MockTreasurer);
     expect(typeof p.treasurer.execute).toBe('function');
     await p.close();
