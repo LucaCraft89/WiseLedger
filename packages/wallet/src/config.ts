@@ -11,7 +11,7 @@ export type RgbNetworkName = 'mutinynet' | 'regtest';
 export interface WalletConfig {
   backend: WalletBackendName;
   network: RgbNetworkName;
-  /** One wallet = one data dir = one process. The mnemonic lives in `<dataDir>/mnemonic` (0600). */
+  /** One wallet = one data dir = one process. The seed lives in `<dataDir>/mnemonic` (0600) or `mnemonic.enc` (locked). */
   dataDir: string;
   indexerUrl: string;
   transportEndpoint: string;
@@ -22,6 +22,15 @@ export interface WalletConfig {
   paymentCap: string;
   /** Asset IDs allowed for payments (ASSET_ALLOWLIST, comma-separated); empty = any. */
   assetAllowlist: string[];
+  /** Max base units per asset in a rolling 24 h (DAILY_CAP, default 5 × PAYMENT_CAP). */
+  dailyCap: string;
+  /**
+   * Hard limit on one send (WALLET_SEND_TIMEOUT_MS, default 120 s). After it the send counts as submitted
+   * (SubmitTimeout): never retried, the wallet syncs and the transfer it created is reported.
+   */
+  sendTimeoutMs?: number;
+  /** Unlocks an encrypted seed at start (WALLET_PASSPHRASE, optional; the UI can unlock instead). */
+  seedPassphrase?: string;
 }
 
 const DEFAULTS: Record<RgbNetworkName, Pick<WalletConfig, 'indexerUrl' | 'transportEndpoint' | 'explorerUrl'>> = {
@@ -60,10 +69,15 @@ export function walletConfigFromEnv(
   const paymentCap = (env.PAYMENT_CAP ?? '').trim() || '100000000';
   if (!/^[1-9]\d*$/.test(paymentCap))
     throw new Error(`PAYMENT_CAP=${paymentCap} must be base units (a positive integer).`);
+  const dailyCap = (env.DAILY_CAP ?? '').trim() || (BigInt(paymentCap) * 5n).toString();
+  if (!/^[1-9]\d*$/.test(dailyCap)) throw new Error(`DAILY_CAP=${dailyCap} must be base units (a positive integer).`);
   const assetAllowlist = (env.ASSET_ALLOWLIST ?? '')
     .split(',')
     .map((a) => a.trim())
     .filter(Boolean);
+  const sendTimeoutMs = Number(env.WALLET_SEND_TIMEOUT_MS ?? '120000');
+  if (!Number.isInteger(sendTimeoutMs) || sendTimeoutMs < 1000)
+    throw new Error(`WALLET_SEND_TIMEOUT_MS=${env.WALLET_SEND_TIMEOUT_MS} must be milliseconds ≥ 1000.`);
   const dataDirVar = opts.dataDirVar ?? 'WALLET_DATA_DIR';
   return {
     backend,
@@ -75,6 +89,9 @@ export function walletConfigFromEnv(
     feeRate,
     paymentCap,
     assetAllowlist,
+    dailyCap,
+    sendTimeoutMs,
+    ...(env.WALLET_PASSPHRASE ? { seedPassphrase: env.WALLET_PASSPHRASE } : {}),
   };
 }
 

@@ -30,8 +30,10 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
-import { loadOrCreateMnemonic } from '../seed.js';
+import { type ReadRetryOptions, withReadRetry } from '../retry.js';
+import { loadOrCreateMnemonic, readSeed } from '../seed.js';
 
 /** The rgb-sdk WalletManager methods we use (wdk-wallet-rgb 2.0.3 exposes some only there). */
 export interface RgbSdkWallet {
@@ -60,6 +62,7 @@ export interface RgbSdkWallet {
   listTransfers(assetId?: string): SdkTransfer[];
   refreshWallet(): void;
   syncWallet(): void;
+  createBackup(p: { backupPath: string; password: string }): { message: string; backupPath: string };
 }
 
 interface SdkBalance {
@@ -190,6 +193,18 @@ export function mapWalletError(e: unknown): WalletError {
   return new TransferFailed(msg, { cause: e });
 }
 
+/** Rejects with SubmitTimeout after `ms` (the send may be out: callers never retry it). */
+export function withSendTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SubmitTimeout(`The wallet did not answer within ${Math.round(ms / 1000)} s after sending.`)),
+      ms,
+    );
+  });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+}
+
 export class WdkRgbWallet implements WalletPort {
   private wdk: WDK | null = null;
   private account: RgbAccount | null = null;
@@ -201,13 +216,32 @@ export class WdkRgbWallet implements WalletPort {
   /** `deps.account` injects a fake WDK account in tests (no native code, no chain). */
   constructor(
     private readonly cfg: WalletConfig,
-    deps: { account?: RgbAccount } = {},
+    deps: { account?: RgbAccount; retry?: ReadRetryOptions } = {},
   ) {
+    this.passphrase = cfg.seedPassphrase;
+    this.retry = deps.retry ?? {};
     if (deps.account) {
       this.account = deps.account;
       this.sdk = deps.account.getRgbWallet() as RgbSdkWallet;
       this.registered = true;
     }
+  }
+
+  /** Backoff for network reads (sync/refresh); a test seam. */
+  private readonly retry: ReadRetryOptions;
+  /** Seed passphrase (wallet lock), from WALLET_PASSPHRASE or unlock(). */
+  private passphrase: string | undefined;
+
+  /** Unlocks an encrypted seed and opens the wallet (WalletLocked on a wrong passphrase). */
+  async unlock(passphrase: string): Promise<WalletInfo> {
+    readSeed(this.cfg.dataDir, passphrase);
+    this.passphrase = passphrase;
+    return this.init();
+  }
+
+  /** The configuration this wallet was opened with (scripts: restore drill). */
+  get config(): WalletConfig {
+    return this.cfg;
   }
 
   /** The rgb-sdk wallet, for scripts that need BTC-level calls. */
@@ -218,7 +252,8 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
-      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir);
+      lockWalletDir(this.cfg.dataDir);
+      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir, { passphrase: this.passphrase });
       this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
       const Manager = WalletManagerRgb as unknown as Parameters<WDK['registerWallet']>[1];
@@ -229,7 +264,7 @@ export class WdkRgbWallet implements WalletPort {
         transportEndpoint: this.cfg.transportEndpoint,
       } as never);
       // Spend limits live in WDK: every transfer passes the policy engine before signing.
-      this.wdk.registerPolicy([buildSpendPolicy(this.cfg)] as never);
+      this.wdk.registerPolicy([buildSpendPolicy(this.cfg, (assetId) => this.spentLast24h(assetId))] as never);
       this.account = (await this.wdk.getAccount('rgb', 0)) as unknown as RgbAccount;
       this.sdk = await this.account.getRgbWallet();
     }
@@ -244,7 +279,7 @@ export class WdkRgbWallet implements WalletPort {
     const marker = path.join(this.cfg.dataDir, 'seed-shown');
     const seedShown = fs.existsSync(marker);
     if (!opts.reveal || seedShown) return { walletCreated: this.created, seedShown };
-    const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+    const mnemonic = readSeed(this.cfg.dataDir, this.passphrase);
     fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
     return { walletCreated: this.created, seedShown: true, mnemonic };
   }
@@ -394,8 +429,13 @@ export class WdkRgbWallet implements WalletPort {
     await this.precheck(req);
     const before = new Set(this.rgb.listTransfers(req.assetId).map((t) => t.batchTransferIdx));
     let hash: string;
+    // The library call can hang after signing (seen on Mutinynet with a slow proxy): cap it. The call keeps running
+    // in the background; the transfer it created is found by the sync below and settled by the sync loop.
     const send = () =>
-      this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate });
+      withSendTimeout(
+        this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate }),
+        this.cfg.sendTimeoutMs ?? 120_000,
+      );
     try {
       try {
         ({ hash } = await send());
@@ -441,6 +481,7 @@ export class WdkRgbWallet implements WalletPort {
           status: toStatus(t.status),
           ...(t.txid ? { txid: t.txid } : {}),
           ...(t.invoiceString ? { rgbInvoice: t.invoiceString } : {}),
+          ...(t.recipientId ? { recipientId: t.recipientId } : {}),
           createdAt: iso(t.createdAt),
           updatedAt: iso(t.updatedAt),
         });
@@ -449,19 +490,26 @@ export class WdkRgbWallet implements WalletPort {
     return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  /** Refreshes pending transfers (exchanges consignments with the proxy) and syncs with the indexer. */
+  /**
+   * Refreshes pending transfers (exchanges consignments with the proxy) and syncs with the indexer. Both are reads:
+   * a flaky indexer/proxy is retried with backoff, then NetworkUnavailable. A refresh failure still lets the sync run.
+   */
   async sync(): Promise<void> {
+    let refreshError: unknown;
     try {
-      this.rgb.refreshWallet();
-    } finally {
-      this.rgb.syncWallet();
+      await withReadRetry(() => this.rgb.refreshWallet(), this.retry);
+    } catch (e) {
+      refreshError = e;
     }
+    await withReadRetry(() => this.rgb.syncWallet(), this.retry);
+    if (refreshError) throw refreshError;
   }
 
   /** Never call the library dispose(): it throws "Invalid checksum" in 2.0.3. */
   close(): void {
     this.account = null;
     this.wdk = null;
+    unlockWalletDir(this.cfg.dataDir);
   }
 
   private acct(): RgbAccount {
@@ -477,6 +525,17 @@ export class WdkRgbWallet implements WalletPort {
     const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
     if (!client?.wallet) throw new TransferFailed('This wallet cannot create an open-amount invoice; set an amount.');
     return client.wallet.blindReceive(assetId ?? null, '"Any"', String(expirySec), [client.transportEndpoint], '1');
+  }
+
+  /** Sent (not failed) base units of an asset in the last 24 h, from rgb-lib's transfer list. */
+  spentLast24h(assetId: string): number {
+    const since = Date.now() / 1000 - 86_400;
+    let sum = 0;
+    for (const t of this.rgb.listTransfers(assetId)) {
+      if (toDirection(t.kind) !== 'outgoing' || toStatus(t.status) === 'Failed' || t.createdAt < since) continue;
+      sum += Number(transferAmount(t));
+    }
+    return sum;
   }
 
   private newOutgoing(assetId: string, before: Set<number>): SdkTransfer | undefined {

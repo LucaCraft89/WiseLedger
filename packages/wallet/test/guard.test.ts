@@ -1,7 +1,7 @@
-import { makePlan, type PaymentPlan } from 'core';
+import { makePlan, NetworkUnavailable, type PaymentPlan, PolicyDenied, SubmitTimeout } from 'core';
 import { MOCK_ASSET_ID, MOCK_FAIL_AMOUNT, MOCK_TIMEOUT_AMOUNT, MockWallet, mockInvoice } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
-import { executeGuarded, MemoryGuardStore, WalletGuard } from '../src/guard.js';
+import { executeGuarded, MemoryGuardStore, RETRY_SAFE, WalletGuard } from '../src/guard.js';
 import { walletTools } from '../src/tools.js';
 
 const far = Math.floor(Date.parse('2100-01-01T00:00:00Z') / 1000);
@@ -90,6 +90,17 @@ describe('PaymentGuard', () => {
     });
   });
 
+  it('refuses a plan that would go over the daily limit (already sent today counts)', async () => {
+    const s = await setup({ amount: '60000000' });
+    await s.wallet.pay({
+      rgbInvoice: mockInvoice(undefined, undefined, far),
+      assetId: MOCK_ASSET_ID,
+      amount: '100000000',
+    });
+    const daily = new WalletGuard({ store: s.store, wallet: s.wallet, limits: { ...limits, dailyCap: '150000000' } });
+    expect(await daily.check(s.plan.planId)).toMatchObject({ ok: false, reason: 'over_cap' });
+  });
+
   it('after a send timeout: no retry, result submitted with the transfer, plan stays claimed', async () => {
     const s = await setup({ amount: MOCK_TIMEOUT_AMOUNT });
     const r = await s.run();
@@ -108,6 +119,85 @@ describe('PaymentGuard', () => {
     const failed = await setup({ amount: MOCK_FAIL_AMOUNT });
     expect(await failed.run()).toMatchObject({ status: 'failed', error: { code: 'TransferFailed' } });
     expect(await failed.guard.check(failed.plan.planId)).toMatchObject({ ok: false, reason: 'already_executed' });
+  });
+});
+
+describe('PaymentGuard edge cases (M3.S2)', () => {
+  it('double click: two executions at the same moment send exactly once', async () => {
+    const s = await setup();
+    const [a, b] = await Promise.all([s.run(), s.run()]);
+    const results = [a, b].map((r) => r.status).sort();
+    expect(results).toEqual(['failed', 'submitted']);
+    expect([a, b].find((r) => r.status === 'failed')).toMatchObject({ error: { code: 'already_executed' } });
+    expect(await outgoing(s.wallet)).toHaveLength(1);
+  });
+
+  it('plan changed after confirmation (amount, invoice, asset or date): refused, nothing sent', async () => {
+    const s = await setup();
+    const changes: Partial<PaymentPlan>[] = [
+      { amount: '25000001' },
+      { rgbInvoice: mockInvoice(undefined, undefined, far - 1) },
+      { assetId: 'rgb:other' },
+      { executeAt: '2100-01-01T00:00:00.000Z' },
+    ];
+    for (const change of changes) {
+      s.store.put({
+        plan: { ...s.plan, ...change },
+        state: 'CONFIRMED',
+        confirmation: { planId: s.plan.planId, confirmedAt: 'x' },
+      });
+      expect(await s.guard.check(s.plan.planId)).toMatchObject({ ok: false, reason: 'hash_mismatch' });
+    }
+    expect(await outgoing(s.wallet)).toHaveLength(0);
+  });
+
+  it('a paid, rejected or failed invoice cannot run again through the guard', async () => {
+    const s = await setup();
+    for (const state of ['PAID', 'REJECTED', 'FAILED', 'AWAITING_CONFIRMATION'] as const) {
+      s.store.put({ plan: s.plan, state, confirmation: { planId: s.plan.planId, confirmedAt: 'x' } });
+      expect(await s.guard.check(s.plan.planId)).toMatchObject({ ok: false, reason: 'not_confirmed' });
+    }
+  });
+
+  it('WDK policy refusal at signing: failed PolicyDenied, nothing sent, the plan is free again', async () => {
+    const s = await setup();
+    const denying = { pay: async () => Promise.reject(new PolicyDenied('The amount is above your payment limit.')) };
+    const r = await executeGuarded(s.plan.planId, { guard: s.guard, wallet: denying });
+    expect(r).toMatchObject({ status: 'failed', error: { code: 'PolicyDenied', message: /payment limit/ } });
+    expect(await s.guard.check(s.plan.planId)).toMatchObject({ ok: true });
+    expect(await outgoing(s.wallet)).toHaveLength(0);
+  });
+
+  it('balance unreadable (network down): refused as insufficient_funds with plain words, plan free', async () => {
+    const s = await setup();
+    const offline = {
+      assetBalance: async () => Promise.reject(new NetworkUnavailable()),
+      listTransfers: async () => [],
+    };
+    const guard = new WalletGuard({ store: s.store, wallet: offline, limits });
+    expect(await guard.check(s.plan.planId)).toMatchObject({
+      ok: false,
+      reason: 'insufficient_funds',
+      message: /could not read your balance/,
+    });
+    expect(await s.guard.check(s.plan.planId)).toMatchObject({ ok: true });
+  });
+
+  it('a SubmitTimeout without a transfer ID still keeps the claim (never resent)', async () => {
+    const s = await setup();
+    const r = await executeGuarded(s.plan.planId, {
+      guard: s.guard,
+      wallet: { pay: async () => Promise.reject(new SubmitTimeout()) },
+    });
+    expect(r).toEqual({ planId: s.plan.planId, status: 'submitted' });
+    expect(await s.run()).toMatchObject({ error: { code: 'already_executed' } });
+  });
+
+  it('retry-safe codes never include a possibly-sent outcome', () => {
+    for (const code of ['already_executed', 'SubmitTimeout', 'TransferFailed'])
+      expect(RETRY_SAFE.has(code)).toBe(false);
+    for (const code of ['PolicyDenied', 'policy_denied', 'over_cap', 'InsufficientFunds'])
+      expect(RETRY_SAFE.has(code)).toBe(true);
   });
 });
 

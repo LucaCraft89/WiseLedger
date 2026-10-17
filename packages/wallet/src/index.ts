@@ -3,9 +3,12 @@ import type { WalletPort } from 'core';
 import { MockWallet } from 'core/mocks';
 import type { WalletConfig } from './config.js';
 
+export * from './backup.js';
 export * from './config.js';
 export * from './guard.js';
 export * from './policy.js';
+export * from './retry.js';
+export * from './seed.js';
 export * from './sync.js';
 export * from './tools.js';
 
@@ -22,3 +25,4 @@ export async function createWallet(cfg: WalletConfig): Promise<WalletPort> {
       throw new Error('WALLET_BACKEND=rgb-lib is not implemented; use wdk-rgb or mock.');
   }
 }
+export * from './lock.js';

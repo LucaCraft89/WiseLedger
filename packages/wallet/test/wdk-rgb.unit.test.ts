@@ -12,6 +12,7 @@ function fake(opts: {
   expiry?: number;
   transfer?: () => Promise<{ hash: string; fee: bigint }>;
   noUtxoFirst?: boolean;
+  sendTimeoutMs?: number;
 }) {
   let noUtxo = opts.noUtxoFirst ?? false;
   const transfers: SdkTransfer[] = [];
@@ -56,7 +57,8 @@ function fake(opts: {
     quoteTransfer: vi.fn(async () => ({ fee: 155n })),
     transfer,
   } as unknown as RgbAccount;
-  const wallet = new WdkRgbWallet(walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' }), {
+  const cfg = walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' });
+  const wallet = new WdkRgbWallet(opts.sendTimeoutMs ? { ...cfg, sendTimeoutMs: opts.sendTimeoutMs } : cfg, {
     account,
   });
   return { wallet, transfer, sdk };
@@ -70,6 +72,17 @@ describe('WdkRgbWallet.pay', () => {
     const r = await wallet.pay(req);
     expect(r).toEqual({ transferId: '7', txid: 'ab'.repeat(32) });
     expect(transfer).toHaveBeenCalledWith({ token: ASSET, recipient: req.rgbInvoice, amount: 5000000, feeRate: 2 });
+  });
+
+  it('a send that hangs after signing → SubmitTimeout after WALLET_SEND_TIMEOUT_MS, with the transfer found', async () => {
+    const { wallet, transfer, sdk } = fake({ transfer: () => new Promise(() => undefined), sendTimeoutMs: 1000 });
+    const t = Date.now();
+    const err = await wallet.pay(req).catch((e: unknown) => e);
+    expect(Date.now() - t).toBeLessThan(3000);
+    expect(err).toBeInstanceOf(SubmitTimeout);
+    expect((err as SubmitTimeout).transferId).toBe('7');
+    expect(transfer).toHaveBeenCalledTimes(1);
+    expect(sdk.syncWallet).toHaveBeenCalled();
   });
 
   it('after a timeout: no second send, one sync, SubmitTimeout carries the transfer found', async () => {

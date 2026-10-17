@@ -10,7 +10,10 @@ const SEED = WDK.getRandomSeedPhrase(12);
 const send = (amount: number, token = ASSET) => ({ token, recipient: 'rgb:~/~/x', amount, feeRate: 2 });
 type Send = ReturnType<typeof send>;
 
-function governedAccount(limits: { paymentCap: string; assetAllowlist: string[] }) {
+function governedAccount(
+  limits: { paymentCap: string; assetAllowlist: string[]; dailyCap?: string },
+  spent?: (assetId: string) => number,
+) {
   const transfer = vi.fn(async (_o: Send) => ({ hash: 'ab'.repeat(32), fee: 300n }));
   const rgbWallet = { listAssets: () => ({ nia: [] }) };
   const account = {
@@ -27,7 +30,7 @@ function governedAccount(limits: { paymentCap: string; assetAllowlist: string[] 
     dispose() {}
   }
   const wdk = new WDK(SEED).registerWallet('rgb', FakeRgbManager as never, {} as never);
-  wdk.registerPolicy([buildSpendPolicy(limits)] as never);
+  wdk.registerPolicy([buildSpendPolicy(limits, spent)] as never);
   return { get: () => wdk.getAccount('rgb', 0) as unknown as Promise<typeof account>, transfer, rgbWallet };
 }
 
@@ -72,6 +75,18 @@ describe('WDK spend policy on the RGB account', () => {
     await expect(Promise.resolve().then(() => acct.issueAssetNia({}))).rejects.toThrow(
       /no policy rule explicitly allowed/,
     );
+  });
+
+  it('refuses a payment that would go over the rolling daily limit', async () => {
+    let spent = 0;
+    const g = governedAccount({ paymentCap: '100000000', assetAllowlist: [], dailyCap: '150000000' }, () => spent);
+    const acct = await g.get();
+    await expect(acct.transfer(send(100_000_000))).resolves.toBeDefined();
+    spent = 100_000_000; // the wallet now reports what was sent in the last 24 h
+    const err = await acct.transfer(send(60_000_000)).catch((e: unknown) => e);
+    expect(policyDenied(err)?.message).toBe('This payment would go over your daily spending limit.');
+    await expect(acct.transfer(send(50_000_000))).resolves.toBeDefined();
+    expect(g.transfer).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a nonsense cap', () => {
