@@ -4,6 +4,7 @@
 import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { ChatInvoice } from 'ai';
 import type {
   AnalysisReport,
   AppEvent,
@@ -15,6 +16,8 @@ import type {
   PaymentPlan,
 } from 'core';
 import { DatabaseSync } from './sqlite.js';
+
+export type { ChatInvoice };
 
 export interface StoredInvoice extends InvoiceRecord {
   kind: InvoiceSourceKind;
@@ -110,6 +113,25 @@ const MIGRATIONS: readonly string[] = [
     last_error TEXT
   );
   CREATE INDEX jobs_status_run_at ON jobs(status, run_at);
+  `,
+  // 4: RGB invoices the app handed out to get paid, matched to incoming transfers.
+  `
+  CREATE TABLE receives (
+    receive_id TEXT PRIMARY KEY,
+    rgb_invoice TEXT NOT NULL,
+    recipient_id TEXT NOT NULL,
+    asset_id TEXT,
+    amount TEXT,
+    note TEXT,
+    status TEXT NOT NULL,
+    transfer_id TEXT,
+    txid TEXT,
+    received_amount TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX receives_status ON receives(status);
   `,
 ];
 
@@ -387,17 +409,6 @@ export class InvoiceStore {
   }
 }
 
-/** Invoice summary the Treasurer's chat sees (B's `ChatInvoice` in the ai package; structured fields only). */
-export interface ChatInvoice {
-  invoiceId: string;
-  supplier?: string;
-  total?: string;
-  currency?: string;
-  state: InvoiceState;
-  /** report.proposedPayment when payable (present and verdict not `block`). */
-  payment?: { amount: string; assetId: string };
-}
-
 /** Every invoice as a ChatInvoice, newest first. Never includes raw invoice text. */
 export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
   return store.list().map((inv) => {
@@ -406,10 +417,20 @@ export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
     return {
       invoiceId: inv.id,
       state: inv.state,
+      createdAt: inv.createdAt,
       ...(ex?.issuer.name ? { supplier: ex.issuer.name } : {}),
       ...(ex?.total ? { total: ex.total } : {}),
       ...(ex?.currency ? { currency: ex.currency } : {}),
-      ...(pp && inv.report?.verdict !== 'block' ? { payment: { amount: pp.amount, assetId: pp.assetId } } : {}),
+      ...(pp && inv.report?.verdict !== 'block'
+        ? { payment: { amount: pp.amount, assetId: pp.assetId, rgbInvoice: pp.rgbInvoice } }
+        : {}),
+      // The safety check for chat ("why was it stopped?"): verdict and flag codes only, never flag text.
+      ...(inv.report
+        ? {
+            verdict: inv.report.verdict,
+            flagCodes: [...new Set(inv.report.flags.filter((f) => f.severity !== 'info').map((f) => f.code))],
+          }
+        : {}),
     };
   });
 }

@@ -1,8 +1,9 @@
 // Wires config → providers (LLM, wallet, sync loop) → orchestrator → Fastify app. main.ts and the demo script
 // both start the server from here.
 import multipart from '@fastify/multipart';
-import { Scheduler } from 'ai';
+import { createTranscriber, Scheduler } from 'ai';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { walletConfigFromEnv } from 'wallet';
 import { loadConfig, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
 import { SqliteGuardStore } from './guard-store.js';
@@ -12,7 +13,9 @@ import { SqliteLabelStore } from './labels.js';
 import { registerOnboardingRoutes } from './onboarding.js';
 import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
+import { SqliteReceiveStore } from './receives.js';
 import { registerRoutes } from './routes.js';
+import { SelfCheck } from './selfcheck.js';
 import { chatInvoices, InvoiceStore } from './store.js';
 
 export interface App {
@@ -36,7 +39,16 @@ export interface AppOptions {
   /** Test seams for the provider factory (an injected LLM or wallet). */
   providers?: Omit<
     ProviderOptions,
-    'history' | 'log' | 'guardStore' | 'onSynced' | 'labels' | 'jobs' | 'fiscalFor' | 'chatInvoices'
+    | 'history'
+    | 'log'
+    | 'guardStore'
+    | 'onSynced'
+    | 'syncBusy'
+    | 'onReceiveCreated'
+    | 'labels'
+    | 'jobs'
+    | 'fiscalFor'
+    | 'chatInvoices'
   >;
   /** Scheduler runner period (default 30 s). */
   schedulerMs?: number;
@@ -51,6 +63,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   const labels = new SqliteLabelStore(store);
   const jobs = new SqliteJobStore(store);
   const guardStore = new SqliteGuardStore(store);
+  const receives = new SqliteReceiveStore(store);
   let fiscal: WalletFiscalService | undefined;
   // Bound once the orchestrator exists: every wallet sync settles EXECUTING invoices from the wallet's transfers.
   let settle: () => void = () => undefined;
@@ -61,6 +74,10 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       history: new StoreHistory(store),
       guardStore,
       onSynced: () => settle(),
+      syncBusy: () => receives.waitingRecently(),
+      onReceiveCreated: (inv) => {
+        receives.add(inv, 'Made in chat');
+      },
       labels,
       jobs,
       chatInvoices: async () => chatInvoices(store),
@@ -75,6 +92,19 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     throw err;
   }
   const { wallet, analyzer, treasurer } = providers;
+  const chain =
+    config.walletBackend === 'mock'
+      ? undefined
+      : walletConfigFromEnv({ ...process.env, WALLET_BACKEND: config.walletBackend, RGB_NETWORK: config.rgbNetwork });
+  // Loaded on the first recording (Parakeet, ~0.6B): the chat model stays the only one loaded until then.
+  const transcriber = createTranscriber({ provider: config.llmProvider });
+  const selfCheck = new SelfCheck({
+    wallet: () => (providers.holder.state === 'ready' ? (providers.holder.current ?? undefined) : undefined),
+    network: config.walletBackend === 'mock' ? 'mock' : config.rgbNetwork,
+    assetAllowlist: config.assetAllowlist,
+    ...(chain ? { indexerUrl: chain.indexerUrl, transportEndpoint: chain.transportEndpoint } : {}),
+    log: { warn: (m) => app.log.warn(m), info: (m) => app.log.info(m) },
+  });
   const fiscalService = fiscal ?? new WalletFiscalService({ wallet, store, labels });
   let scheduler: Scheduler | undefined;
   const orchestrator = new Orchestrator({
@@ -96,6 +126,14 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   });
   settle = () => {
     orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
+    wallet
+      .listTransfers()
+      .then((transfers) => {
+        for (const r of receives.reconcile(transfers)) {
+          app.log.info({ receiveId: r.receiveId, status: r.status, transferId: r.transferId }, 'Incoming payment');
+        }
+      })
+      .catch((err: unknown) => app.log.warn({ err }, 'Checking incoming payments failed'));
   };
   // The mock wallet has no sync loop: settle on a timer instead (e.g. a timed-out mock payment). The real wallet
   // settles after each sync (its loop starts once onboarding has a ready wallet).
@@ -111,10 +149,17 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     treasurer,
     labels,
     jobs,
+    receives,
+    transcriber,
     fiscal: fiscalService,
     llmInfo: providers.llmInfo,
     holder: providers.holder,
     walletBackend: config.walletBackend,
+    limits: {
+      paymentCap: config.paymentCap,
+      ...(config.dailyCap ? { dailyCap: config.dailyCap } : {}),
+      assetAllowlist: config.assetAllowlist,
+    },
     network: config.rgbNetwork,
     uploadMaxMb: config.uploadMaxMb,
     walletSync: () => ({
@@ -129,13 +174,18 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
             `Invoice ${inv.filename} (${inv.id}) was being paid when the app stopped. It was not sent again; a wallet sync will show whether the payment went through.`,
         ),
       ...providers.problems(),
+      ...selfCheck.problems(),
     ],
   });
   registerOnboardingRoutes(app, providers.holder);
   app.addHook('onClose', async () => {
     scheduler.stop();
+    selfCheck.stop();
+    await transcriber.unload().catch(() => undefined);
     if (mockSettle) clearInterval(mockSettle);
-    await orchestrator.idle();
+    if (!(await orchestrator.idle(10_000))) {
+      app.log.warn('Stopping with a payment still in progress: it is not sent again; the next start checks its state.');
+    }
     await providers.close();
     store.close();
   });
@@ -144,6 +194,8 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   if (touched > 0) app.log.info({ recovery }, 'Recovered invoices interrupted by the last shutdown');
   // After recovery: jobs missed while the app was down run once now, then every interval.
   scheduler.start();
+  // What the demo still needs (sats, asset, UTXOs, indexer, proxy), in the log and in /api/health problems.
+  selfCheck.start();
   return { app, orchestrator, store, config, providers, labels, jobs, fiscal: fiscalService, scheduler };
 }
 

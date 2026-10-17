@@ -2,6 +2,8 @@
 // wallet, PaymentGuard and the background sync loop. The mock LLM path keeps core's MockAnalyzer/MockTreasurer so
 // tests and `pnpm demo:mock` stay hermetic; qvac/openai use B's createAiRuntime() (one shared model).
 // Every execution goes through A's WalletGuard (SQLite claims = idempotency), on both paths.
+
+import path from 'node:path';
 import { type AiRuntime, type ChatInvoice, createAiRuntime, type RuleConfig, Treasurer } from 'ai';
 import type {
   AnalysisReport,
@@ -20,11 +22,22 @@ import type {
   LlmProvider,
   PaymentGuard,
   PaymentPlan,
+  ReceiveInvoice,
   TreasurerAgent,
   WalletPort,
 } from 'core';
 import { MemoryJobStore, MemoryLabelStore, MockAnalyzer, MockTreasurer, MockWallet } from 'core/mocks';
-import { type GuardStore, type SyncLoop, startSyncLoop, WalletGuard, walletConfigFromEnv } from 'wallet';
+import {
+  type GuardStore,
+  LnNode,
+  REPO_ROOT,
+  requestLspChannel,
+  type SyncLoop,
+  startSyncLoop,
+  WalletGuard,
+  walletConfigFromEnv,
+  withLightning,
+} from 'wallet';
 import { ConfigError, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
 import { onboardingNetwork, realWalletFactory, type WalletFactory, WalletHolder } from './onboarding.js';
@@ -60,6 +73,10 @@ export interface ProviderOptions {
   guardStore: GuardStore;
   /** Called after every successful wallet sync (the orchestrator settles EXECUTING invoices). */
   onSynced?: () => void;
+  /** A payment request made in the Treasurer chat (the server lists it under "Get paid"). */
+  onReceiveCreated?: (inv: ReceiveInvoice) => void;
+  /** Extra "keep syncing fast" signal from the server (open receive requests); pending transfers are checked here. */
+  syncBusy?: () => boolean;
   /** Persistent stores from the server (in-memory ones when absent, e.g. in provider unit tests). */
   labels?: LabelStore;
   jobs?: JobStore;
@@ -200,7 +217,7 @@ export class GuardedMockTreasurer implements SchedulingTreasurer {
     return this.inner.execute({ ...g.plan, executeAt: 'now' }, confirmation, emit);
   }
 
-  chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
+  chat: TreasurerAgent['chat'] = (message, history, emit, stream) => this.inner.chat(message, history, emit, stream);
 }
 
 /** Records every outcome with the guard (frees the claim when nothing was sent), then syncs after the payment. */
@@ -229,7 +246,7 @@ class GuardedTreasurer implements SchedulingTreasurer {
     }
   }
 
-  chat: TreasurerAgent['chat'] = (message, history, emit) => this.inner.chat(message, history, emit);
+  chat: TreasurerAgent['chat'] = (message, history, emit, stream) => this.inner.chat(message, history, emit, stream);
 }
 
 /** Opens the wallet holder: mock and injected wallets are ready at once; the real backend may wait for onboarding. */
@@ -311,6 +328,7 @@ function realAi(
       labels: stores.labels,
       fiscal: stores.fiscal,
       ...(opts.chatInvoices ? { invoices: opts.chatInvoices } : {}),
+      ...(opts.onReceiveCreated ? { onReceiveCreated: opts.onReceiveCreated } : {}),
     }),
     llmStatus: () => {
       return runtime.status();
@@ -328,6 +346,35 @@ function realAi(
   };
 }
 
+/** Opens the app's Lightning node when LN_ENABLED=true; failures become a plain problem, never a crash. */
+async function openLightning(
+  config: ServerConfig,
+  env: NodeJS.ProcessEnv,
+  opts: ProviderOptions,
+): Promise<{ node?: LnNode; problem?: string }> {
+  if (!/^(1|true|yes)$/i.test(env.LN_ENABLED ?? '') || config.walletBackend === 'mock' || opts.wallet) return {};
+  const out: { node?: LnNode; problem?: string } = {};
+  try {
+    out.node = await LnNode.open({
+      name: 'app',
+      dataDir: path.resolve(REPO_ROOT, env.LN_DATA_DIR || '.data/ln', 'c'),
+      peerPort: Number(env.LN_PEER_PORT ?? 9737),
+    });
+    opts.log?.info(`Lightning node ${out.node.pubkey} is up`);
+  } catch (err) {
+    out.problem = `Lightning is on (LN_ENABLED) but its node did not start: ${err instanceof Error ? err.message : err}`;
+    opts.log?.warn({ err }, 'Lightning node failed to start');
+    return out;
+  }
+  const url = env.LN_LSP_URL;
+  if (url) {
+    void requestLspChannel(out.node, { url, log: (m) => opts.log?.info(m) }).catch((err: unknown) => {
+      out.problem = `Lightning: ${err instanceof Error ? err.message : err}`;
+    });
+  }
+  return out;
+}
+
 export async function createProviders(config: ServerConfig, opts: ProviderOptions): Promise<Providers> {
   const env = opts.env ?? process.env;
   let sync: SyncLoop | null = null;
@@ -339,6 +386,13 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
     if (config.walletBackend === 'mock' || sync) return;
     sync = startSyncLoop(ready, {
       intervalMs: config.walletSyncMs,
+      idleIntervalMs: Math.max(config.walletSyncIdleMs, config.walletSyncMs),
+      // Fast while a transfer is on its way (local read, no network) or the server waits for an incoming payment.
+      isBusy: async () =>
+        (opts.syncBusy?.() ?? false) ||
+        (await ready.listTransfers()).some(
+          (t) => t.status === 'WaitingCounterparty' || t.status === 'WaitingConfirmations',
+        ),
       onSynced: () => opts.onSynced?.(),
       onError: (err, next) => opts.log?.warn({ err, nextDelayMs: next }, 'Wallet sync failed; will retry'),
     });
@@ -347,8 +401,11 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
   };
   const holder = await openHolder(config, env, opts, onReady);
   // Mock and injected wallets are used directly (unchanged mock path); the real backend goes through the holder.
-  const wallet: WalletPort =
+  const base: WalletPort =
     (opts.wallet || config.walletBackend === 'mock') && holder.current ? holder.current : holder.port;
+  // Lightning rail (LN_ENABLED=true, real backend only): the app's own RGB Lightning node, channel from our LSP.
+  const ln = await openLightning(config, env, opts);
+  const wallet: WalletPort = ln.node ? withLightning(base, ln.node) : base;
 
   const labels = opts.labels ?? new MemoryLabelStore();
   const jobs = opts.jobs ?? new MemoryJobStore();
@@ -381,11 +438,13 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
       if (sync?.lastError) out.push(`The last wallet sync failed: ${sync.lastError}. It will be retried.`);
       const info = llmInfo();
       if (info.state === 'error') out.push(`The local AI model is not working: ${info.error ?? 'unknown error'}.`);
+      if (ln.problem) out.push(ln.problem);
       return out;
     },
     async close() {
       sync?.stop();
       await ai.close();
+      await ln.node?.close();
       holder.close();
     },
   };
