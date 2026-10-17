@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { AnalysisReport, computeVerdict, type InvoiceExtraction, type RiskFlag } from '../src/analysis.js';
 import {
   ApiError,
+  buildConfirmationSentence,
   ChatRequest,
   ChatResponse,
   ConfirmRequest,
   ConfirmResponse,
   CreateInvoiceResponse,
   CreateInvoiceTextRequest,
+  formatAssetAmount,
   HealthResponse,
   InvoiceDetailResponse,
   InvoiceListResponse,
@@ -263,5 +265,30 @@ describe('mocks', () => {
     const bad = await treasurer.execute(plan as never, { planId: 'other', confirmedAt: NOW } as never, () => {});
     expect(bad.status).toBe('failed');
     expect(paid).toHaveLength(1);
+  });
+});
+
+describe('confirmation sentence', () => {
+  const plan = {
+    amount: '25000000',
+    assetId: 'rgb:mock-tusdt',
+    payee: { name: 'Acme Srl' },
+    executeAt: 'now' as const,
+  };
+  it('formats amounts with at least 2 decimals', () => {
+    expect(formatAssetAmount('25000000', 6)).toBe('25.00');
+    expect(formatAssetAmount('1234567', 6)).toBe('1.234567');
+    expect(formatAssetAmount('500000', 6)).toBe('0.50');
+    expect(formatAssetAmount('42', 0)).toBe('42');
+  });
+  it('builds the ok-basic sentence', () => {
+    expect(buildConfirmationSentence(plan, { ticker: 'TUSDT', precision: 6 })).toBe(
+      'Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?',
+    );
+  });
+  it('names the date for a scheduled payment', () => {
+    expect(
+      buildConfirmationSentence({ ...plan, executeAt: '2026-10-23T09:00:00.000Z' }, { ticker: 'TUSDT', precision: 6 }),
+    ).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, on Fri, 23 Oct 2026 09:00 UTC. Confirm?');
   });
 });

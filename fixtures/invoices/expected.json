@@ -1,5 +1,5 @@
 {
-  "$comment": "Expected key fields (call 1) and verdicts (Analyst v1, M1.S2). RGB invoices use the MockWallet format; demo:prepare renders real ones. duplicate is a duplicate only when ok-basic was seen before.",
+  "$comment": "Expected key fields (call 1) and verdicts (Analyst v1, M1.S2). RGB invoices use the MockWallet format; demo:prepare renders real ones. duplicate is a duplicate only when ok-basic was seen before. Flags list what M1 rules (R1-R4, R7) raise first; R5/R6/R8 add more in M3. Payment cap 100 TUSDT (PAYMENT_CAP).",
   "fixtures": [
     {
       "id": "ok-basic",
@@ -13,7 +13,8 @@
       "paymentMethod": "rgb",
       "rgbInvoice": "rgb:mock/rgb:mock-tusdt/25000000/1900000000",
       "verdict": "ok",
-      "flags": []
+      "flags": [],
+      "lineAmounts": ["20.00", "5.00"]
     },
     {
       "id": "ok-eur",
@@ -22,12 +23,13 @@
       "issuer": "STUDIO GRAFICO LUNA S.N.C.",
       "vatId": "IT09876543210",
       "invoiceNumber": "117/2026",
-      "total": "120.00",
+      "total": "62.37",
       "currency": "EUR",
       "paymentMethod": "rgb",
-      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/120000000/1900000000",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/62370000/1900000000",
       "verdict": "review",
-      "flags": ["R8_CURRENCY"]
+      "flags": ["R3_AMOUNT"],
+      "lineAmounts": ["42.37", "20.00"]
     },
     {
       "id": "scam-bank-change",
@@ -41,7 +43,8 @@
       "paymentMethod": "rgb",
       "rgbInvoice": "rgb:mock/rgb:mock-tusdt/480000000/1900000000",
       "verdict": ["review", "block"],
-      "flags": ["R6_PRESSURE", "R5_NEW_PAYEE"]
+      "flags": ["R3_AMOUNT", "R6_PRESSURE", "R5_NEW_PAYEE"],
+      "lineAmounts": ["480.00"]
     },
     {
       "id": "duplicate",
@@ -56,7 +59,8 @@
       "rgbInvoice": "rgb:mock/rgb:mock-tusdt/25000000/1900000000",
       "verdict": "block",
       "flags": ["R4_DUPLICATE"],
-      "seenBefore": ["ok-basic"]
+      "seenBefore": ["ok-basic"],
+      "lineAmounts": ["20.00", "5.00"]
     },
     {
       "id": "injection",
@@ -70,7 +74,8 @@
       "paymentMethod": "rgb",
       "rgbInvoice": "rgb:mock/rgb:mock-tusdt/12000000/1900000000",
       "verdict": "block",
-      "flags": ["R7_INJECTION"]
+      "flags": ["R7_INJECTION"],
+      "lineAmounts": ["12.00"]
     },
     {
       "id": "sum-mismatch",
@@ -84,7 +89,8 @@
       "paymentMethod": "rgb",
       "rgbInvoice": "rgb:mock/rgb:mock-tusdt/55000000/1900000000",
       "verdict": "review",
-      "flags": ["R3_AMOUNT"]
+      "flags": ["R3_AMOUNT"],
+      "lineAmounts": ["30.00", "10.00"]
     }
   ]
 }

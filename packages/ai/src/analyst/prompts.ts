@@ -9,10 +9,10 @@ export const EXTRACT_SYSTEM = [
   '- Copy values exactly as printed. Use null when a field is not on the invoice. Do not guess.',
   '- total: the amount due as printed, digits with a dot for decimals, no currency (e.g. "1250.00").',
   '- currency: code or ticker printed next to the total (e.g. "EUR", "TUSDT").',
-  '- rgbInvoice: the full string starting with "rgb:" given as the payment destination, copied character by character.',
+  '- rgbInvoice: the full string starting with "rgb:" given as the payment destination, copied character by character (count repeated digits carefully).',
   '- paymentMethod: "rgb" if an rgb: invoice is given, else "iban", "btc", "ln" or "unknown".',
   '- pressureLanguage: true if the invoice pushes urgency, threatens suspension, or says payment or bank details changed; pressureQuote: the shortest quote proving it.',
-  '- lineItems: at most 10 rows.',
+  '- lineItems: at most 10 rows; amount = the number printed at the end of the row (e.g. "30.00"), quantity = the Qty column.',
   '- confidence: 0..1, how sure you are that the fields are right.',
 ].join('\n');
 

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MockLlm } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
-import { extractInvoice, normalizeDecimal, printedTotal, toExtraction } from '../src/analyst/extract.js';
+import { extractInvoice, normalizeDecimal, printedTotal, rowAmount, toExtraction } from '../src/analyst/extract.js';
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
@@ -57,6 +57,8 @@ describe('extract: deterministic clean-up', () => {
     expect(normalizeDecimal('1,250.00')).toBe('1250.00');
     expect(normalizeDecimal('EUR 25')).toBe('25');
     expect(normalizeDecimal('n/a')).toBeUndefined();
+    expect(normalizeDecimal('So.30.00')).toBe('30.00');
+    expect(normalizeDecimal('25.-')).toBe('25');
   });
   it('drops an RGB invoice not printed in the document and falls back to the single printed one', () => {
     const text = 'Pay to rgb:mock/rgb:mock-tusdt/25000000/1900000000 thanks';
@@ -74,6 +76,13 @@ describe('extract: deterministic clean-up', () => {
     expect(e.fieldConfidence.total).toBeLessThanOrEqual(0.6);
     expect(printedTotal('TOTAL: 12.00\nTotale: 13.00')).toBeUndefined();
     expect(printedTotal('TOTALE: EUR 120.00')).toBe('120.00');
+  });
+  it('fills a dropped row amount from the matching text line', () => {
+    const text = 'Bike repair, labour                2        15.00    30.00\nSpare parts   1   10.00   10.00\n';
+    expect(rowAmount(text, 'Bike repair, labour')).toBe('30.00');
+    const e = toExtraction({ ...base, lineItems: [{ description: 'Spare parts', quantity: 1, amount: null }] }, text);
+    expect(e.lineItems[0]?.amount).toBe('10.00');
+    expect(rowAmount(text + 'Spare parts again 5.00', 'Spare parts')).toBeUndefined();
   });
   it('marks missing fields with confidence 0', () => {
     const e = toExtraction({ ...base, invoiceNumber: null, total: 'abc' });
