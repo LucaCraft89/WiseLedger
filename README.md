@@ -1,6 +1,7 @@
 # WiseLedger
 <p align="center">
-  <img src="coincube1024.png" alt="" width="50%" />
+  <img src="coincube1024.png" alt="" width="50%" /><img src="wiseledger1400.png" alt="" width="50%" />
+  
 </p>
 
 **Team Coin³** · *Agentic Dollars on Bitcoin* hackathon, BLOX Turin, 17–18 October 2026
