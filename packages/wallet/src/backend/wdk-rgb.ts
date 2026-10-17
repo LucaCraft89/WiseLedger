@@ -30,6 +30,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { type ReadRetryOptions, withReadRetry } from '../retry.js';
 import { loadOrCreateMnemonic, readSeed } from '../seed.js';
@@ -192,6 +193,18 @@ export function mapWalletError(e: unknown): WalletError {
   return new TransferFailed(msg, { cause: e });
 }
 
+/** Rejects with SubmitTimeout after `ms` (the send may be out: callers never retry it). */
+export function withSendTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SubmitTimeout(`The wallet did not answer within ${Math.round(ms / 1000)} s after sending.`)),
+      ms,
+    );
+  });
+  return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+}
+
 export class WdkRgbWallet implements WalletPort {
   private wdk: WDK | null = null;
   private account: RgbAccount | null = null;
@@ -239,6 +252,7 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
+      lockWalletDir(this.cfg.dataDir);
       const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir, { passphrase: this.passphrase });
       this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
@@ -415,8 +429,13 @@ export class WdkRgbWallet implements WalletPort {
     await this.precheck(req);
     const before = new Set(this.rgb.listTransfers(req.assetId).map((t) => t.batchTransferIdx));
     let hash: string;
+    // The library call can hang after signing (seen on Mutinynet with a slow proxy): cap it. The call keeps running
+    // in the background; the transfer it created is found by the sync below and settled by the sync loop.
     const send = () =>
-      this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate });
+      withSendTimeout(
+        this.acct().transfer({ token: req.assetId, recipient: req.rgbInvoice, amount: toNumber(req.amount), feeRate }),
+        this.cfg.sendTimeoutMs ?? 120_000,
+      );
     try {
       try {
         ({ hash } = await send());
@@ -490,6 +509,7 @@ export class WdkRgbWallet implements WalletPort {
   close(): void {
     this.account = null;
     this.wdk = null;
+    unlockWalletDir(this.cfg.dataDir);
   }
 
   private acct(): RgbAccount {

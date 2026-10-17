@@ -24,6 +24,11 @@ export interface WalletConfig {
   assetAllowlist: string[];
   /** Max base units per asset in a rolling 24 h (DAILY_CAP, default 5 × PAYMENT_CAP). */
   dailyCap: string;
+  /**
+   * Hard limit on one send (WALLET_SEND_TIMEOUT_MS, default 120 s). After it the send counts as submitted
+   * (SubmitTimeout): never retried, the wallet syncs and the transfer it created is reported.
+   */
+  sendTimeoutMs?: number;
   /** Unlocks an encrypted seed at start (WALLET_PASSPHRASE, optional; the UI can unlock instead). */
   seedPassphrase?: string;
 }
@@ -70,6 +75,9 @@ export function walletConfigFromEnv(
     .split(',')
     .map((a) => a.trim())
     .filter(Boolean);
+  const sendTimeoutMs = Number(env.WALLET_SEND_TIMEOUT_MS ?? '120000');
+  if (!Number.isInteger(sendTimeoutMs) || sendTimeoutMs < 1000)
+    throw new Error(`WALLET_SEND_TIMEOUT_MS=${env.WALLET_SEND_TIMEOUT_MS} must be milliseconds ≥ 1000.`);
   const dataDirVar = opts.dataDirVar ?? 'WALLET_DATA_DIR';
   return {
     backend,
@@ -82,6 +90,7 @@ export function walletConfigFromEnv(
     paymentCap,
     assetAllowlist,
     dailyCap,
+    sendTimeoutMs,
     ...(env.WALLET_PASSPHRASE ? { seedPassphrase: env.WALLET_PASSPHRASE } : {}),
   };
 }
