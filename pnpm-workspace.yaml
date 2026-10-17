@@ -1,3 +1,8 @@
 packages:
   - packages/*
   - apps/*
+minimumReleaseAgeExclude:
+  - '@qvac/inference@0.21.1'
+  - '@qvac/sdk@0.21.1'
+allowBuilds:
+  esbuild: true
