@@ -61,10 +61,16 @@ export class Analyst implements InvoiceAnalyzer {
     };
 
     const input = await stage('reading', () => loadInvoice(src));
-    let extracted: Awaited<ReturnType<typeof extractInvoice>>;
+    let extracted: Pick<Awaited<ReturnType<typeof extractInvoice>>, 'extraction' | 'ms'>;
     try {
-      extracted = await stage('extracting', () =>
-        extractInvoice(input, llm, { ...(ctx.signal ? { signal: ctx.signal } : {}), ...(onToken ? { onToken } : {}) }),
+      const t0 = Date.now();
+      extracted = await stage('extracting', async () =>
+        input.mode === 'text' && input.structured
+          ? { extraction: input.structured, ms: Date.now() - t0 } // FatturaPA: tagged fields, no model call
+          : extractInvoice(input, llm, {
+              ...(ctx.signal ? { signal: ctx.signal } : {}),
+              ...(onToken ? { onToken } : {}),
+            }),
       );
     } catch (err) {
       // Never a silent pass: without a reliable extraction the user must review, and there is nothing to pay.

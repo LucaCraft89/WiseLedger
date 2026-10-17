@@ -1,10 +1,12 @@
 // Turns an uploaded invoice into model input: plain text (txt, xml, PDF text layer) or an image path for vision.
 import { readFile } from 'node:fs/promises';
-import type { InvoiceSource } from 'core';
+import type { InvoiceExtraction, InvoiceSource } from 'core';
+import { isFatturaPA, parseFatturaPA } from './fatturapa.js';
 
 export type InvoiceInput =
   /** `removed`: control-like text stripped by `sanitize` (R7 evidence); the model never sees it. */
-  | { mode: 'text'; text: string; source: InvoiceSource; removed: string[] }
+  /** `structured`: fields read deterministically (FatturaPA XML); the Analyst then skips extraction call 1. */
+  | { mode: 'text'; text: string; source: InvoiceSource; removed: string[]; structured?: InvoiceExtraction }
   | { mode: 'image'; imagePath: string; source: InvoiceSource };
 
 /** Characters kept from a document (keeps call 1 inside ctx 4096 with the prompt and the answer). */
@@ -18,8 +20,12 @@ export interface LoadOptions {
 export async function loadInvoice(source: InvoiceSource, opts: LoadOptions = {}): Promise<InvoiceInput> {
   switch (source.kind) {
     case 'text':
-    case 'xml':
       return { mode: 'text', ...untrusted(await readFile(source.path, 'utf8')), source };
+    case 'xml': {
+      const raw = await readFile(source.path, 'utf8');
+      const structured = isFatturaPA(raw) ? parseFatturaPA(sanitize(raw).text) : undefined;
+      return { mode: 'text', ...untrusted(raw), source, ...(structured ? { structured } : {}) };
+    }
     case 'pdf': {
       const text = await pdfText(source.path);
       // Scanned PDF without a text layer: nothing to read here; vision on a rendered page is M2 work.

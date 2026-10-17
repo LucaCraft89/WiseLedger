@@ -17,6 +17,7 @@
   "dependencies": {
     "@qvac/sdk": "0.21.1",
     "core": "workspace:*",
+    "fast-xml-parser": "5.11.2",
     "unpdf": "1.9.0",
     "zod": "^4.6.7"
   },
