@@ -1,5 +1,9 @@
 // Wallet configuration from env. Endpoints are always explicit: the wdk-wallet-rgb defaults for 'signet' do not work.
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** Repo root: relative data dirs resolve here, not against the cwd (pnpm -F runs scripts inside the package). */
+export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 export type WalletBackendName = 'mock' | 'wdk-rgb' | 'rgb-lib';
 export type RgbNetworkName = 'mutinynet' | 'regtest';
@@ -64,7 +68,7 @@ export function walletConfigFromEnv(
   return {
     backend,
     network,
-    dataDir: path.resolve(env[dataDirVar] || opts.defaultDataDir || '.data/wallet'),
+    dataDir: path.resolve(REPO_ROOT, env[dataDirVar] || opts.defaultDataDir || '.data/wallet'),
     indexerUrl: env.RGB_INDEXER_URL || d.indexerUrl,
     transportEndpoint: env.RGB_TRANSPORT_ENDPOINT || d.transportEndpoint,
     explorerUrl: env.RGB_EXPLORER_URL || d.explorerUrl,
