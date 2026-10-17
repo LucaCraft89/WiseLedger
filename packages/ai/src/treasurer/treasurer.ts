@@ -23,11 +23,32 @@ export const TREASURER_SYSTEM = [
   'Never invent or change a planId.',
 ].join('\n');
 
-export const ExecutePlanArgs = z.object({ planId: z.string().min(1).max(100) });
+export const ExecutePlanArgs = z.object({
+  planId: z.string().min(1).max(100),
+  /** Informational: the confirmed plan decides when it runs (scheduled plans go through the job runner). */
+  executeAt: z.string().max(40).optional(),
+  labels: z.array(z.string().max(40)).max(5).optional(),
+});
+export const GetBalanceArgs = z.object({ assetId: z.string().max(100).optional() });
+export const CreateReceiveArgs = z.object({
+  assetId: z.string().max(100).optional(),
+  /** Base units as a decimal string. */
+  amount: z
+    .string()
+    .regex(/^\d{1,20}$/)
+    .optional(),
+  expiryMinutes: z.number().int().min(1).max(10_080).optional(),
+});
+
+export type TreasurerWallet = Pick<
+  WalletPort,
+  'pay' | 'getTransfer' | 'listAssets' | 'assetBalance' | 'createReceiveInvoice'
+>;
+type AnyTool = ToolDef<Record<string, unknown>>;
 
 export interface TreasurerDeps {
   llm: LlmProvider;
-  wallet: Pick<WalletPort, 'pay' | 'getTransfer'>;
+  wallet: TreasurerWallet;
   /** A's PaymentGuard (M2.S2). Until then use `confirmationGuard()`. */
   guard: PaymentGuard;
   /** Follow the transfer until Settled/Failed (default true, poll 1 s, give up after 120 s → 'submitted'). */
@@ -61,17 +82,83 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class Treasurer implements TreasurerAgent {
   constructor(private readonly deps: TreasurerDeps) {}
 
-  /** The tools the model can call (more in M3: balance, receive, schedule, labels, report). */
-  tools(ctx: { invoiceId?: string; emit: EmitFn }): ToolDef<{ planId: string }>[] {
-    return [
+  /** The tools the model can call. Arguments are short IDs and numbers; handlers resolve everything else. */
+  tools(ctx: { invoiceId?: string; emit: EmitFn }): AnyTool[] {
+    const { wallet } = this.deps;
+    const tools: ToolDef<never>[] = [
       {
         name: 'execute_plan',
-        description: 'Execute a payment plan the user has confirmed. Argument: the planId.',
-        params: ExecutePlanArgs,
+        description: 'Execute a payment plan the user has confirmed. Arguments: planId (required).',
+        params: ExecutePlanArgs as never,
         requiresConfirmation: true,
-        handler: (args) => this.executePlan(args.planId, ctx),
-      },
+        handler: (args: z.infer<typeof ExecutePlanArgs>) => this.executePlan(args.planId, ctx),
+      } as ToolDef<never>,
+      {
+        name: 'get_balance',
+        description: 'Show the wallet balance, for one asset (assetId) or for all assets.',
+        params: GetBalanceArgs as never,
+        requiresConfirmation: false,
+        handler: async (args: z.infer<typeof GetBalanceArgs>) => {
+          const assets = await wallet.listAssets();
+          return assets
+            .filter((a) => !args.assetId || a.assetId === args.assetId)
+            .map((a) => ({
+              assetId: a.assetId,
+              ticker: a.ticker,
+              precision: a.precision,
+              spendable: a.balance.spendable,
+              settled: a.balance.settled,
+            }));
+        },
+      } as ToolDef<never>,
+      {
+        name: 'create_receive_invoice',
+        description:
+          'Create an RGB invoice so someone can pay this wallet. Optional: assetId, amount (base units), expiryMinutes.',
+        params: CreateReceiveArgs as never,
+        requiresConfirmation: false,
+        handler: async (args: z.infer<typeof CreateReceiveArgs>) =>
+          wallet.createReceiveInvoice({
+            ...(args.assetId ? { assetId: args.assetId } : {}),
+            ...(args.amount ? { amount: args.amount } : {}),
+            expirySec: (args.expiryMinutes ?? 60) * 60,
+          }),
+      } as ToolDef<never>,
     ];
+    return tools as unknown as AnyTool[];
+  }
+
+  /** Validates the model's arguments with the tool's schema and runs it, emitting toolCall events. */
+  async runTool(
+    name: string,
+    rawArgs: Record<string, unknown>,
+    ctx: { invoiceId?: string; emit: EmitFn },
+  ): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+    const tool = this.tools(ctx).find((t) => t.name === name);
+    const base = {
+      ...(ctx.invoiceId ? { invoiceId: ctx.invoiceId } : {}),
+      agent: 'treasurer' as const,
+      name,
+      args: rawArgs,
+    };
+    if (!tool) {
+      ctx.emit({ type: 'toolCall', ...base, at: this.at(), status: 'rejected', message: 'Unknown tool.' });
+      return { ok: false, error: `Unknown tool ${name}` };
+    }
+    const parsed = tool.params.safeParse(rawArgs);
+    if (!parsed.success) {
+      ctx.emit({ type: 'toolCall', ...base, at: this.at(), status: 'rejected', message: 'Invalid arguments.' });
+      return { ok: false, error: 'Invalid arguments' };
+    }
+    try {
+      const result = await tool.handler(parsed.data as Record<string, unknown>);
+      if (name !== 'execute_plan') ctx.emit({ type: 'toolCall', ...base, at: this.at(), status: 'ok' });
+      return { ok: true, result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.emit({ type: 'toolCall', ...base, at: this.at(), status: 'error', message });
+      return { ok: false, error: message };
+    }
   }
 
   async execute(plan: PaymentPlan, confirmation: Confirmation, emit: EmitFn): Promise<ExecutionResult> {
@@ -84,10 +171,11 @@ export class Treasurer implements TreasurerAgent {
       // Scheduler lands in M3; the plan stays confirmed and is executed by the job runner through the guard.
       return { planId: plan.planId, status: 'scheduled' };
     }
-    const tool = this.tools({ invoiceId, emit })[0] as ToolDef<{ planId: string }>;
+    const tool = this.tools({ invoiceId, emit }).find((t) => t.name === 'execute_plan') as AnyTool;
     const facts = [
       `Confirmed payment plan: planId=${plan.planId}`,
-      `Pay ${plan.amount} base units of asset ${plan.assetId} to ${plan.payee.name.slice(0, 60)}, now.`,
+      // No payee name or other invoice text here: the tool-calling prompt sees only IDs and numbers.
+      `Pay ${plan.amount} base units of asset ${plan.assetId}, now.`,
     ].join('\n');
 
     const maxRetries = this.deps.maxRetries ?? 2;
@@ -127,7 +215,7 @@ export class Treasurer implements TreasurerAgent {
         });
         continue;
       }
-      return (await tool.handler(args.data)) as ExecutionResult;
+      return (await tool.handler(args.data as Record<string, unknown>)) as ExecutionResult;
     }
     return fail(plan.planId, 'TREASURER_PARSE', 'The AI could not start the payment. Nothing was sent.');
   }
@@ -173,8 +261,14 @@ export class Treasurer implements TreasurerAgent {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const code = (err as { code?: unknown })?.code;
+      // SubmitTimeout: the send may have gone out. Never retried: report it as submitted so nobody offers a retry,
+      // and let the wallet sync settle it.
+      if (code === 'SubmitTimeout') {
+        const tid = (err as { transferId?: unknown }).transferId;
+        emit({ type: 'toolCall', ...base, at: at(), status: 'ok', message });
+        return { planId, status: 'submitted', ...(typeof tid === 'string' ? { transferId: tid } : {}) };
+      }
       emit({ type: 'toolCall', ...base, at: at(), status: 'error', message });
-      // SubmitTimeout: never retried here; the caller syncs and checks the transfer state.
       return fail(planId, typeof code === 'string' ? code : 'TransferFailed', message);
     }
     emit({ type: 'toolCall', ...base, at: at(), status: 'ok' });

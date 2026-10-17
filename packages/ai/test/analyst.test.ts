@@ -100,6 +100,40 @@ describe('Analyst v1 with MockLlm', () => {
     expect(llm.calls[1]?.tools).toBeUndefined();
   });
 
+  it('model failure during extraction → verdict review with AI_UNAVAILABLE and no payment', async () => {
+    const f = EXPECTED[0];
+    if (!f) throw new Error('fixture');
+    const llm = new MockLlm({ fallback: { error: 'model not loaded' } });
+    const events: AppEvent[] = [];
+    const r = await new Analyst({
+      llm,
+      wallet: new MockWallet(),
+      history: historyOf(),
+      config: CONFIG,
+      now: () => NOW,
+    }).analyze(sourceOf(f), { invoiceId: 'x' }, (e) => events.push(e));
+    expect(r.verdict).toBe('review');
+    expect(r.flags.map((x) => x.code)).toEqual(['AI_UNAVAILABLE']);
+    expect(r.proposedPayment).toBeUndefined();
+    expect(events.some((e) => e.type === 'stage' && e.stage === 'extracting' && e.status === 'error')).toBe(true);
+  });
+
+  it('adds the supplier to a summary that forgot it', async () => {
+    const { withLead } = await import('../src/analyst/summarize.js');
+    const e = {
+      issuer: { name: 'STUDIO LUNA' },
+      total: '62.37',
+      currency: 'EUR',
+      lineItems: [],
+      payment: { method: 'rgb' as const },
+      fieldConfidence: {},
+    };
+    expect(withLead('Check the amount yourself.', e)).toBe(
+      'STUDIO LUNA asks for 62.37 EUR. Check the amount yourself.',
+    );
+    expect(withLead('Studio Luna billed you.', e)).toBe('Studio Luna billed you.');
+  });
+
   it('falls back to a code-written summary when call 2 fails', async () => {
     const f = EXPECTED[0];
     if (!f) throw new Error('fixture');
