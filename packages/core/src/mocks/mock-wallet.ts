@@ -9,6 +9,7 @@ import {
   InvalidInvoice,
   InvoiceExpired,
   type IssueNiaRequest,
+  type OnboardingInfo,
   type PaymentRequest,
   type PayResult,
   type QuoteResult,
@@ -83,6 +84,10 @@ export class MockWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     return { backend: 'mock', network: 'mock' };
+  }
+
+  async onboarding(_opts?: { reveal?: boolean }): Promise<OnboardingInfo> {
+    return { walletCreated: false, seedShown: true };
   }
 
   async receiveAddress(): Promise<string> {
