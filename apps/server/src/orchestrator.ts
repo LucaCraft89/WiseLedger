@@ -163,8 +163,25 @@ export class Orchestrator {
   }
 
   /** Waits until no analysis or payment is running (tests, graceful shutdown). */
-  async idle(): Promise<void> {
-    while (this.tasks.size > 0) await Promise.allSettled([...this.tasks]);
+  /**
+   * Waits for background work. With `maxMs` it gives up after that long and returns false: a send that hangs inside
+   * the wallet library must not block shutdown (nothing is resent; on restart recover() leaves it to the sync).
+   */
+  async idle(maxMs?: number): Promise<boolean> {
+    const all = (async () => {
+      while (this.tasks.size > 0) await Promise.allSettled([...this.tasks]);
+    })();
+    if (maxMs === undefined) {
+      await all;
+      return true;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<false>((r) => {
+      timer = setTimeout(() => r(false), maxMs);
+    });
+    const done = await Promise.race([all.then(() => true as const), limit]);
+    clearTimeout(timer);
+    return done;
   }
 
   async createInvoice(upload: NewUpload): Promise<StoredInvoice> {
