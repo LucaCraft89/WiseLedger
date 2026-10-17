@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { RiskFlag, Verdict } from './api/contracts.js';
-import { FlagList } from './FlagCard.js';
 import { BLOCK_EXPLANATION, confirmGate, gateHint, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
 
 /**
@@ -44,7 +43,13 @@ export function ConfirmDialog(props: {
         Confirm payment
       </h3>
 
-      {props.flags.length > 0 && <FlagList flags={props.flags} />}
+      {/* The flag cards are already shown in "Checks" above: one line here, so nothing is read twice. */}
+      {props.flags.length > 0 && props.verdict !== 'block' && (
+        <p data-testid="flags-pointer">
+          {props.flags.length === 1 ? 'There is 1 point' : `There are ${props.flags.length} points`} to check in
+          “Checks” above. Read {props.flags.length === 1 ? 'it' : 'them'} before you pay.
+        </p>
+      )}
 
       {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600 }}>{props.sentence}</p>}
 
@@ -103,9 +108,11 @@ export function ConfirmDialog(props: {
           <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
             Do not pay
           </button>
-          <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
-            {gateHint(props.verdict, ticked)}
-          </p>
+          {props.verdict !== 'block' && (
+            <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
+              {gateHint(props.verdict, ticked)}
+            </p>
+          )}
         </div>
       )}
     </section>
