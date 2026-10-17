@@ -16,13 +16,18 @@ Node 22.x only (`nvm use`): the rgb-lib binding does not build on Node 24+. Test
 ## Moving the funded wallets to the demo machine
 Copy `.data/wallet/`, `.data/payee/` and `.data/tusdt.json` (USB, never git, never chat; keep mode 600). Run each wallet on **one machine only**: stop it on the old one first.
 
+## Wallet lock and restore
+- Lock (optional): put `WALLET_PASSPHRASE=<≥ 8 chars>` in `.env` before the first start → the seed is stored encrypted (`.data/wallet/mnemonic.enc`, scrypt + AES-256-GCM). Without the variable the app asks for it (`POST /api/onboarding/unlock`). Wrong passphrase → `WalletLocked`.
+- Restore drill: `pnpm -F wallet restore-check` restores the payer into clean temp folders: words only → bitcoin back; words + backup file → RGB assets back. Prints PASS/FAIL, never the words.
+- RGB balances are NOT in the 12 words: keep the encrypted backup file (`backupWallet`) next to them.
+
 ## When something is off
 - Payment stuck in `WaitingCounterparty`: the payee is not refreshing → start `pnpm -F wallet payee watch`.
 - Stuck in `WaitingConfirmations` for > 3 min: Mutinynet block delay; check https://mutinynet.com. Never resend: the guard refuses a second execution and a send timeout is never retried.
 - `NoUtxo` / "needs more bitcoin": fund the payer address from `pnpm wallet:smoke`; UTXOs are created automatically.
 - `PolicyDenied`: amount above `PAYMENT_CAP` (base units) or asset not in `ASSET_ALLOWLIST`, enforced by the WDK policy engine.
 - Spendable 0 right after a payment: change is locked until the transfer settles; wait, or `pnpm wallet:smoke` to refresh.
-- KaleidoSwap indexer down: `RGB_INDEXER_URL=https://mutinynet.com/api`.
+- KaleidoSwap indexer down: `RGB_INDEXER_URL=https://mutinynet.com/api`. Reads (sync) retry 3× with backoff, then `NetworkUnavailable` ("Nothing was sent"); sends are never retried.
 
 ## Offline fallback (regtest, no faucet)
 `pnpm regtest start` · `RGB_NETWORK=regtest pnpm wallet:smoke -- --fund-regtest` · `RGB_NETWORK=regtest pnpm -F wallet issue-asset` · `RGB_NETWORK=regtest pnpm wallet:smoke -- --pay 5000000`. Wallets live in `.data/regtest/`; blocks are mined by the scripts.

@@ -32,3 +32,6 @@ Thumbs.db
 *.node
 *.so
 *.exe
+
+# Claude Code agent worktrees (side subagents)
+.claude/worktrees/

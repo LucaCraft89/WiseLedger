@@ -31,7 +31,8 @@ import {
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
-import { loadOrCreateMnemonic } from '../seed.js';
+import { type ReadRetryOptions, withReadRetry } from '../retry.js';
+import { loadOrCreateMnemonic, readSeed } from '../seed.js';
 
 /** The rgb-sdk WalletManager methods we use (wdk-wallet-rgb 2.0.3 exposes some only there). */
 export interface RgbSdkWallet {
@@ -202,13 +203,32 @@ export class WdkRgbWallet implements WalletPort {
   /** `deps.account` injects a fake WDK account in tests (no native code, no chain). */
   constructor(
     private readonly cfg: WalletConfig,
-    deps: { account?: RgbAccount } = {},
+    deps: { account?: RgbAccount; retry?: ReadRetryOptions } = {},
   ) {
+    this.passphrase = cfg.seedPassphrase;
+    this.retry = deps.retry ?? {};
     if (deps.account) {
       this.account = deps.account;
       this.sdk = deps.account.getRgbWallet() as RgbSdkWallet;
       this.registered = true;
     }
+  }
+
+  /** Backoff for network reads (sync/refresh); a test seam. */
+  private readonly retry: ReadRetryOptions;
+  /** Seed passphrase (wallet lock), from WALLET_PASSPHRASE or unlock(). */
+  private passphrase: string | undefined;
+
+  /** Unlocks an encrypted seed and opens the wallet (WalletLocked on a wrong passphrase). */
+  async unlock(passphrase: string): Promise<WalletInfo> {
+    readSeed(this.cfg.dataDir, passphrase);
+    this.passphrase = passphrase;
+    return this.init();
+  }
+
+  /** The configuration this wallet was opened with (scripts: restore drill). */
+  get config(): WalletConfig {
+    return this.cfg;
   }
 
   /** The rgb-sdk wallet, for scripts that need BTC-level calls. */
@@ -219,7 +239,7 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
-      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir);
+      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir, { passphrase: this.passphrase });
       this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
       const Manager = WalletManagerRgb as unknown as Parameters<WDK['registerWallet']>[1];
@@ -245,7 +265,7 @@ export class WdkRgbWallet implements WalletPort {
     const marker = path.join(this.cfg.dataDir, 'seed-shown');
     const seedShown = fs.existsSync(marker);
     if (!opts.reveal || seedShown) return { walletCreated: this.created, seedShown };
-    const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+    const mnemonic = readSeed(this.cfg.dataDir, this.passphrase);
     fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
     return { walletCreated: this.created, seedShown: true, mnemonic };
   }
@@ -451,13 +471,19 @@ export class WdkRgbWallet implements WalletPort {
     return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  /** Refreshes pending transfers (exchanges consignments with the proxy) and syncs with the indexer. */
+  /**
+   * Refreshes pending transfers (exchanges consignments with the proxy) and syncs with the indexer. Both are reads:
+   * a flaky indexer/proxy is retried with backoff, then NetworkUnavailable. A refresh failure still lets the sync run.
+   */
   async sync(): Promise<void> {
+    let refreshError: unknown;
     try {
-      this.rgb.refreshWallet();
-    } finally {
-      this.rgb.syncWallet();
+      await withReadRetry(() => this.rgb.refreshWallet(), this.retry);
+    } catch (e) {
+      refreshError = e;
     }
+    await withReadRetry(() => this.rgb.syncWallet(), this.retry);
+    if (refreshError) throw refreshError;
   }
 
   /** Never call the library dispose(): it throws "Invalid checksum" in 2.0.3. */
