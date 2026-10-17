@@ -62,3 +62,8 @@ export function perfectAnswer(f: ExpectedFixture): LlmExtraction {
     confidence: 0.9,
   };
 }
+
+/** MockLlm replies for one analysis: the extraction answer (skipped for FatturaPA XML, read without the model), then the summary. */
+export function analysisReplies(f: ExpectedFixture, summary: unknown): { json: unknown }[] {
+  return f.kind === 'xml' ? [{ json: summary }] : [{ json: perfectAnswer(f) }, { json: summary }];
+}

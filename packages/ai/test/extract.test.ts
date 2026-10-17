@@ -22,15 +22,15 @@ describe('extract: input loading', () => {
 });
 
 describe('extract: call 1 with MockLlm', () => {
-  for (const f of EXPECTED) {
+  for (const f of EXPECTED.filter((x) => x.kind !== 'xml')) {
     it(`${f.id} → valid InvoiceExtraction`, async () => {
       const llm = new MockLlm({ replies: [{ json: perfectAnswer(f) }] });
       const { extraction, attempts } = await extractInvoice(await loadInvoice(sourceOf(f)), llm);
       expect(attempts).toBe(1);
       expect(extraction.issuer.name).toBe(f.issuer);
       expect(extraction.total).toBe(f.total);
-      expect(extraction.payment.method).toBe('rgb');
-      expect(extraction.payment.rgbInvoice).toBe(f.rgbInvoice);
+      expect(extraction.payment.method).toBe(f.paymentMethod);
+      expect(extraction.payment.rgbInvoice ?? '').toBe(f.rgbInvoice);
       const req = llm.calls[0];
       expect(req?.responseFormat?.type).toBe('json_schema');
       expect(req && 'tools' in req && req.tools).toBeFalsy();
@@ -120,5 +120,34 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('extract: live QVAC on the six fi
     console.log(table);
     await llm.unload();
     expect(good).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('extract: FatturaPA XML without the model', () => {
+  for (const f of EXPECTED.filter((x) => x.kind === 'xml')) {
+    it(`${f.id}: every key field from the XML tags`, async () => {
+      const input = await loadInvoice(sourceOf(f));
+      if (input.mode !== 'text' || !input.structured) throw new Error('not read as FatturaPA');
+      const e = input.structured;
+      expect(e.issuer).toMatchObject({ name: f.issuer, vatId: f.vatId });
+      expect([e.invoiceNumber, e.total, e.currency, e.issueDate, e.dueDate]).toEqual([
+        f.invoiceNumber,
+        f.total,
+        f.currency,
+        f.issueDate,
+        f.dueDate,
+      ]);
+      expect(e.payment.method).toBe(f.paymentMethod);
+      expect(e.payment.rgbInvoice ?? '').toBe(f.rgbInvoice);
+      expect(e.lineItems.map((l) => l.amount)).toEqual(f.lineAmounts);
+    });
+  }
+  it('is not fooled by other XML, and never expands entities', async () => {
+    const { isFatturaPA, parseFatturaPA } = await import('../src/extract/fatturapa.js');
+    expect(isFatturaPA('<invoice><total>5</total></invoice>')).toBe(false);
+    expect(parseFatturaPA('<FatturaElettronica></FatturaElettronica>')).toBeUndefined();
+    const bomb =
+      '<!DOCTYPE x [<!ENTITY a "AAAAAAAAAA"><!ENTITY b "&a;&a;&a;&a;&a;">]><FatturaElettronica><FatturaElettronicaHeader><CedentePrestatore><DatiAnagrafici><Anagrafica><Denominazione>&b;</Denominazione></Anagrafica></DatiAnagrafici></CedentePrestatore></FatturaElettronicaHeader><FatturaElettronicaBody><DatiGenerali><DatiGeneraliDocumento><Numero>1</Numero></DatiGeneraliDocumento></DatiGenerali></FatturaElettronicaBody></FatturaElettronica>';
+    expect(parseFatturaPA(bomb)?.issuer.name ?? '').not.toContain('AAAA');
   });
 });
