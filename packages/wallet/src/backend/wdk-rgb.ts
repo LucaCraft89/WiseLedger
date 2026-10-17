@@ -31,7 +31,7 @@ import {
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
-import { loadOrCreateMnemonic } from '../seed.js';
+import { loadOrCreateMnemonic, readSeed } from '../seed.js';
 
 /** The rgb-sdk WalletManager methods we use (wdk-wallet-rgb 2.0.3 exposes some only there). */
 export interface RgbSdkWallet {
@@ -204,11 +204,22 @@ export class WdkRgbWallet implements WalletPort {
     private readonly cfg: WalletConfig,
     deps: { account?: RgbAccount } = {},
   ) {
+    this.passphrase = cfg.seedPassphrase;
     if (deps.account) {
       this.account = deps.account;
       this.sdk = deps.account.getRgbWallet() as RgbSdkWallet;
       this.registered = true;
     }
+  }
+
+  /** Seed passphrase (wallet lock), from WALLET_PASSPHRASE or unlock(). */
+  private passphrase: string | undefined;
+
+  /** Unlocks an encrypted seed and opens the wallet (WalletLocked on a wrong passphrase). */
+  async unlock(passphrase: string): Promise<WalletInfo> {
+    readSeed(this.cfg.dataDir, passphrase);
+    this.passphrase = passphrase;
+    return this.init();
   }
 
   /** The rgb-sdk wallet, for scripts that need BTC-level calls. */
@@ -219,7 +230,7 @@ export class WdkRgbWallet implements WalletPort {
 
   async init(): Promise<WalletInfo> {
     if (!this.account) {
-      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir);
+      const { mnemonic, created } = loadOrCreateMnemonic(this.cfg.dataDir, { passphrase: this.passphrase });
       this.created = created;
       // WDK's generic WalletManager typing does not know the RGB config shape.
       const Manager = WalletManagerRgb as unknown as Parameters<WDK['registerWallet']>[1];
@@ -245,7 +256,7 @@ export class WdkRgbWallet implements WalletPort {
     const marker = path.join(this.cfg.dataDir, 'seed-shown');
     const seedShown = fs.existsSync(marker);
     if (!opts.reveal || seedShown) return { walletCreated: this.created, seedShown };
-    const { mnemonic } = loadOrCreateMnemonic(this.cfg.dataDir);
+    const mnemonic = readSeed(this.cfg.dataDir, this.passphrase);
     fs.writeFileSync(marker, `${new Date().toISOString()}\n`, { mode: 0o600 });
     return { walletCreated: this.created, seedShown: true, mnemonic };
   }

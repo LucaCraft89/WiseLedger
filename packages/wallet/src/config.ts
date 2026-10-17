@@ -11,7 +11,7 @@ export type RgbNetworkName = 'mutinynet' | 'regtest';
 export interface WalletConfig {
   backend: WalletBackendName;
   network: RgbNetworkName;
-  /** One wallet = one data dir = one process. The mnemonic lives in `<dataDir>/mnemonic` (0600). */
+  /** One wallet = one data dir = one process. The seed lives in `<dataDir>/mnemonic` (0600) or `mnemonic.enc` (locked). */
   dataDir: string;
   indexerUrl: string;
   transportEndpoint: string;
@@ -24,6 +24,8 @@ export interface WalletConfig {
   assetAllowlist: string[];
   /** Max base units per asset in a rolling 24 h (DAILY_CAP, default 5 × PAYMENT_CAP). */
   dailyCap: string;
+  /** Unlocks an encrypted seed at start (WALLET_PASSPHRASE, optional; the UI can unlock instead). */
+  seedPassphrase?: string;
 }
 
 const DEFAULTS: Record<RgbNetworkName, Pick<WalletConfig, 'indexerUrl' | 'transportEndpoint' | 'explorerUrl'>> = {
@@ -80,6 +82,7 @@ export function walletConfigFromEnv(
     paymentCap,
     assetAllowlist,
     dailyCap,
+    ...(env.WALLET_PASSPHRASE ? { seedPassphrase: env.WALLET_PASSPHRASE } : {}),
   };
 }
 

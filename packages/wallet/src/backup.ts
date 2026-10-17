@@ -2,10 +2,10 @@
 // needs the mnemonic AND an rgb-lib backup file (encrypted with a passphrase). Mnemonic alone restores bitcoin only.
 import fs from 'node:fs';
 import path from 'node:path';
-import WDK from '@tetherto/wdk';
 import WalletManagerRgb from '@utexo/wdk-wallet-rgb';
 import { WdkRgbWallet } from './backend/wdk-rgb.js';
 import { libNetwork, type WalletConfig } from './config.js';
+import { normalizeMnemonic, writeSeed } from './seed.js';
 
 const MIN_PASSPHRASE = 8;
 
@@ -27,16 +27,17 @@ export function backupWallet(wallet: WdkRgbWallet, opts: { passphrase: string; d
 
 /**
  * Restores a wallet into a FRESH data dir (missing or empty) from the mnemonic, plus the rgb-lib backup file when
- * given (otherwise only bitcoin comes back). Returns a wallet to init(); the seed is stored at `<dataDir>/mnemonic`.
+ * given (otherwise only bitcoin comes back). Returns a wallet to init(); the seed is stored in `<dataDir>`, locked
+ * when `lockPassphrase` is given (wallet lock).
  */
 export async function restoreWallet(opts: {
   cfg: WalletConfig;
   mnemonic: string;
   backupFile?: string;
   passphrase?: string;
+  lockPassphrase?: string;
 }): Promise<WdkRgbWallet> {
-  const mnemonic = opts.mnemonic.trim().toLowerCase().split(/\s+/).join(' ');
-  if (!WDK.isValidSeed(mnemonic)) throw new Error('These words are not a valid recovery phrase.');
+  const mnemonic = normalizeMnemonic(opts.mnemonic);
   const { dataDir } = opts.cfg;
   if (fs.existsSync(dataDir) && fs.readdirSync(dataDir).length > 0)
     throw new Error(`Restore needs an empty folder; ${dataDir} already holds a wallet.`);
@@ -57,6 +58,8 @@ export async function restoreWallet(opts: {
       dataDir,
     } as never);
   }
-  fs.writeFileSync(path.join(dataDir, 'mnemonic'), `${mnemonic}\n`, { mode: 0o600, flag: 'wx' });
-  return new WdkRgbWallet(opts.cfg);
+  writeSeed(dataDir, mnemonic, opts.lockPassphrase);
+  return new WdkRgbWallet(
+    opts.lockPassphrase === undefined ? opts.cfg : { ...opts.cfg, seedPassphrase: opts.lockPassphrase },
+  );
 }

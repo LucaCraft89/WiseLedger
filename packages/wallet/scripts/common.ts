@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { WdkRgbWallet } from '../src/backend/wdk-rgb.js';
 import { walletConfigFromEnv } from '../src/config.js';
+import { seedStatus } from '../src/seed.js';
 
 /** Repo root (scripts run with cwd = packages/wallet under pnpm -F). */
 export const repoRoot = path.resolve(import.meta.dirname, '../../..');
@@ -42,13 +43,15 @@ export async function openWallet(role: Role): Promise<WdkRgbWallet> {
     (process.env.RGB_NETWORK !== 'regtest' && process.env[dataDirVar]) ||
       `${base}/${role === 'payer' ? 'wallet' : 'payee'}`,
   );
-  const cfg = walletConfigFromEnv({ ...process.env, WALLET_BACKEND: 'wdk-rgb', [dataDirVar]: dataDir }, { dataDirVar });
-  const fresh = !fs.existsSync(path.join(cfg.dataDir, 'mnemonic'));
+  // WALLET_PASSPHRASE (wallet lock) belongs to the payer: the payee test wallet stays unlocked.
+  const env = { ...process.env, WALLET_BACKEND: 'wdk-rgb', [dataDirVar]: dataDir };
+  if (role !== 'payer') delete env.WALLET_PASSPHRASE;
+  const cfg = walletConfigFromEnv(env, { dataDirVar });
+  const fresh = seedStatus(cfg.dataDir) === 'none';
   const w = new WdkRgbWallet(cfg);
   await w.init();
   log(role, `network ${cfg.network} · indexer ${cfg.indexerUrl} · data ${path.relative(repoRoot, cfg.dataDir)}`);
-  if (fresh)
-    log(role, `NEW wallet created (mnemonic saved in ${path.relative(repoRoot, cfg.dataDir)}/mnemonic, mode 600)`);
+  if (fresh) log(role, `NEW wallet created (seed saved in ${path.relative(repoRoot, cfg.dataDir)}/, mode 600)`);
   return w;
 }
 
