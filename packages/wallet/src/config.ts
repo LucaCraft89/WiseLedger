@@ -47,7 +47,8 @@ export function walletConfigFromEnv(
   const network = oneOf('RGB_NETWORK', env.RGB_NETWORK, ['mutinynet', 'regtest'] as const, 'mutinynet');
   const d = DEFAULTS[network];
   const feeRate = Number(env.RGB_FEE_RATE ?? '2');
-  if (!Number.isFinite(feeRate) || feeRate < 1) throw new Error(`RGB_FEE_RATE=${env.RGB_FEE_RATE} must be a number ≥ 1.`);
+  if (!Number.isFinite(feeRate) || feeRate < 1)
+    throw new Error(`RGB_FEE_RATE=${env.RGB_FEE_RATE} must be a number ≥ 1.`);
   const dataDirVar = opts.dataDirVar ?? 'WALLET_DATA_DIR';
   return {
     backend,

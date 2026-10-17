@@ -6,7 +6,8 @@ import { fundRegtest, log, mine, openWallet, readAssetId, sleep, tokens } from '
 
 const args = process.argv.slice(2).filter((a) => a !== '--');
 const payIdx = args.indexOf('--pay');
-const amount = payIdx >= 0 && args[payIdx + 1] && /^\d+$/.test(args[payIdx + 1] ?? '') ? (args[payIdx + 1] as string) : '5000000';
+const amount =
+  payIdx >= 0 && args[payIdx + 1] && /^\d+$/.test(args[payIdx + 1] ?? '') ? (args[payIdx + 1] as string) : '5000000';
 const tIdx = args.indexOf('--timeout');
 const timeoutSec = tIdx >= 0 ? Number(args[tIdx + 1]) : 600;
 
@@ -18,11 +19,18 @@ if (args.includes('--fund-regtest')) {
   log('both', 'funded from the local regtest miner');
 }
 await Promise.all([payer.sync(), payee.sync()]);
-for (const [role, w] of [['payer', payer], ['payee', payee]] as const) {
+for (const [role, w] of [
+  ['payer', payer],
+  ['payee', payee],
+] as const) {
   const b = w.btcBalance();
   log(role, `BTC vanilla ${b.vanilla.settled} sats (spendable ${b.vanilla.spendable}) · colored ${b.colored.settled}`);
   if (payIdx < 0) log(role, `funding address ${await w.receiveAddress()}`);
-  for (const a of await w.listAssets()) log(role, `${a.ticker} ${a.assetId} settled ${tokens(a.balance.settled, a.precision)} spendable ${tokens(a.balance.spendable, a.precision)}`);
+  for (const a of await w.listAssets())
+    log(
+      role,
+      `${a.ticker} ${a.assetId} settled ${tokens(a.balance.settled, a.precision)} spendable ${tokens(a.balance.spendable, a.precision)}`,
+    );
 }
 
 if (payIdx >= 0) {

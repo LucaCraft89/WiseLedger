@@ -39,14 +39,16 @@ export async function openWallet(role: Role): Promise<WdkRgbWallet> {
   const base = process.env.RGB_NETWORK === 'regtest' ? '.data/regtest' : '.data';
   const dataDir = path.resolve(
     repoRoot,
-    (process.env.RGB_NETWORK !== 'regtest' && process.env[dataDirVar]) || `${base}/${role === 'payer' ? 'wallet' : 'payee'}`,
+    (process.env.RGB_NETWORK !== 'regtest' && process.env[dataDirVar]) ||
+      `${base}/${role === 'payer' ? 'wallet' : 'payee'}`,
   );
   const cfg = walletConfigFromEnv({ ...process.env, WALLET_BACKEND: 'wdk-rgb', [dataDirVar]: dataDir }, { dataDirVar });
   const fresh = !fs.existsSync(path.join(cfg.dataDir, 'mnemonic'));
   const w = new WdkRgbWallet(cfg);
   await w.init();
   log(role, `network ${cfg.network} · indexer ${cfg.indexerUrl} · data ${path.relative(repoRoot, cfg.dataDir)}`);
-  if (fresh) log(role, `NEW wallet created (mnemonic saved in ${path.relative(repoRoot, cfg.dataDir)}/mnemonic, mode 600)`);
+  if (fresh)
+    log(role, `NEW wallet created (mnemonic saved in ${path.relative(repoRoot, cfg.dataDir)}/mnemonic, mode 600)`);
   return w;
 }
 
