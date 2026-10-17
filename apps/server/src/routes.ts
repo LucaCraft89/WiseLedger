@@ -9,8 +9,10 @@ import {
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
   type HealthResponse,
+  IllegalTransition,
   type InvoiceDetailResponse,
   type InvoiceListResponse,
+  InvoiceStateSchema,
   type InvoiceSummaryDto,
   type LlmInfo,
   RejectRequest,
@@ -25,7 +27,7 @@ import {
 } from 'core';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
-import { ApiFailure, type Orchestrator } from './orchestrator.js';
+import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import { streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 
@@ -92,6 +94,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ApiFailure) return reply.status(err.status).send(apiError(err.code, err.message));
+    if (err instanceof IllegalTransition) {
+      const f = invalidTransition(err.from, err.to);
+      return reply.status(f.status).send(apiError(f.code, f.message));
+    }
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
@@ -142,13 +148,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { invoiceId: created.id, state: created.state };
   });
 
-  route(
-    app,
-    API_ROUTES.listInvoices,
-    async (): Promise<InvoiceListResponse> => ({
-      invoices: store.list().map(toSummary),
-    }),
-  );
+  // Optional ?state=EXECUTING (comma-separated) filter, e.g. to find payments waiting for a wallet sync.
+  route(app, API_ROUTES.listInvoices, async (req): Promise<InvoiceListResponse> => {
+    const raw = (req.query as { state?: string } | undefined)?.state;
+    const states = raw ? raw.split(',').map((s) => InvoiceStateSchema.parse(s.trim().toUpperCase())) : [];
+    return { invoices: store.list({ states }).map(toSummary) };
+  });
 
   route(app, API_ROUTES.getInvoice, async (req): Promise<InvoiceDetailResponse> => {
     const inv = store.get(idParam(req));
