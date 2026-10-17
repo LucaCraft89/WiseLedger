@@ -13,6 +13,7 @@ import {
   HealthResponse,
   InvoiceDetailResponse,
   InvoiceListResponse,
+  isLightningInvoice,
   RejectRequest,
   RejectResponse,
   TransfersResponse,
@@ -285,6 +286,18 @@ describe('confirmation sentence', () => {
     expect(buildConfirmationSentence(plan, { ticker: 'TUSDT', precision: 6 })).toBe(
       'Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?',
     );
+  });
+  it('says "via Lightning (instant)" for an RGB Lightning invoice, nothing for rgb:', () => {
+    const asset = { ticker: 'TUSDT', precision: 6 };
+    expect(buildConfirmationSentence({ ...plan, rgbInvoice: 'lntbs250u1pjrgbtusdtmockinvoice0hash' }, asset)).toBe(
+      'Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl via Lightning (instant), now. Confirm?',
+    );
+    expect(
+      buildConfirmationSentence({ ...plan, rgbInvoice: 'rgb:mock/rgb:mock-tusdt/25000000/1900000000' }, asset),
+    ).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?');
+    expect(isLightningInvoice('lightning:LNBCRT250U1PJRGBMOCKINVOICE')).toBe(true);
+    expect(isLightningInvoice('lnbc1')).toBe(false);
+    expect(isLightningInvoice('rgb:abc')).toBe(false);
   });
   it('names the date for a scheduled payment', () => {
     expect(

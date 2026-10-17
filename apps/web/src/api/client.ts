@@ -13,6 +13,7 @@ import {
   type InvoiceListResponse,
   type LabelsPutRequest,
   type LabelsPutResponse,
+  type LightningStatusResponse,
   type OnboardingCreateRequest,
   type OnboardingCreateResponse,
   type OnboardingOkResponse,
@@ -52,6 +53,8 @@ export interface ApiClient {
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
   /** Payment requests handed out, newest first, with the status of the payment that answers each. */
   receives(): Promise<ReceivesListResponse>;
+  /** Lightning node and channels. A server without the route (404) counts as Lightning off. */
+  lightning(): Promise<LightningStatusResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** Replace the labels of one transfer. */
@@ -76,6 +79,9 @@ export interface ApiClient {
 }
 
 /** Answer used when the server has no onboarding route (older server): the wallet is simply ready. */
+/** What a server without Lightning (or without the route) means. */
+export const LIGHTNING_OFF: LightningStatusResponse = { enabled: false, channels: [] };
+
 export const READY_ONBOARDING: OnboardingStatusResponse = {
   state: 'ready',
   seedShown: true,
@@ -152,6 +158,14 @@ export function createHttpClient(base = ''): ApiClient {
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
     receives: () => call(`${base}/api/wallet/receives`),
+    async lightning() {
+      try {
+        return await call<LightningStatusResponse>(`${base}/api/wallet/lightning`);
+      } catch (err) {
+        if (err instanceof ApiCallError && err.status === 404) return LIGHTNING_OFF;
+        throw err;
+      }
+    },
     transfers: () => call(`${base}/api/transfers`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),

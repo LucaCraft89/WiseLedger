@@ -52,6 +52,8 @@ export const TransferEvent = z.object({
   transferId: z.string(),
   status: TransferStatusSchema,
   txid: z.string().optional(),
+  /** Lightning payments: no txid, the payment hash identifies the payment. */
+  paymentHash: z.string().optional(),
 });
 /** Plain-language error for the UI (additive to the PLAN sketch). */
 export const ErrorEvent = z.object({ type: z.literal('error'), ...base, code: z.string(), message: z.string() });

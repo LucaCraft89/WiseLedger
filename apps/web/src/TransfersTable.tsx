@@ -70,6 +70,8 @@ export function TransfersTable({
                   <a href={t.explorerUrl ?? explorerTxUrl(t.txid)} target="_blank" rel="noreferrer" title={t.txid}>
                     {shortId(t.txid, 6)}
                   </a>
+                ) : t.paymentHash ? (
+                  <span title={`Lightning payment hash ${t.paymentHash}`}>Lightning · {shortId(t.paymentHash, 6)}</span>
                 ) : (
                   '—'
                 )}

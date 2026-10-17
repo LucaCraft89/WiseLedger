@@ -80,8 +80,11 @@ export interface ChatInvoice {
   state: string;
   /** ISO upload time: chat lists invoices newest first and marks the latest ("pay the latest invoice"). */
   createdAt?: string;
-  /** Present when a payment can be made: the code-built proposed payment. */
-  payment?: { amount: string; assetId: string };
+  /**
+   * Present when a payment can be made: the code-built proposed payment. `rgbInvoice` only picks the rail for the
+   * confirmation sentence ("via Lightning (instant)"); it never goes into a prompt.
+   */
+  payment?: { amount: string; assetId: string; rgbInvoice?: string };
 }
 type AnyTool = ToolDef<Record<string, unknown>>;
 
@@ -529,6 +532,7 @@ export class Treasurer implements TreasurerAgent {
         {
           amount: inv.payment.amount,
           assetId: inv.payment.assetId,
+          ...(inv.payment.rgbInvoice ? { rgbInvoice: inv.payment.rgbInvoice } : {}),
           payee: { name: safeName(inv.supplier) },
           executeAt: new Date(t).toISOString(),
         },
