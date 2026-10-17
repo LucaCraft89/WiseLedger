@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppEvent, InvoiceState } from './api/contracts.js';
 import { AppEvent as AppEventSchema, InvoiceDetailResponse, InvoiceListResponse } from './api/contracts.js';
 import { createFakeClient } from './api/fake.js';
+import { confirmGate, dialogSentence, paymentProgress } from './lib/confirm.js';
 import {
   buildFullTimeline,
   buildTimeline,
@@ -133,5 +134,98 @@ describe('fake listInvoices', () => {
     expect(list.invoices.map((i) => i.id)).toEqual([b.invoiceId, a.invoiceId]);
     expect(list.invoices[0]?.verdict).toBe('block');
     expect(list.invoices[1]?.state).toBe('AWAITING_CONFIRMATION');
+  });
+});
+
+describe('confirmation dialog', () => {
+  const tusdt = { assetId: 'rgb:mock-tusdt', ticker: 'TUSDT', precision: 6 };
+  const plan = {
+    amount: '25000000',
+    assetId: 'rgb:mock-tusdt',
+    payee: { name: 'Acme Srl' },
+    executeAt: 'now' as const,
+  };
+
+  it('builds the exact sentence for the ok-basic plan', () => {
+    expect(dialogSentence(plan, [tusdt])).toBe('Pay 25.00 TUSDT (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?');
+  });
+
+  it('matches the asset by ID, never by ticker', () => {
+    const other = { ...tusdt, assetId: 'rgb:other' };
+    expect(dialogSentence(plan, [other])).toBe(
+      'Pay 25000000 base units (asset rgb:mock-tusdt) to Acme Srl, now. Confirm?',
+    );
+  });
+
+  it('gates confirm by verdict', () => {
+    expect(confirmGate('ok', false)).toEqual({ canConfirm: true });
+    expect(confirmGate('review', false)).toEqual({ canConfirm: false });
+    expect(confirmGate('review', true)).toEqual({ canConfirm: true, override: true });
+    expect(confirmGate('block', true)).toEqual({ canConfirm: false });
+  });
+
+  it('folds transfer events into the 4-step progress', () => {
+    const at = '2026-10-17T10:00:00.000Z';
+    const statuses = (p: ReturnType<typeof paymentProgress>) => p.steps.map((s) => s.status);
+    const executing: AppEvent[] = [{ type: 'state', at, from: 'CONFIRMED', to: 'EXECUTING' }];
+    expect(statuses(paymentProgress('EXECUTING', executing))).toEqual(['running', 'pending', 'pending', 'pending']);
+    const waiting = [
+      ...executing,
+      { type: 'transfer', at, transferId: 't1', status: 'WaitingCounterparty' } as AppEvent,
+    ];
+    expect(statuses(paymentProgress('EXECUTING', waiting))).toEqual(['done', 'running', 'pending', 'pending']);
+    const confirming = [
+      ...waiting,
+      { type: 'transfer', at, transferId: 't1', status: 'WaitingConfirmations', txid: 'tx1' } as AppEvent,
+    ];
+    const p = paymentProgress('EXECUTING', confirming);
+    expect(statuses(p)).toEqual(['done', 'done', 'running', 'pending']);
+    expect(p.txid).toBe('tx1');
+    expect(statuses(paymentProgress('PAID', confirming))).toEqual(['done', 'done', 'done', 'done']);
+    const failed = [
+      ...waiting,
+      { type: 'error', at, code: 'X', message: 'The supplier wallet did not answer.' } as AppEvent,
+      { type: 'transfer', at, transferId: 't1', status: 'Failed' } as AppEvent,
+    ];
+    const f = paymentProgress('FAILED', failed);
+    expect(f.failed).toBe(true);
+    expect(f.errorMessage).toBe('The supplier wallet did not answer.');
+    expect(statuses(f)).toEqual(['done', 'pending', 'pending', 'pending']);
+  });
+});
+
+describe('fake confirm flows', () => {
+  it('ok: wallet assets give the code-built sentence, confirm reaches Paid with transfer ID', async () => {
+    const api = fast();
+    const assets = (await api.wallet()).assets;
+    expect(assets.map((a) => a.ticker)).toContain('TUSDT');
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'acme.txt' });
+    const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
+    if (!d.plan) throw new Error('no plan');
+    expect(dialogSentence(d.plan, assets)).toBe(d.confirmationSentence);
+    await api.confirm(invoiceId, { planId: d.plan.planId, override: confirmGate('ok', false).override });
+    const paid = await waitForState(api, invoiceId, 'PAID');
+    const p = paymentProgress(paid.invoice.state, paid.events, paid.execution);
+    expect(p.steps.every((s) => s.status === 'done')).toBe(true);
+    expect(p.transferId).toBeTruthy();
+  });
+
+  it('block: no plan, confirm refused; reject archives it', async () => {
+    const api = fast();
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'scam.txt' });
+    const d = await waitForState(api, invoiceId, 'BLOCKED');
+    expect(d.plan).toBeUndefined();
+    expect(confirmGate('block', true).canConfirm).toBe(false);
+    await expect(api.confirm(invoiceId, { planId: 'x' })).rejects.toThrow(/not waiting/);
+    expect((await api.reject(invoiceId)).state).toBe('REJECTED');
+  });
+
+  it('reject: an ok invoice can be refused, then cannot be confirmed', async () => {
+    const api = fast();
+    const { invoiceId } = await api.createInvoice({ text: 'x', filename: 'acme.txt' });
+    const d = await waitForState(api, invoiceId, 'AWAITING_CONFIRMATION');
+    expect((await api.reject(invoiceId, 'I do not know this supplier')).state).toBe('REJECTED');
+    await expect(api.confirm(invoiceId, { planId: d.plan?.planId ?? '' })).rejects.toThrow(/not waiting/);
+    await expect(api.reject(invoiceId)).rejects.toThrow(/no longer/);
   });
 });
