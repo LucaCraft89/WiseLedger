@@ -29,6 +29,18 @@ import {
 } from 'core';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import {
+  FiscalQuery,
+  type LabelsListResponse,
+  LabelsPutRequest,
+  M3_ROUTES,
+  type ScheduleCancelResponse,
+  ScheduleListQuery,
+  type ScheduleListResponse,
+} from './api-local.js';
+import type { WalletFiscalService } from './fiscal.js';
+import type { SqliteJobStore } from './jobs.js';
+import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
@@ -39,6 +51,9 @@ export interface RouteDeps {
   orchestrator: Orchestrator;
   wallet: WalletPort;
   treasurer: TreasurerAgent;
+  labels: SqliteLabelStore;
+  jobs: SqliteJobStore;
+  fiscal: WalletFiscalService;
   llmInfo: () => LlmInfo;
   walletBackend: WalletResponse['backend'];
   network: WalletResponse['network'];
@@ -86,7 +101,7 @@ function isTooLarge(err: unknown): boolean {
   return e.statusCode === 413 || e.code === 'FST_REQ_FILE_TOO_LARGE' || e.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
 }
 
-type Method = 'GET' | 'POST';
+type Method = 'GET' | 'POST' | 'PUT';
 type Handler = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown> | unknown;
 
 function route(app: FastifyInstance, spec: string, handler: Handler): void {
@@ -118,14 +133,14 @@ export function toSummary(inv: StoredInvoice): InvoiceSummaryDto {
   };
 }
 
-function toTransferDto(t: TransferInfo, invoiceId: string | undefined): TransferDto {
+function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: string[]): TransferDto {
   return {
     transferId: t.transferId,
     assetId: t.assetId ?? '',
     amount: t.amount,
     direction: t.direction === 'outgoing' ? 'out' : 'in',
     status: t.status,
-    labels: [],
+    labels,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     ...(t.txid ? { txid: t.txid } : {}),
@@ -278,9 +293,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.transfers, async (): Promise<TransfersResponse> => {
     const transfers = await wallet.listTransfers();
+    const labels = await deps.labels.effectiveLabelsMap(transfers.map((t) => t.transferId));
     return {
       transfers: transfers
-        .map((t) => toTransferDto(t, store.invoiceForTransfer(t.transferId)))
+        .map((t) => toTransferDto(t, store.invoiceForTransfer(t.transferId), labels.get(t.transferId) ?? []))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     };
   });
@@ -296,4 +312,55 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const emit = (event: AppEvent) => store.appendEvent(event);
     return treasurer.chat(body.message, body.history ?? [], emit);
   });
+
+  route(app, M3_ROUTES.scheduleList, async (req): Promise<ScheduleListResponse> => {
+    const q = ScheduleListQuery.parse(req.query ?? {});
+    return { jobs: await deps.jobs.list(q.status ? { status: q.status } : {}) };
+  });
+
+  // Cancels a pending job; its SCHEDULED invoice is rejected so it does not stay "scheduled" forever.
+  route(app, M3_ROUTES.scheduleCancel, async (req): Promise<ScheduleCancelResponse> => {
+    const { jobId } = req.params as { jobId: string };
+    const job = await deps.jobs.get(jobId);
+    if (!job) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this scheduled payment.');
+    if (!(await deps.jobs.cancel(jobId))) {
+      throw new ApiFailure(
+        409,
+        'JOB_NOT_PENDING',
+        `This scheduled payment cannot be cancelled any more (it is ${job.status}).`,
+      );
+    }
+    if (store.get(job.invoiceId)?.state === 'SCHEDULED') orchestrator.reject(job.invoiceId, {});
+    return { ok: true };
+  });
+
+  route(app, M3_ROUTES.labelsList, async (): Promise<LabelsListResponse> => ({ labels: await deps.labels.list() }));
+
+  route(app, M3_ROUTES.labelsPutPayee, async (req) => {
+    const name = ((req.params as { name: string }).name ?? '').trim();
+    if (!name || name.length > 200) throw new ApiFailure(400, 'VALIDATION', 'Please give the payee name.');
+    const body = LabelsPutRequest.parse(req.body ?? {});
+    return deps.labels.set(payeeTarget(name), body.labels, body.note);
+  });
+
+  // Target = a transferId, an invoiceId (unpaid invoices) or `payee:<name>`.
+  route(app, M3_ROUTES.labelsPut, async (req) => {
+    const target = ((req.params as { transferId: string }).transferId ?? '').trim();
+    if (!target || target.length > 200 || target === PAYEE_PREFIX) {
+      throw new ApiFailure(400, 'VALIDATION', 'Please say which payment the labels are for.');
+    }
+    const body = LabelsPutRequest.parse(req.body ?? {});
+    return deps.labels.set(target, body.labels, body.note);
+  });
+
+  const fiscalDownload: Handler = async (req, reply) => {
+    const q = FiscalQuery.parse(req.query ?? {});
+    const report = await deps.fiscal.report(q.from, q.to, q.format, { includeFailed: q.includeFailed === 'true' });
+    reply
+      .header('content-type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json; charset=utf-8')
+      .header('content-disposition', `attachment; filename="${report.filename}"`);
+    return report.content;
+  };
+  route(app, M3_ROUTES.fiscal, fiscalDownload);
+  route(app, M3_ROUTES.fiscalAlias, fiscalDownload);
 }
