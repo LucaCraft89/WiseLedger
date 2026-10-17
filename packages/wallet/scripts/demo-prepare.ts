@@ -5,12 +5,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
-import { log, openWallet, readAssetId, repoRoot, tokens } from './common.js';
+import { loadDotEnv, log, openWallet, readAssetId, repoRoot, tokens } from './common.js';
+
+// The demo runs on real backends only (PLAN §0.3/§1.1): a mock server would show fake payments.
+loadDotEnv();
+const mocked = [
+  process.env.WALLET_BACKEND !== 'wdk-rgb' && process.env.WALLET_BACKEND !== 'rgb-lib' && 'WALLET_BACKEND=wdk-rgb',
+  (process.env.LLM_PROVIDER ?? 'mock') === 'mock' && 'LLM_PROVIDER=qvac',
+].filter(Boolean);
+if (mocked.length && process.env.DEMO_ALLOW_MOCK !== '1') {
+  console.error(
+    `demo:prepare refuses to prepare a demo on mocks. Set ${mocked.join(' and ')} in .env (or export them), then run it again.`,
+  );
+  process.exit(1);
+}
 
 const outDir = path.join(repoRoot, '.data/demo');
 const EXPIRY_SEC = 24 * 3600;
 const today = new Date();
 const day = (offset: number) => new Date(today.getTime() + offset * 86_400_000).toISOString().slice(0, 10);
+// A new invoice number per run (minute of the day), so a second run is not a duplicate of the first one paid.
+const number = `2026-${String(today.getHours() * 60 + today.getMinutes()).padStart(4, '0')}`;
 
 interface DemoInvoice {
   file: string;
@@ -35,7 +50,7 @@ log('payee', 'created 4 RGB invoices (24 h expiry)');
 const invoices: DemoInvoice[] = [
   {
     file: '1-good-acme.pdf',
-    title: 'INVOICE No. 2026-042',
+    title: `INVOICE No. ${number}`,
     lines: [
       'ACME SRL',
       'Via Roma 12, 10121 Torino (TO) · P.IVA IT01234567890',
@@ -68,7 +83,7 @@ const invoices: DemoInvoice[] = [
   },
   {
     file: '3-duplicate-acme.pdf',
-    title: 'INVOICE No. 2026-042 (copy)',
+    title: `INVOICE No. ${number} (copy)`,
     lines: [
       'ACME SRL',
       'Via Roma 12, 10121 Torino (TO) · P.IVA IT01234567890',
