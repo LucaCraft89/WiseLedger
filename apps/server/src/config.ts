@@ -1,13 +1,21 @@
-// Server configuration from env. Only the mock backends exist in M0: any other value fails fast at startup.
+// Server configuration from env. Unsupported values fail fast at startup with a plain message.
 import { fileURLToPath } from 'node:url';
 
 export interface ServerConfig {
   port: number;
   host: string;
-  llmProvider: 'mock';
-  walletBackend: 'mock';
+  llmProvider: 'qvac' | 'openai' | 'mock';
+  walletBackend: 'mock' | 'wdk-rgb';
   rgbNetwork: 'mutinynet' | 'regtest';
   uploadDir: string;
+  /** Largest accepted upload in MB (env UPLOAD_MAX_MB, default 10). */
+  uploadMaxMb: number;
+  /** Asset IDs the user accepts to pay with (env ASSET_ALLOWLIST, comma-separated). Empty = the one NIA asset held. */
+  assetAllowlist: string[];
+  /** Max amount per payment in base units (env PAYMENT_CAP). */
+  paymentCap: string;
+  /** Background wallet sync period for the real backend (env WALLET_SYNC_MS, default 15000). */
+  walletSyncMs: number;
   /** SQLite file (env DB_PATH), or `:memory:`. */
   dbPath: string;
   /** MockWallet status step and MockAnalyzer stage delay, in ms. */
@@ -47,14 +55,30 @@ function int(env: NodeJS.ProcessEnv, name: string, fallback: number, min = 0, ma
   return n;
 }
 
+function baseUnits(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
+  const raw = env[name]?.trim();
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) {
+    throw new ConfigError(`${name}=${raw} must be an amount in base units, digits only (5000000 = 5 TUSDT).`);
+  }
+  return raw;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     port: int(env, 'PORT', 8787, 0, 65535),
     host: env.HOST?.trim() || '127.0.0.1',
-    llmProvider: oneOf(env, 'LLM_PROVIDER', ['mock'] as const, 'mock'),
-    walletBackend: oneOf(env, 'WALLET_BACKEND', ['mock'] as const, 'mock'),
+    llmProvider: oneOf(env, 'LLM_PROVIDER', ['qvac', 'openai', 'mock'] as const, 'mock'),
+    walletBackend: oneOf(env, 'WALLET_BACKEND', ['mock', 'wdk-rgb'] as const, 'mock'),
     rgbNetwork: oneOf(env, 'RGB_NETWORK', ['mutinynet', 'regtest'] as const, 'mutinynet'),
     uploadDir: env.UPLOAD_DIR?.trim() || DEFAULT_UPLOAD_DIR,
+    uploadMaxMb: int(env, 'UPLOAD_MAX_MB', 10, 1, 200),
+    assetAllowlist: (env.ASSET_ALLOWLIST ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    paymentCap: baseUnits(env, 'PAYMENT_CAP', '100000000'),
+    walletSyncMs: int(env, 'WALLET_SYNC_MS', 15_000, 1000),
     dbPath: env.DB_PATH?.trim() || DEFAULT_DB_PATH,
     mockStepMs: int(env, 'MOCK_STEP_MS', 1000),
   };

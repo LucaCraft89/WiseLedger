@@ -8,10 +8,12 @@ import {
   type AnalysisReport,
   type AppEvent,
   assertTransition,
+  buildConfirmationSentence,
   type ConfirmRequest,
   type ConfirmResponse,
   canTransition,
   type ExecutionResult,
+  FLAG_CODES,
   IllegalTransition,
   type InvoiceAnalyzer,
   type InvoiceSourceKind,
@@ -20,10 +22,13 @@ import {
   type PaymentPlan,
   type RejectRequest,
   type RejectResponse,
+  type TransferInfo,
+  type TransferStatus,
   type TreasurerAgent,
   type WalletPort,
 } from 'core';
 import type { FastifyBaseLogger } from 'fastify';
+import { RETRY_SAFE } from 'wallet';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 
 /** Error with an HTTP status and a stable code; message is plain language for the user. */
@@ -59,12 +64,24 @@ export interface RecoveryReport {
   awaitingSync: string[];
 }
 
+/** What settleFromTransfers() did (invoice IDs). */
+export interface SettleReport {
+  paid: string[];
+  failed: string[];
+  /** Timed-out payments linked to the outgoing transfer found for their rgbInvoice. */
+  linked: string[];
+  /** Still waiting for the chain (or for the transfer to appear). */
+  pending: string[];
+}
+
 type Log = Pick<FastifyBaseLogger, 'info' | 'warn'>;
 
 export interface NewUpload {
   filename: string;
   mimeType?: string;
   data: Buffer;
+  /** Kind already established by the upload checks; otherwise guessed from name and MIME type. */
+  kind?: InvoiceSourceKind;
 }
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff']);
@@ -78,14 +95,6 @@ export function detectKind(filename: string, mimeType?: string): InvoiceSourceKi
   return 'text';
 }
 
-/** Base units → human decimal, trailing zeros trimmed to at least 2 decimals ("25000000", 6 → "25.00"; "25123400" → "25.1234"). */
-export function formatUnits(amount: string, precision: number): string {
-  if (precision === 0) return amount;
-  const padded = amount.padStart(precision + 1, '0');
-  const frac = padded.slice(-precision).replace(/0+$/, '').padEnd(Math.min(2, precision), '0');
-  return `${padded.slice(0, -precision)}.${frac}`;
-}
-
 export class Orchestrator {
   private readonly store: InvoiceStore;
   private readonly now: () => Date;
@@ -93,6 +102,11 @@ export class Orchestrator {
   private readonly tasks = new Set<Promise<void>>();
   /** Invoices found mid-payment at startup; cleared when they leave EXECUTING. */
   private readonly interrupted = new Set<string>();
+  /** Invoices whose treasurer.execute() is still running: settleFromTransfers() leaves them alone. */
+  private readonly executing = new Set<string>();
+  /** Last status seen per transfer not linked to an invoice (null until the first settle pass). */
+  private knownTransfers: Map<string, TransferStatus> | null = null;
+  private settling: Promise<SettleReport> | null = null;
 
   constructor(private readonly deps: OrchestratorDeps) {
     this.store = deps.store;
@@ -147,7 +161,7 @@ export class Orchestrator {
 
   async createInvoice(upload: NewUpload): Promise<StoredInvoice> {
     const id = `inv_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
-    const kind = detectKind(upload.filename, upload.mimeType);
+    const kind = upload.kind ?? detectKind(upload.filename, upload.mimeType);
     const ext = safeExt(upload.filename) || (kind === 'text' ? '.txt' : '');
     const sha256 = createHash('sha256').update(upload.data).digest('hex');
     // Content-addressed: the same file uploaded twice is stored once; the record keeps the original filename.
@@ -200,10 +214,18 @@ export class Orchestrator {
     }
   }
 
-  /** ANALYZED → BLOCKED, or plan + sentence → AWAITING_CONFIRMATION. */
+  /**
+   * ANALYZED → BLOCKED (verdict block), or plan + sentence → AWAITING_CONFIRMATION. A report that is not blocked
+   * but has no payment we can make (e.g. AI_UNAVAILABLE) also waits for the user, without a plan: they can read
+   * it and reject it; confirm is refused with a plain 409.
+   */
   private async finishAnalysis(id: string, report: AnalysisReport): Promise<void> {
-    if (report.verdict === 'block' || !report.proposedPayment) {
+    if (report.verdict === 'block') {
       this.transition(id, 'BLOCKED');
+      return;
+    }
+    if (!report.proposedPayment) {
+      this.transition(id, 'AWAITING_CONFIRMATION');
       return;
     }
     const plan = await this.planFromReport(id, report);
@@ -298,12 +320,10 @@ export class Orchestrator {
     });
   }
 
+  /** The shared sentence builder (core), so server and web always show the same words. */
   private async sentenceFor(plan: PaymentPlan): Promise<string> {
-    const assets = await this.deps.wallet.listAssets();
-    const asset = assets.find((a) => a.assetId === plan.assetId);
-    const amount = asset ? `${formatUnits(plan.amount, asset.precision)} ${asset.ticker}` : `${plan.amount} base units`;
-    const when = plan.executeAt === 'now' ? 'now' : `on ${plan.executeAt}`;
-    return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
+    const asset = (await this.deps.wallet.listAssets()).find((a) => a.assetId === plan.assetId);
+    return buildConfirmationSentence(plan, asset);
   }
 
   async confirm(id: string, req: ConfirmRequest): Promise<ConfirmResponse> {
@@ -312,7 +332,30 @@ export class Orchestrator {
     if (inv.state === 'BLOCKED' || report?.verdict === 'block') {
       throw new ApiFailure(409, 'VERDICT_BLOCK', 'This invoice was blocked as dangerous and cannot be paid.');
     }
-    if (inv.state !== 'AWAITING_CONFIRMATION' || !report || !inv.plan) {
+    if (inv.state === 'AWAITING_CONFIRMATION' && report && !report.proposedPayment) {
+      if (report.flags.some((f) => f.code === FLAG_CODES.AI_UNAVAILABLE)) {
+        throw new ApiFailure(
+          409,
+          'AI_UNAVAILABLE',
+          'The local AI could not read this invoice, so there is no payment to confirm. Check it yourself or upload it again.',
+        );
+      }
+      throw new ApiFailure(
+        409,
+        'NO_PAYMENT',
+        'This invoice has no RGB payment we can make. Check it yourself, then reject it or ask the supplier for an RGB invoice.',
+      );
+    }
+    // Retry after a failure: only when nothing can have been sent (wallet RETRY_SAFE codes).
+    const retry = inv.state === 'FAILED';
+    if (retry && !RETRY_SAFE.has(inv.result?.error?.code ?? '')) {
+      throw new ApiFailure(
+        409,
+        'RETRY_NOT_SAFE',
+        'This payment may already have left the wallet, so it cannot be retried. Check the transfer list first.',
+      );
+    }
+    if ((!retry && inv.state !== 'AWAITING_CONFIRMATION') || !report || !inv.plan) {
       throw new ApiFailure(409, 'INVALID_TRANSITION', `This invoice cannot be confirmed now (state ${inv.state}).`);
     }
     if (report.verdict === 'review' && req.override !== true) {
@@ -340,6 +383,15 @@ export class Orchestrator {
   }
 
   private async execute(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
+    this.executing.add(id);
+    try {
+      await this.runExecution(id, plan, confirmation);
+    } finally {
+      this.executing.delete(id);
+    }
+  }
+
+  private async runExecution(id: string, plan: PaymentPlan, confirmation: { planId: string; confirmedAt: string }) {
     this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'start' });
     let result: ExecutionResult;
     try {
@@ -347,8 +399,20 @@ export class Orchestrator {
     } catch (err) {
       result = { planId: plan.planId, status: 'failed', error: { code: 'EXECUTION_ERROR', message: messageOf(err) } };
     }
+    // A send timeout may be on chain: treat it as submitted (stay EXECUTING, never FAILED, never retried).
+    if (result.status === 'failed' && result.error?.code === 'SubmitTimeout') {
+      result = {
+        planId: result.planId,
+        status: 'submitted',
+        ...(result.transferId ? { transferId: result.transferId } : {}),
+        ...(result.txid ? { txid: result.txid } : {}),
+        error: result.error,
+      };
+    }
     this.store.update(id, { result });
     if (result.transferId) this.store.linkTransfer(result.transferId, id);
+    // Something else (e.g. a wallet sync) already settled it while we waited.
+    if (this.mustGet(id).state !== 'EXECUTING') return;
     switch (result.status) {
       case 'settled':
         this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
@@ -363,16 +427,135 @@ export class Orchestrator {
         this.fail(id, result.error?.code ?? 'PAYMENT_FAILED', result.error?.message ?? 'The payment failed.');
         return;
       case 'submitted':
-        // Sent but not settled yet: stay EXECUTING (never retry automatically).
+        // Sent (or maybe sent, after a timeout) but not settled yet: stay EXECUTING; the wallet sync settles it.
         this.emit({
           type: 'stage',
           invoiceId: id,
           at: this.at(),
           stage: 'executing',
           status: 'end',
-          message: 'The payment was sent and is waiting for confirmation on chain.',
+          message: result.error
+            ? 'The payment was submitted but the wallet did not answer in time. It will not be sent again; the next wallet sync will show whether it went through.'
+            : 'The payment was sent and is waiting for confirmation on chain.',
         });
         return;
+    }
+  }
+
+  /**
+   * Called after each wallet sync. EXECUTING invoices (not being executed right now) are settled from the wallet:
+   * the stored transferId (or, after a timeout without one, the outgoing transfer paying the plan's rgbInvoice) is
+   * read; Settled → PAID, Failed → FAILED. Emits `transfer` events on status changes (invoice-linked ones on the
+   * invoice stream, the others on the global stream) and `state` events through transition().
+   */
+  settleFromTransfers(): Promise<SettleReport> {
+    this.settling ??= this.settleOnce().finally(() => {
+      this.settling = null;
+    });
+    return this.settling;
+  }
+
+  private async settleOnce(): Promise<SettleReport> {
+    const out: SettleReport = { paid: [], failed: [], linked: [], pending: [] };
+    const transfers = await this.deps.wallet.listTransfers();
+    const byId = new Map(transfers.map((t) => [t.transferId, t]));
+
+    for (const inv of this.store.list({ states: ['EXECUTING'] })) {
+      const id = inv.id;
+      if (this.executing.has(id) || !inv.plan) continue;
+      let transferId = inv.result?.transferId;
+      if (!transferId) {
+        const match = transfers.find(
+          (t) =>
+            t.direction === 'outgoing' &&
+            t.rgbInvoice === inv.plan?.rgbInvoice &&
+            t.status !== 'Failed' &&
+            !this.store.invoiceForTransfer(t.transferId),
+        );
+        if (!match) {
+          out.pending.push(id);
+          continue;
+        }
+        transferId = match.transferId;
+        this.store.linkTransfer(transferId, id);
+        this.store.update(id, {
+          result: {
+            ...(inv.result ?? { planId: inv.plan.planId, status: 'submitted' }),
+            transferId,
+            ...(match.txid ? { txid: match.txid } : {}),
+          },
+        });
+        out.linked.push(id);
+      }
+      const t = byId.get(transferId) ?? (await this.deps.wallet.getTransfer(transferId));
+      if (!t) {
+        out.pending.push(id);
+        continue;
+      }
+      this.emitTransferChange(id, t);
+      if (t.status === 'Settled') {
+        this.store.update(id, {
+          result: { planId: inv.plan.planId, status: 'settled', transferId, ...(t.txid ? { txid: t.txid } : {}) },
+        });
+        this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'executing', status: 'end' });
+        this.transition(id, 'PAID');
+        this.emit({ type: 'stage', invoiceId: id, at: this.at(), stage: 'done', status: 'end' });
+        out.paid.push(id);
+      } else if (t.status === 'Failed') {
+        this.store.update(id, {
+          result: {
+            planId: inv.plan.planId,
+            status: 'failed',
+            transferId,
+            ...(t.txid ? { txid: t.txid } : {}),
+            error: { code: 'TransferFailed', message: 'The transfer failed on chain.' },
+          },
+        });
+        this.fail(id, 'TransferFailed', 'The transfer failed. Nothing more will be sent for this invoice.');
+        out.failed.push(id);
+      } else {
+        out.pending.push(id);
+      }
+    }
+
+    this.emitUnlinkedTransferChanges(transfers);
+    return out;
+  }
+
+  /** Emits a `transfer` event on the invoice stream when the status differs from the last one emitted there. */
+  private emitTransferChange(invoiceId: string, t: TransferInfo): void {
+    const last = this.store
+      .eventsOf(invoiceId)
+      .filter((e) => e.type === 'transfer' && e.transferId === t.transferId)
+      .at(-1);
+    if (last?.type === 'transfer' && last.status === t.status) return;
+    this.emit({
+      type: 'transfer',
+      invoiceId,
+      at: this.at(),
+      transferId: t.transferId,
+      status: t.status,
+      ...(t.txid ? { txid: t.txid } : {}),
+    });
+  }
+
+  /** Global `transfer` events for transfers not linked to an invoice. The first pass only records the baseline. */
+  private emitUnlinkedTransferChanges(transfers: TransferInfo[]): void {
+    const first = this.knownTransfers === null;
+    const known = this.knownTransfers ?? new Map<string, TransferStatus>();
+    this.knownTransfers = known;
+    for (const t of transfers) {
+      if (this.store.invoiceForTransfer(t.transferId)) continue;
+      const prev = known.get(t.transferId);
+      known.set(t.transferId, t.status);
+      if (first || prev === t.status) continue;
+      this.emit({
+        type: 'transfer',
+        at: this.at(),
+        transferId: t.transferId,
+        status: t.status,
+        ...(t.txid ? { txid: t.txid } : {}),
+      });
     }
   }
 

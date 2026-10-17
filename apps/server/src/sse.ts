@@ -15,6 +15,27 @@ export function streamInvoiceEvents(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
+  const res = open(reply);
+  // Replay and subscribe in the same synchronous tick, so no event can fall in between.
+  for (const event of store.eventsOf(invoiceId)) res.write(formatSse(event));
+  keepAlive(
+    request,
+    res,
+    store.subscribe(invoiceId, (event) => res.write(formatSse(event))),
+  );
+}
+
+/** Live events without an invoice (no replay): transfer status changes not linked to an invoice. */
+export function streamGlobalEvents(store: InvoiceStore, request: FastifyRequest, reply: FastifyReply): void {
+  const res = open(reply);
+  keepAlive(
+    request,
+    res,
+    store.subscribeGlobal((event) => res.write(formatSse(event))),
+  );
+}
+
+function open(reply: FastifyReply) {
   reply.hijack();
   const res = reply.raw;
   res.writeHead(200, {
@@ -24,11 +45,10 @@ export function streamInvoiceEvents(
     'x-accel-buffering': 'no',
   });
   res.write(': connected\n\n');
+  return res;
+}
 
-  // Replay and subscribe in the same synchronous tick, so no event can fall in between.
-  for (const event of store.eventsOf(invoiceId)) res.write(formatSse(event));
-  const unsubscribe = store.subscribe(invoiceId, (event) => res.write(formatSse(event)));
-
+function keepAlive(request: FastifyRequest, res: FastifyReply['raw'], unsubscribe: () => void): void {
   const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
   heartbeat.unref();
   const close = () => {
