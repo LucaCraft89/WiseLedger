@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { selectClient } from './api/select.js';
+import { ChatPage } from './ChatPage.js';
 import { InvoiceListPage } from './InvoiceListPage.js';
 import { InvoicePage } from './InvoicePage.js';
+import { SchedulePage } from './SchedulePage.js';
 import { SettingsDrawer } from './SettingsDrawer.js';
+import { TransfersPage } from './TransfersPage.js';
 import { UploadPage } from './UploadPage.js';
 import { WalletPage } from './WalletPage.js';
 
-/** Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet. */
+/**
+ * Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet,
+ * `#/transfers` = transfers + fiscal report, `#/schedule` = scheduled payments, `#/chat` = Treasurer chat.
+ */
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
@@ -44,6 +50,8 @@ export function App() {
           <a href="#/">Check an invoice</a>
           <a href="#/invoices">My invoices</a>
           <a href="#/wallet">Wallet</a>
+          <a href="#/schedule">Scheduled</a>
+          <a href="#/chat">Ask the Treasurer</a>
           <button type="button" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
@@ -58,6 +66,12 @@ export function App() {
         <InvoicePage key={invoiceId} api={api} invoiceId={decodeURIComponent(invoiceId)} />
       ) : hash === '#/wallet' ? (
         <WalletPage api={api} />
+      ) : hash === '#/transfers' ? (
+        <TransfersPage api={api} />
+      ) : hash === '#/schedule' ? (
+        <SchedulePage api={api} />
+      ) : hash === '#/chat' ? (
+        <ChatPage api={api} />
       ) : hash === '#/invoices' ? (
         <InvoiceListPage api={api} />
       ) : (
