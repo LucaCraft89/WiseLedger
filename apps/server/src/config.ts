@@ -14,6 +14,8 @@ export interface ServerConfig {
   assetAllowlist: string[];
   /** Max amount per payment in base units (env PAYMENT_CAP). */
   paymentCap: string;
+  /** Max amount per asset in a rolling 24 h in base units (env DAILY_CAP, default 5 × PAYMENT_CAP). */
+  dailyCap: string;
   /** Background wallet sync period for the real backend (env WALLET_SYNC_MS, default 15000). */
   walletSyncMs: number;
   /** SQLite file (env DB_PATH), or `:memory:`. */
@@ -78,6 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       .map((s) => s.trim())
       .filter(Boolean),
     paymentCap: baseUnits(env, 'PAYMENT_CAP', '100000000'),
+    dailyCap: baseUnits(env, 'DAILY_CAP', (BigInt(baseUnits(env, 'PAYMENT_CAP', '100000000')) * 5n).toString()),
     walletSyncMs: int(env, 'WALLET_SYNC_MS', 15_000, 1000),
     dbPath: env.DB_PATH?.trim() || DEFAULT_DB_PATH,
     mockStepMs: int(env, 'MOCK_STEP_MS', 1000),

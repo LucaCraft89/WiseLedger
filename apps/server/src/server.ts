@@ -3,8 +3,11 @@
 import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { loadConfig, type ServerConfig } from './config.js';
+import { WalletFiscalService } from './fiscal.js';
 import { SqliteGuardStore } from './guard-store.js';
 import { StoreHistory } from './history.js';
+import { SqliteJobStore } from './jobs.js';
+import { SqliteLabelStore } from './labels.js';
 import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
 import { registerRoutes } from './routes.js';
@@ -16,12 +19,18 @@ export interface App {
   store: InvoiceStore;
   config: ServerConfig;
   providers: Providers;
+  /** Persistent labels (per transfer / invoice / payee). Same instance as providers.labels. */
+  labels: SqliteLabelStore;
+  /** Persistent scheduled jobs. Same instance as providers.jobs. */
+  jobs: SqliteJobStore;
+  /** Fiscal report over the wallet's transfers. Same instance as providers.fiscal. */
+  fiscal: WalletFiscalService;
 }
 
 export interface AppOptions {
   logger?: boolean;
   /** Test seams for the provider factory (an injected LLM or wallet). */
-  providers?: Omit<ProviderOptions, 'history' | 'log' | 'guardStore' | 'onSynced'>;
+  providers?: Omit<ProviderOptions, 'history' | 'log' | 'guardStore' | 'onSynced' | 'labels' | 'jobs' | 'fiscalFor'>;
 }
 
 export async function createApp(overrides: Partial<ServerConfig> = {}, opts: AppOptions = {}): Promise<App> {
@@ -30,6 +39,9 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: maxUploadBytes, forceCloseConnections: true });
 
   const store = new InvoiceStore(config.dbPath);
+  const labels = new SqliteLabelStore(store);
+  const jobs = new SqliteJobStore(store);
+  let fiscal: WalletFiscalService | undefined;
   // Bound once the orchestrator exists: every wallet sync settles EXECUTING invoices from the wallet's transfers.
   let settle: () => void = () => undefined;
   let providers: Providers;
@@ -39,6 +51,12 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       history: new StoreHistory(store),
       guardStore: new SqliteGuardStore(store),
       onSynced: () => settle(),
+      labels,
+      jobs,
+      fiscalFor: (wallet) => {
+        fiscal = new WalletFiscalService({ wallet, store, labels });
+        return fiscal;
+      },
       log: { info: (m) => app.log.info(m), warn: (o, m) => app.log.warn(o, m) },
     });
   } catch (err) {
@@ -46,6 +64,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     throw err;
   }
   const { wallet, analyzer, treasurer } = providers;
+  const fiscalService = fiscal ?? new WalletFiscalService({ wallet, store, labels });
   const orchestrator = new Orchestrator({ store, analyzer, treasurer, wallet, uploadDir: config.uploadDir });
   settle = () => {
     orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
@@ -60,6 +79,9 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     orchestrator,
     wallet,
     treasurer,
+    labels,
+    jobs,
+    fiscal: fiscalService,
     llmInfo: providers.llmInfo,
     walletBackend: config.walletBackend,
     network: config.rgbNetwork,
@@ -87,7 +109,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   const recovery = await orchestrator.recover(app.log);
   const touched = Object.values(recovery).flat().length;
   if (touched > 0) app.log.info({ recovery }, 'Recovered invoices interrupted by the last shutdown');
-  return { app, orchestrator, store, config, providers };
+  return { app, orchestrator, store, config, providers, labels, jobs, fiscal: fiscalService };
 }
 
 /** Starts listening; returns the base URL. */

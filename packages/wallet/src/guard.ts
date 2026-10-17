@@ -63,7 +63,7 @@ export class WalletGuard implements PaymentGuard {
   constructor(
     private readonly deps: {
       store: GuardStore;
-      wallet: Pick<WalletPort, 'assetBalance'>;
+      wallet: Pick<WalletPort, 'assetBalance' | 'listTransfers'>;
       limits: SpendLimits;
     },
   ) {}
@@ -80,6 +80,14 @@ export class WalletGuard implements PaymentGuard {
       return no('hash_mismatch', 'The payment changed after you confirmed it. Nothing was sent.');
     const amount = BigInt(plan.amount);
     if (amount > BigInt(this.deps.limits.paymentCap)) return no('over_cap', 'The amount is above your payment limit.');
+    if (this.deps.limits.dailyCap !== undefined) {
+      const since = Date.now() - 86_400_000;
+      const sent = (await this.deps.wallet.listTransfers(plan.assetId).catch(() => []))
+        .filter((t) => t.direction === 'outgoing' && t.status !== 'Failed' && Date.parse(t.createdAt) >= since)
+        .reduce((sum, t) => sum + BigInt(t.amount), 0n);
+      if (sent + amount > BigInt(this.deps.limits.dailyCap))
+        return no('over_cap', 'This payment would go over your daily spending limit.');
+    }
     const allow = this.deps.limits.assetAllowlist;
     if (allow.length > 0 && !allow.includes(plan.assetId))
       return no('asset_not_allowed', 'This asset is not on your list of approved assets.');

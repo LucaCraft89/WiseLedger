@@ -60,6 +60,7 @@ export interface RgbSdkWallet {
   listTransfers(assetId?: string): SdkTransfer[];
   refreshWallet(): void;
   syncWallet(): void;
+  createBackup(p: { backupPath: string; password: string }): { message: string; backupPath: string };
 }
 
 interface SdkBalance {
@@ -229,7 +230,7 @@ export class WdkRgbWallet implements WalletPort {
         transportEndpoint: this.cfg.transportEndpoint,
       } as never);
       // Spend limits live in WDK: every transfer passes the policy engine before signing.
-      this.wdk.registerPolicy([buildSpendPolicy(this.cfg)] as never);
+      this.wdk.registerPolicy([buildSpendPolicy(this.cfg, (assetId) => this.spentLast24h(assetId))] as never);
       this.account = (await this.wdk.getAccount('rgb', 0)) as unknown as RgbAccount;
       this.sdk = await this.account.getRgbWallet();
     }
@@ -478,6 +479,17 @@ export class WdkRgbWallet implements WalletPort {
     const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
     if (!client?.wallet) throw new TransferFailed('This wallet cannot create an open-amount invoice; set an amount.');
     return client.wallet.blindReceive(assetId ?? null, '"Any"', String(expirySec), [client.transportEndpoint], '1');
+  }
+
+  /** Sent (not failed) base units of an asset in the last 24 h, from rgb-lib's transfer list. */
+  spentLast24h(assetId: string): number {
+    const since = Date.now() / 1000 - 86_400;
+    let sum = 0;
+    for (const t of this.rgb.listTransfers(assetId)) {
+      if (toDirection(t.kind) !== 'outgoing' || toStatus(t.status) === 'Failed' || t.createdAt < since) continue;
+      sum += Number(transferAmount(t));
+    }
+    return sum;
   }
 
   private newOutgoing(assetId: string, before: Set<number>): SdkTransfer | undefined {
