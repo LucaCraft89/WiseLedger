@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import type { RiskFlag, Verdict } from './api/contracts.js';
-import { BLOCK_EXPLANATION, confirmGate, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
-import { SEVERITY_COLORS, SEVERITY_WORDS } from './lib/format.js';
-
-const SEVERITY_ORDER = { block: 0, warn: 1, info: 2 } as const;
+import { BLOCK_EXPLANATION, confirmGate, gateHint, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
@@ -23,7 +20,6 @@ export function ConfirmDialog(props: {
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const gate = confirmGate(props.verdict, ticked);
-  const flags = [...props.flags].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
 
   const run = (fn: () => Promise<void>) => async () => {
     setBusy(true);
@@ -47,22 +43,12 @@ export function ConfirmDialog(props: {
         Confirm payment
       </h3>
 
-      {flags.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {flags.map((f) => (
-            <li
-              key={f.code}
-              style={{
-                background: SEVERITY_COLORS[f.severity].bg,
-                borderLeft: `4px solid ${SEVERITY_COLORS[f.severity].border}`,
-                padding: '4px 10px',
-                marginBottom: 4,
-              }}
-            >
-              <strong>{SEVERITY_WORDS[f.severity]}:</strong> {f.message}
-            </li>
-          ))}
-        </ul>
+      {/* The flag cards are already shown in "Checks" above: one line here, so nothing is read twice. */}
+      {props.flags.length > 0 && props.verdict !== 'block' && (
+        <p data-testid="flags-pointer">
+          {props.flags.length === 1 ? 'There is 1 point' : `There are ${props.flags.length} points`} to check in
+          “Checks” above. Read {props.flags.length === 1 ? 'it' : 'them'} before you pay.
+        </p>
       )}
 
       {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600 }}>{props.sentence}</p>}
@@ -122,6 +108,11 @@ export function ConfirmDialog(props: {
           <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
             Do not pay
           </button>
+          {props.verdict !== 'block' && (
+            <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
+              {gateHint(props.verdict, ticked)}
+            </p>
+          )}
         </div>
       )}
     </section>
@@ -130,7 +121,7 @@ export function ConfirmDialog(props: {
 
 const PROGRESS_ICON = { pending: '○', running: '…', done: '✓' } as const;
 
-/** The 4-step payment progress, or the failure line. */
+/** The 4-step payment stepper (failures get their own card). */
 export function PaymentProgressView({ progress }: { progress: PaymentProgress }) {
   return (
     <div style={{ marginTop: 16 }}>
@@ -143,11 +134,6 @@ export function PaymentProgressView({ progress }: { progress: PaymentProgress })
           </li>
         ))}
       </ol>
-      {progress.failed && (
-        <p style={{ background: '#f8d7da', padding: 12 }}>
-          <strong>The payment failed.</strong> {progress.errorMessage ?? ''} Nothing is retried automatically.
-        </p>
-      )}
     </div>
   );
 }

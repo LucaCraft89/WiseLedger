@@ -9,6 +9,8 @@ import {
   type InvoiceListResponse,
   type RejectResponse,
   SSE_EVENT_NAME,
+  type WalletReceiveRequest,
+  type WalletReceiveResponse,
   type WalletResponse,
 } from './contracts.js';
 
@@ -28,6 +30,8 @@ export interface ApiClient {
   reject(id: string, reason?: string): Promise<RejectResponse>;
   /** Wallet backend, network and assets (ticker and precision for amounts). */
   wallet(): Promise<WalletResponse>;
+  /** New RGB receive invoice (optional asset and amount in base units). */
+  receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
 }
 
 /** Error with a plain-language message (from the server's ApiError body when present). */
@@ -87,5 +91,6 @@ export function createHttpClient(base = ''): ApiClient {
     confirm: (id, req) => call(`${base}/api/invoices/${encodeURIComponent(id)}/confirm`, json(req)),
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
+    receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
   };
 }

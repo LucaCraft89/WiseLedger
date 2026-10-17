@@ -5,8 +5,9 @@ import { InvoiceListPage } from './InvoiceListPage.js';
 import { InvoicePage } from './InvoicePage.js';
 import { SettingsDrawer } from './SettingsDrawer.js';
 import { UploadPage } from './UploadPage.js';
+import { WalletPage } from './WalletPage.js';
 
-/** Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page. */
+/** Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet. */
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
@@ -42,6 +43,7 @@ export function App() {
         <nav style={{ display: 'flex', gap: 16, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <a href="#/">Check an invoice</a>
           <a href="#/invoices">My invoices</a>
+          <a href="#/wallet">Wallet</a>
           <button type="button" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
@@ -54,6 +56,8 @@ export function App() {
       )}
       {invoiceId ? (
         <InvoicePage key={invoiceId} api={api} invoiceId={decodeURIComponent(invoiceId)} />
+      ) : hash === '#/wallet' ? (
+        <WalletPage api={api} />
       ) : hash === '#/invoices' ? (
         <InvoiceListPage api={api} />
       ) : (
