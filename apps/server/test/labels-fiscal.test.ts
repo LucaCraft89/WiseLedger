@@ -363,5 +363,6 @@ describe('M3 routes', () => {
     const id = await payInvoice();
     const inv = chatInvoices(built.store).find((x) => x.invoiceId === id);
     expect(inv).toMatchObject({ invoiceId: id, state: 'PAID', supplier: 'Acme Srl', payment: { amount: '25000000' } });
+    expect(Date.parse(inv?.createdAt ?? '')).not.toBeNaN();
   });
 });

@@ -12,6 +12,11 @@ Node 22.x only (`nvm use`): the rgb-lib binding does not build on Node 24+. Test
 7. `pnpm demo:prepare` → fresh 24 h RGB invoices and `.data/demo/1-good … 4-injection` (.pdf + .txt); fails with exactly what to fund if not ready.
 8. Two terminals: `pnpm -F wallet payee watch` (the supplier side: accepts consignments) and `pnpm dev` → http://localhost:5173.
 9. Upload `1-good-acme.pdf` → confirm the sentence → PAID with the explorer link. Then 2, 3, 4: all blocked.
+10. Incoming payment: in the app, create an invoice to get paid (`POST /api/wallet/receive {amount, note}`), stop `payee watch`, run `pnpm -F wallet payee pay <rgbInvoice>`, restart `payee watch`. The app shows it in `GET /api/wallet/receives` (waiting → incoming → received) and in the transfers list (~1 min).
+
+## Demo reset (one command, ~40 s)
+Stop `pnpm dev` and `payee watch`, then `pnpm demo:reset`: removes `.data/app.db*`, `.data/uploads`, `.data/demo`, keeps the wallets and seeds, reruns `demo:prepare` (new invoice numbers each run, so a repeat is not a duplicate). It refuses while the app holds the wallet, and `demo:prepare` refuses mock mode (`WALLET_BACKEND=wdk-rgb`, `LLM_PROVIDER=qvac`).
+- Supplier out of sats for new invoices (`NoUtxo` in demo:prepare): `pnpm wallet:smoke -- --fund-payee 10000` (payer → payee test sats).
 
 ## Moving the funded wallets to the demo machine
 Copy `.data/wallet/`, `.data/payee/` and `.data/tusdt.json` (USB, never git, never chat; keep mode 600). Run each wallet on **one machine only**: stop it on the old one first.
@@ -27,10 +32,12 @@ Copy `.data/wallet/`, `.data/payee/` and `.data/tusdt.json` (USB, never git, nev
 - `NoUtxo` / "needs more bitcoin": fund the payer address from `pnpm wallet:smoke`; UTXOs are created automatically.
 - `PolicyDenied`: amount above `PAYMENT_CAP` (base units) or asset not in `ASSET_ALLOWLIST`, enforced by the WDK policy engine.
 - Spendable 0 right after a payment: change is locked until the transfer settles; wait, or `pnpm wallet:smoke` to refresh.
+- `WalletInUse`: another program has this wallet open (server, `payee watch`, a script). One wallet = one process: stop the other one. Two programs on one folder corrupt its chain cache (`bincode error … entry tag` on open): move `.data/<wallet>/<id>/bdk_db_watch_only` aside and reopen; the wallet resyncs from the chain (RGB state is in the other files).
+- A send that does not return within `WALLET_SEND_TIMEOUT_MS` (120 s) is reported as submitted, never resent; the sync loop settles it.
 - KaleidoSwap indexer down: `RGB_INDEXER_URL=https://mutinynet.com/api`. Reads (sync) retry 3× with backoff, then `NetworkUnavailable` ("Nothing was sent"); sends are never retried.
 
 ## Offline fallback (regtest, no faucet)
 `pnpm regtest start` · `RGB_NETWORK=regtest pnpm wallet:smoke -- --fund-regtest` · `RGB_NETWORK=regtest pnpm -F wallet issue-asset` · `RGB_NETWORK=regtest pnpm wallet:smoke -- --pay 5000000`. Wallets live in `.data/regtest/`; blocks are mined by the scripts.
 
 ## Reset
-Stop the server; `rm -rf .data/app.db* .data/uploads .data/demo` keeps the wallets. Deleting `.data/wallet` loses its test funds (seed is in `.data/wallet/mnemonic`).
+`pnpm demo:reset` (above). Deleting `.data/wallet` loses its test funds (seed is in `.data/wallet/mnemonic`).

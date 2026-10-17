@@ -37,6 +37,8 @@ import {
   type LabelsListResponse,
   LabelsPutRequest,
   M3_ROUTES,
+  M4_ROUTES,
+  ReceiveNote,
   ScheduleListQuery,
 } from './api-local.js';
 import type { WalletFiscalService } from './fiscal.js';
@@ -44,6 +46,7 @@ import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
 import { healthHints, type WalletHolder } from './onboarding.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
+import type { SqliteReceiveStore } from './receives.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
 import type { InvoiceStore, StoredInvoice } from './store.js';
 import { checkUpload, tooLarge } from './uploads.js';
@@ -55,6 +58,7 @@ export interface RouteDeps {
   treasurer: TreasurerAgent;
   labels: SqliteLabelStore;
   jobs: SqliteJobStore;
+  receives: SqliteReceiveStore;
   fiscal: WalletFiscalService;
   llmInfo: () => LlmInfo & { warmUpMs?: number };
   /** Onboarding state (needs_setup / locked / ready) for /api/health. */
@@ -293,18 +297,27 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
+    const { note } = ReceiveNote.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
       expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
       ...(body.assetId ? { assetId: body.assetId } : {}),
       ...(body.amount ? { amount: body.amount } : {}),
     });
+    // Remembered so the app can tell when it is paid (matched after each wallet sync).
+    deps.receives.add(inv, note);
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
       ...(inv.assetId ? { assetId: inv.assetId } : {}),
       ...(inv.amount ? { amount: inv.amount } : {}),
     };
+  });
+
+  // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
+  route(app, M4_ROUTES.receivesList, async () => {
+    deps.receives.reconcile(await wallet.listTransfers());
+    return { receives: deps.receives.list() };
   });
 
   route(app, API_ROUTES.transfers, async (): Promise<TransfersResponse> => {

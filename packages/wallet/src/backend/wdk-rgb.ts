@@ -40,6 +40,8 @@ export interface RgbSdkWallet {
   registerWallet(): { address: string; btcBalance?: unknown };
   getBtcBalance(): { vanilla: SdkBalance; colored: SdkBalance };
   getAddress(): string;
+  /** Plain BTC send (scripts only: test sats between our own wallets; RGB payments go through pay()). */
+  sendBtc(p: { address: string; amount: number; feeRate: number; skipSync?: boolean }): Promise<string>;
   listUnspents(): { utxo: { colorable: boolean; btcAmount: number }; rgbAllocations: unknown[] }[];
   listAssets(): { nia?: SdkAsset[] };
   getAssetBalance(assetId: string): Partial<SdkBalance>;

@@ -116,3 +116,7 @@ export const M3_ONBOARDING_ROUTES = {
   restore: 'POST /api/onboarding/restore',
   unlock: 'POST /api/onboarding/unlock',
 } as const;
+
+// M4: incoming payments. POST /api/wallet/receive also takes an optional note (core body + note).
+export const ReceiveNote = z.object({ note: z.string().trim().max(120).optional() });
+export const M4_ROUTES = { receivesList: 'GET /api/wallet/receives' } as const;
