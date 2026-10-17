@@ -1,5 +1,5 @@
-import type { AppEvent } from 'core';
-import { MockLlm, MockWallet } from 'core/mocks';
+import { type AppEvent, buildConfirmationSentence, makePlan } from 'core';
+import { MockLlm, MockTreasurer, MockWallet } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
 import { Analyst } from '../src/analyst/analyze.js';
 import { QvacProvider } from '../src/llm/qvac.js';
@@ -181,5 +181,47 @@ describe.skipIf(process.env.LIVE_QVAC !== '1')('Analyst v1 on live QVAC', () => 
     );
     await llm.unload();
     expect(good).toBe(6);
+  });
+});
+
+describe('RGB Lightning invoice (mock rail)', () => {
+  it('ln-basic: ok, same plan path, sentence says Lightning, pays instantly with a payment hash', async () => {
+    const f = EXPECTED.find((x) => x.id === 'ln-basic');
+    if (!f) throw new Error('fixture');
+    const wallet = new MockWallet({ now: () => NOW.getTime() });
+    const r = await new Analyst({
+      llm: new MockLlm({ replies: analysisReplies(f, { summary: 'Fine.', questionsForUser: [] }) }),
+      wallet,
+      history: historyOf([], PAYEE_BOOK),
+      config: CONFIG,
+      now: () => NOW,
+    }).analyze(sourceOf(f), { invoiceId: f.id }, () => {});
+    expect(r.extraction.payment.method).toBe('ln');
+    expect(r.verdict).toBe('ok');
+    const pp = r.proposedPayment;
+    if (!pp) throw new Error('no proposed payment');
+    expect(pp).toMatchObject({ rgbInvoice: f.rgbInvoice, assetId: 'rgb:mock-tusdt', amount: '18500000' });
+    const plan = await makePlan({
+      invoiceId: f.id,
+      rgbInvoice: pp.rgbInvoice,
+      assetId: pp.assetId,
+      amount: pp.amount,
+      payee: { name: pp.payee },
+      executeAt: 'now',
+      labels: [],
+    });
+    expect(buildConfirmationSentence(plan, { ticker: 'TUSDT', precision: 6 })).toBe(
+      'Pay 18.50 TUSDT (asset rgb:mock-tusdt) to PIXEL PRINT SRL via Lightning (instant), now. Confirm?',
+    );
+    const events: AppEvent[] = [];
+    const res = await new MockTreasurer(wallet, { pollMs: 1 }).execute(
+      plan,
+      { planId: plan.planId, confirmedAt: NOW.toISOString() },
+      (e) => events.push(e),
+    );
+    expect(res.status).toBe('settled');
+    expect(res.txid).toBeUndefined();
+    expect(res.paymentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(events.some((e) => e.type === 'transfer' && e.paymentHash === res.paymentHash)).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import {
   formatAssetAmount,
+  type LightningStatusResponse,
   type ReceiveRequestDto,
   type WalletReceiveResponse,
   type WalletResponse,
@@ -87,6 +88,8 @@ export function WalletPage({ api }: { api: ApiClient }) {
         </p>
       )}
 
+      <LightningPanel api={api} assets={w.assets} />
+
       <RecentTransfers api={api} assets={w.assets} />
 
       {w.address && (
@@ -105,6 +108,74 @@ export function WalletPage({ api }: { api: ApiClient }) {
 
       <ReceiveForm api={api} wallet={w} />
     </section>
+  );
+}
+
+/** Spendable and receivable over Lightning, per asset, summed over usable channels. */
+export function lightningTotals(ln: LightningStatusResponse): { assetId?: string; send: bigint; receive: bigint }[] {
+  const by = new Map<string, { assetId?: string; send: bigint; receive: bigint }>();
+  for (const c of ln.channels) {
+    if (!c.usable) continue;
+    const key = c.assetId ?? '';
+    const row = by.get(key) ?? { ...(c.assetId ? { assetId: c.assetId } : {}), send: 0n, receive: 0n };
+    row.send += BigInt(c.localAsset);
+    row.receive += BigInt(c.remoteAsset);
+    by.set(key, row);
+  }
+  return [...by.values()];
+}
+
+/** Lightning panel from GET /api/wallet/lightning. Hidden while loading; "off" when the server has no Lightning. */
+export function LightningPanel({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
+  const [ln, setLn] = useState<LightningStatusResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .lightning()
+      .then((r) => live && setLn(r))
+      .catch((err: unknown) => live && setError(errorText(err, 'Could not read the Lightning status.')));
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  if (error) return <p style={{ color: '#555' }}>Lightning: {error}</p>;
+  if (!ln) return null;
+  if (!ln.enabled) {
+    return (
+      <p data-testid="lightning-off" style={{ color: '#555' }}>
+        Lightning (instant payments) is off in this wallet. Invoices that ask for Lightning will be stopped.
+      </p>
+    );
+  }
+  const usable = ln.channels.filter((c) => c.usable).length;
+  const fmt = (assetId: string | undefined, v: bigint) => {
+    const a = assets.find((x) => x.assetId === assetId);
+    return a ? `${formatAssetAmount(v.toString(), a.precision)} ${a.ticker}` : `${v.toString()} smallest units`;
+  };
+  return (
+    <>
+      <h3>Lightning (instant payments)</h3>
+      <div style={box} data-testid="lightning-panel">
+        <div>
+          {usable === 0
+            ? 'No Lightning channel is ready yet, so payments go on-chain. A channel opens on first start; check back in a few minutes.'
+            : `${usable} channel${usable === 1 ? '' : 's'} ready.`}
+        </div>
+        {ln.problem && <div style={{ color: '#8a6d3b' }}>{ln.problem}</div>}
+        {lightningTotals(ln).map((t) => (
+          <div key={t.assetId ?? 'unknown'}>
+            Can send now: <strong>{fmt(t.assetId, t.send)}</strong> · Can receive: {fmt(t.assetId, t.receive)}
+          </div>
+        ))}
+        {ln.nodePubkey && (
+          <div style={{ fontSize: '0.9em', color: '#555' }}>
+            Your Lightning node: <code title={ln.nodePubkey}>{shortId(ln.nodePubkey)}</code>{' '}
+            <CopyButton value={ln.nodePubkey} what="Node ID" />
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

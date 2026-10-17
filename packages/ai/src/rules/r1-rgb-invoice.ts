@@ -1,6 +1,6 @@
-// R1 · the RGB invoice decodes, is for our network and has not expired.
-import { FLAG_CODES, type RiskFlag } from 'core';
-import { isDecoded, type Rule } from './types.js';
+// R1 · the RGB invoice (on-chain rgb:… or RGB Lightning) decodes, is for our network and has not expired.
+import { FLAG_CODES, isLightningInvoice, type RiskFlag } from 'core';
+import { isDecoded, type Rule, railOf } from './types.js';
 
 const NETWORK_ALIASES: Record<string, string> = { mutinynet: 'signet', bitcoinsignet: 'signet' };
 const norm = (n: string) => {
@@ -17,12 +17,27 @@ export const r1RgbInvoice: Rule = ({ extraction, decoded, config, now }) => {
   });
   const inv = extraction.payment.rgbInvoice;
   if (!inv) return [flag('This invoice has no RGB payment request, so it cannot be paid from this wallet.')];
-  if (!isDecoded(decoded)) return [flag('The RGB payment request on this invoice is not valid.', inv)];
+  const printedLn = isLightningInvoice(inv);
+  const what = printedLn ? 'Lightning payment request' : 'RGB payment request';
+  if (!isDecoded(decoded)) {
+    return [
+      flag(
+        printedLn
+          ? 'The Lightning payment request on this invoice could not be read, or Lightning is off in this wallet.'
+          : 'The RGB payment request on this invoice is not valid.',
+        inv,
+      ),
+    ];
+  }
+  // Same string, two readings: the wallet must agree on the rail the invoice shows.
+  if ((railOf(decoded) === 'lightning') !== printedLn) {
+    return [flag(`The wallet read this ${what} as a different kind of payment. Ask the supplier for a new one.`, inv)];
+  }
   if (!config.networks.map(norm).includes(norm(decoded.network))) {
-    return [flag(`The RGB payment request is for another network (${decoded.network}).`, inv)];
+    return [flag(`The ${what} is for another network (${decoded.network}).`, inv)];
   }
   if (decoded.expiresAt && Date.parse(decoded.expiresAt) <= now.getTime()) {
-    return [flag('The RGB payment request has expired. Ask the supplier for a new one.', decoded.expiresAt)];
+    return [flag(`The ${what} has expired. Ask the supplier for a new one.`, decoded.expiresAt)];
   }
   return [];
 };

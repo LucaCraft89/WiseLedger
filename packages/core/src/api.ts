@@ -151,6 +151,8 @@ export const TransferDto = z.object({
   direction: z.enum(['in', 'out']),
   status: TransferStatusSchema,
   txid: z.string().optional(),
+  /** Lightning payments: no txid, the payment hash identifies the payment. */
+  paymentHash: z.string().optional(),
   explorerUrl: z.string().optional(),
   invoiceId: z.string().optional(),
   labels: z.array(z.string()),
@@ -313,6 +315,27 @@ export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
 export const TranscribeResponse = z.object({ text: z.string(), ms: z.number().int().nonnegative() });
 export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
 
+// GET /api/wallet/lightning — mirrors WalletPort.lightningStatus(); `enabled: false` when Lightning is off.
+export const LightningChannelDto = z.object({
+  channelId: z.string(),
+  peer: z.string(),
+  assetId: z.string().optional(),
+  /** Asset we can send over this channel, base units. */
+  localAsset: BaseUnits,
+  /** Asset we can receive over this channel, base units. */
+  remoteAsset: BaseUnits,
+  usable: z.boolean(),
+});
+export type LightningChannelDto = z.infer<typeof LightningChannelDto>;
+export const LightningStatusResponse = z.object({
+  enabled: z.boolean(),
+  nodePubkey: z.string().optional(),
+  channels: z.array(LightningChannelDto),
+  /** Plain words when enabled but not working ("No channel yet: requested from the LSP"). */
+  problem: z.string().optional(),
+});
+export type LightningStatusResponse = z.infer<typeof LightningStatusResponse>;
+
 export const API_ROUTES = {
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
@@ -323,6 +346,7 @@ export const API_ROUTES = {
   wallet: 'GET /api/wallet',
   walletReceive: 'POST /api/wallet/receive',
   walletReceives: 'GET /api/wallet/receives',
+  walletLightning: 'GET /api/wallet/lightning',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
   agentTranscribe: 'POST /api/agent/transcribe',
@@ -349,11 +373,20 @@ export function formatAssetAmount(baseUnits: string, precision: number): string 
 }
 
 /**
+ * RGB Lightning invoices are BOLT11 strings (lnbc mainnet, lntb testnet, lntbs signet, lnbcrt regtest; the mock
+ * wallet uses lnrgb…), optionally behind "lightning:". On-chain RGB invoices start with "rgb:".
+ */
+export const LN_INVOICE_RE = /\b(?:lightning:)?(ln(?:bcrt|tbs|tb|bc|rgb)[^\s"'<>]{8,})/gi;
+export function isLightningInvoice(invoice: string | undefined): boolean {
+  return !!invoice && /^(?:lightning:)?ln(?:bcrt|tbs|tb|bc|rgb)[^\s"'<>]{8,}$/i.test(invoice.trim());
+}
+
+/**
  * The one sentence the user confirms, built by code from the plan (never by the LLM). Server and web both use this.
- * "Pay 25.00 TUSDT (asset rgb:…) to Acme Srl, now. Confirm?"
+ * "Pay 25.00 TUSDT (asset rgb:…) to Acme Srl, now. Confirm?"; a Lightning invoice adds "via Lightning (instant)".
  */
 export function buildConfirmationSentence(
-  plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'>,
+  plan: Pick<PaymentPlan, 'amount' | 'assetId' | 'payee' | 'executeAt'> & { rgbInvoice?: string },
   asset: { ticker: string; precision: number } | undefined,
   /** IANA zone for the date (default: this machine's zone, so the user reads their own clock time). */
   timeZone?: string,
@@ -374,5 +407,6 @@ export function buildConfirmationSentence(
           timeZoneName: 'short',
           ...(timeZone ? { timeZone } : {}),
         })}`;
-  return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}, ${when}. Confirm?`;
+  const rail = isLightningInvoice(plan.rgbInvoice) ? ' via Lightning (instant)' : '';
+  return `Pay ${amount} (asset ${plan.assetId}) to ${plan.payee.name}${rail}, ${when}. Confirm?`;
 }

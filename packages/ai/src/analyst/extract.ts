@@ -1,5 +1,5 @@
 // Analyst call 1: invoice → validated InvoiceExtraction. json_schema + low temperature, at most 2 repair retries.
-import { type ChatMessage, InvoiceExtraction, type LlmProvider } from 'core';
+import { type ChatMessage, InvoiceExtraction, isLightningInvoice, type LlmProvider, LN_INVOICE_RE } from 'core';
 import { z } from 'zod';
 import type { InvoiceInput } from '../extract/text.js';
 import {
@@ -105,6 +105,14 @@ export async function extractInvoice(
 
 const RGB_INVOICE_RE = /rgb:[^\s"'<>]+/g;
 
+/** Every payment request printed in the text: on-chain RGB (rgb:…) and RGB Lightning (BOLT11, lightning: dropped). */
+export function paymentRequestsIn(text: string): string[] {
+  const ln = [...text.matchAll(LN_INVOICE_RE)].map((m) => m[1] ?? '').filter(Boolean);
+  // A Lightning invoice may embed "rgb:…" (lnrgb:mock/rgb:…): look for on-chain ones only outside it.
+  const rest = text.replace(LN_INVOICE_RE, ' ');
+  return [...new Set([...(rest.match(RGB_INVOICE_RE) ?? []), ...ln])];
+}
+
 /** Maps the model output to the contract and applies deterministic clean-up. */
 export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceExtraction {
   const conf = clamp01(raw.confidence);
@@ -126,11 +134,11 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     totalFromText = total !== undefined;
   }
 
-  // The RGB invoice must be printed in the document (text mode). If the model altered it, fall back to the
-  // single rgb: string in the text; with several candidates keep the model's verbatim choice or nothing.
-  let rgbInvoice = raw.rgbInvoice?.trim() || undefined;
+  // The RGB invoice (rgb:… or an RGB Lightning invoice) must be printed in the document (text mode). If the model
+  // altered it, fall back to the single payment request in the text; with several keep the model's verbatim choice.
+  let rgbInvoice = raw.rgbInvoice?.trim().replace(/^lightning:/i, '') || undefined;
   if (sourceText !== undefined) {
-    const candidates = [...new Set(sourceText.match(RGB_INVOICE_RE) ?? [])];
+    const candidates = paymentRequestsIn(sourceText);
     if (rgbInvoice && !sourceText.includes(rgbInvoice)) rgbInvoice = undefined;
     if (!rgbInvoice && candidates.length === 1) rgbInvoice = candidates[0];
   }
@@ -155,7 +163,7 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
       ...opt('amount', normalizeDecimal(l.amount) ?? (sourceText ? rowAmount(sourceText, l.description) : undefined)),
     })),
     payment: {
-      method: rgbInvoice ? 'rgb' : raw.paymentMethod,
+      method: rgbInvoice ? (isLightningInvoice(rgbInvoice) ? 'ln' : 'rgb') : raw.paymentMethod,
       ...opt('rgbInvoice', keep('payment.rgbInvoice', rgbInvoice)),
       ...opt('iban', raw.iban?.trim() || undefined),
       ...opt('address', raw.btcAddress?.trim() || undefined),

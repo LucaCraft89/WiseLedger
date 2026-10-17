@@ -5,8 +5,23 @@ import { CopyButton, errorText } from './ui.js';
 /** From the root .env (RGB_EXPLORER_URL) via vite.config.ts; Mutinynet by default. */
 export const EXPLORER_BASE: string = import.meta.env.VITE_RGB_EXPLORER_URL || DEFAULT_EXPLORER_URL;
 
-/** Paid: what was paid, the transfer ID and the Bitcoin transaction with a link to the explorer. */
-export function ResultCard({ sentence, transferId, txid }: { sentence?: string; transferId?: string; txid?: string }) {
+/**
+ * Paid: what was paid, the transfer ID and the Bitcoin transaction with a link to the explorer. A Lightning payment
+ * has no Bitcoin transaction: the card shows its payment hash instead.
+ */
+export function ResultCard({
+  sentence,
+  transferId,
+  txid,
+  paymentHash,
+  lightning = false,
+}: {
+  sentence?: string;
+  transferId?: string;
+  txid?: string;
+  paymentHash?: string;
+  lightning?: boolean;
+}) {
   return (
     <div
       data-testid="paid-card"
@@ -20,7 +35,21 @@ export function ResultCard({ sentence, transferId, txid }: { sentence?: string; 
           <CopyButton value={transferId} what="Transfer ID" />
         </div>
       )}
-      {txid ? (
+      {lightning ? (
+        paymentHash ? (
+          <div style={{ marginTop: 6 }} data-testid="payment-hash">
+            Lightning payment hash: <code title={paymentHash}>{shortId(paymentHash)}</code>{' '}
+            <CopyButton value={paymentHash} what="Payment hash" />
+            <div style={{ fontSize: '0.9em' }}>
+              Paid over Lightning: no Bitcoin transaction is needed, the supplier received it at once.
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 6, fontSize: '0.9em' }}>
+            Paid over Lightning: the payment hash will appear here once known.
+          </div>
+        )
+      ) : txid ? (
         <div style={{ marginTop: 6 }}>
           Bitcoin transaction: <code title={txid}>{shortId(txid)}</code>{' '}
           <CopyButton value={txid} what="Transaction ID" />{' '}

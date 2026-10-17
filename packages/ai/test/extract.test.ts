@@ -2,7 +2,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MockLlm } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
-import { extractInvoice, normalizeDecimal, printedTotal, rowAmount, toExtraction } from '../src/analyst/extract.js';
+import {
+  extractInvoice,
+  normalizeDecimal,
+  paymentRequestsIn,
+  printedTotal,
+  rowAmount,
+  toExtraction,
+} from '../src/analyst/extract.js';
 import { EXTRACT_SYSTEM } from '../src/analyst/prompts.js';
 import { loadInvoice } from '../src/extract/text.js';
 import { QvacProvider } from '../src/llm/qvac.js';
@@ -69,6 +76,19 @@ describe('extract: deterministic clean-up', () => {
     const text = 'rgb:a/1 and rgb:b/2';
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:b/2' }, text).payment.rgbInvoice).toBe('rgb:b/2');
     expect(toExtraction({ ...base, rgbInvoice: 'rgb:c/3' }, text).payment.rgbInvoice).toBeUndefined();
+  });
+  it('recognises an RGB Lightning invoice: method ln, same rgbInvoice field, "lightning:" dropped', () => {
+    const ln = 'lntbs250u1pjrgbtusdtmockinvoice0hash';
+    const text = `TOTAL DUE: 25.00 TUSDT\nPay instantly: lightning:${ln}\n`;
+    const fromModel = toExtraction({ ...base, rgbInvoice: `lightning:${ln}`, paymentMethod: 'ln' }, text);
+    expect(fromModel.payment).toMatchObject({ method: 'ln', rgbInvoice: ln });
+    const fallback = toExtraction({ ...base, rgbInvoice: null, paymentMethod: 'unknown' }, text);
+    expect(fallback.payment).toMatchObject({ method: 'ln', rgbInvoice: ln });
+    // An rgb: invoice next to a Lightning one: two candidates, only the model's verbatim choice stays.
+    const both = `${text}or on-chain rgb:mock/rgb:mock-tusdt/25000000/1900000000\n`;
+    expect(toExtraction({ ...base, rgbInvoice: null }, both).payment.rgbInvoice).toBeUndefined();
+    expect(toExtraction({ ...base, rgbInvoice: ln }, both).payment.method).toBe('ln');
+    expect(paymentRequestsIn('kilnbcrt is a word, lnbc1 too short')).toEqual([]);
   });
   it('falls back to a single printed TOTAL line when the model drops the total', () => {
     const e = toExtraction({ ...base, total: null }, 'Item 10.00\nTOTAL DUE: 55.00 TUSDT\n');
