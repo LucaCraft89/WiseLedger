@@ -192,6 +192,8 @@ describe('rules R1–R10', () => {
     expect(sev('Thank you for your business. Payment within 30 days.')).toEqual([]);
     const llmOnly = { ...extraction, pressure: { detected: true, evidence: 'please settle soon' } };
     expect(r6Pressure({ ...base, extraction: llmOnly }).map((f) => f.severity)).toEqual(['info']);
+    // With a text layer the keywords decide: the model's boolean alone raises nothing.
+    expect(r6Pressure({ ...base, extraction: llmOnly, sourceText: 'TOTAL DUE: 25.00 TUSDT' })).toEqual([]);
     // An image has no text layer: the model's quote is checked with the same keywords.
     const quote = { ...extraction, pressure: { detected: true, evidence: 'New bank details, pay immediately' } };
     expect(r6Pressure({ ...base, extraction: quote })[0]?.severity).toBe('block');

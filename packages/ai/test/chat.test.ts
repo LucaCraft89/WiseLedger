@@ -3,7 +3,7 @@ import { MemoryLabelStore, MOCK_ASSET_ID, MockLlm, MockWallet, mockInvoice } fro
 import { describe, expect, it } from 'vitest';
 import type { ChatInvoice } from '../src/index.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { confirmationGuard, safeName, Treasurer } from '../src/treasurer/treasurer.js';
+import { confirmationGuard, newestFirst, safeName, Treasurer } from '../src/treasurer/treasurer.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z'); // Saturday
 const INVOICES: ChatInvoice[] = [
@@ -138,6 +138,28 @@ describe('Treasurer chat (MockLlm)', () => {
     const prompt = String(llm.calls[0]?.messages[0]?.content);
     expect(prompt).not.toMatch(/ignore previous/i);
     expect(prompt).toContain('[name hidden]');
+  });
+
+  it('invoices are listed newest first and the latest is marked', async () => {
+    const dated: ChatInvoice[] = [
+      { ...(INVOICES[0] as ChatInvoice), invoiceId: 'inv_old', createdAt: '2026-10-10T09:00:00Z' },
+      { ...(INVOICES[0] as ChatInvoice), invoiceId: 'inv_new', createdAt: '2026-10-17T09:00:00Z' },
+    ];
+    expect(newestFirst(dated).map((i) => i.invoiceId)).toEqual(['inv_new', 'inv_old']);
+    expect(newestFirst(INVOICES)).toEqual(INVOICES); // no dates: keep the server order
+    const llm = new MockLlm({ fallback: { text: 'The latest is inv_new.' } });
+    const t = new Treasurer({
+      llm,
+      wallet: new MockWallet({ stepMs: 0 }),
+      guard: confirmationGuard(),
+      invoices: async () => dated,
+      now: () => NOW,
+      timeZone: 'UTC',
+    });
+    await t.chat('which is the latest invoice?', [], () => {});
+    const system = String(llm.calls[0]?.messages[0]?.content);
+    expect(system).toContain('Invoices (newest first; the first one is the latest):');
+    expect(system).toMatch(/invoiceId=inv_new \(latest\) uploaded=2026-10-17/);
   });
 
   it('safeName strips quotes, newlines and instruction-like names', () => {
