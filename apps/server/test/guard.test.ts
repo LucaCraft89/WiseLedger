@@ -215,3 +215,19 @@ describe('SubmitTimeout', () => {
     store.close();
   });
 });
+
+describe('wallet errors on routes', () => {
+  it('a wallet failure is a plain 502, not a 500 INTERNAL', async () => {
+    const { TransferFailed } = await import('core');
+    const wallet = new MockWallet({ stepMs: 0 });
+    wallet.createReceiveInvoice = async () => {
+      throw new TransferFailed('JSONConversion(Error("expected value", line: 1, column: 13))');
+    };
+    const built = await createApp({ uploadDir: dir, dbPath: ':memory:', mockStepMs: 0 }, { providers: { wallet } });
+    const res = await built.app.inject({ method: 'POST', url: '/api/wallet/receive', payload: {} });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error.code).toBe('TransferFailed');
+    expect(res.json().error.message).not.toContain('JSONConversion');
+    await built.app.close();
+  });
+});

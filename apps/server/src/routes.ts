@@ -14,12 +14,14 @@ import {
   type InvoiceListResponse,
   InvoiceStateSchema,
   type InvoiceSummaryDto,
+  isWalletError,
   type LlmInfo,
   RejectRequest,
   type TransferDto,
   type TransferInfo,
   type TransfersResponse,
   type TreasurerAgent,
+  type WalletErrorCode,
   type WalletPort,
   WalletReceiveRequest,
   type WalletReceiveResponse,
@@ -46,6 +48,16 @@ export interface RouteDeps {
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
 }
+
+/** Wallet errors caused by the request (400); the rest are the wallet's own failures (502). */
+const WALLET_CLIENT_ERRORS: ReadonlySet<string> = new Set(['UnknownAsset', 'InvalidInvoice', 'InvoiceExpired']);
+
+/** Plain words for wallet errors whose native message is technical (e.g. rgb-lib JSONConversion). */
+const WALLET_MESSAGES: Partial<Record<WalletErrorCode, string>> = {
+  TransferFailed: 'The wallet could not complete this operation. Please try again in a moment.',
+  NoUtxo: 'The wallet has no free coins to use for RGB right now. Wait for the next block and try again.',
+  SubmitTimeout: 'The wallet did not answer in time. Check the transfers list before trying again.',
+};
 
 /** Server-side route (not in core API_ROUTES yet). */
 export const GLOBAL_EVENTS_ROUTE = 'GET /api/events';
@@ -134,6 +146,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       const first = err.issues[0];
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
       return reply.status(400).send(apiError('VALIDATION', `The request is not valid${where}: ${first?.message}`));
+    }
+    if (isWalletError(err)) {
+      app.log.warn({ err }, 'Wallet operation failed');
+      const status = WALLET_CLIENT_ERRORS.has(err.code) ? 400 : 502;
+      return reply.status(status).send(apiError(err.code, WALLET_MESSAGES[err.code] ?? err.message));
     }
     if (isTooLarge(err)) {
       const f = tooLarge(deps.uploadMaxMb);
