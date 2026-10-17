@@ -1,3 +1,7 @@
 packages:
   - packages/*
   - apps/*
+allowBuilds:
+  '@utexo/rgb-lib-linux-x64': true
+  '@utexo/rgb-lib-linux-arm64': true
+  '@utexo/rgb-lib-darwin-arm64': true
