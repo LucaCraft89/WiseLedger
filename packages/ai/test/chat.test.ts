@@ -63,7 +63,7 @@ describe('Treasurer chat (MockLlm)', () => {
     });
     const r = await treasurer(llm, await walletWithPayment()).chat('what is my TUSDT balance', [], () => {});
     expect(r.toolCalls).toEqual([expect.objectContaining({ name: 'get_balance', ok: true })]);
-    expect((r.toolCalls[0]?.result as { ticker: string }[])[0]?.ticker).toBe('TUSDT');
+    expect(((r.toolCalls[0]?.result ?? []) as { ticker: string }[])[0]?.ticker).toBe('TUSDT');
     expect(r.text).toBe('You have 975.00 TUSDT.');
     expect(llm.calls[0]?.toolChoice).toBe('auto');
   });
