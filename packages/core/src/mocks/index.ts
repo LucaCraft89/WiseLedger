@@ -1,3 +1,6 @@
-// Barrel for mocks (lane A). Lane B's mocks (mock-llm, mock-analyzer, mock-treasurer) are added at merge.
+// Barrel for mocks (lane A).
 export * from './memory-stores.js';
+export * from './mock-analyzer.js';
+export * from './mock-llm.js';
+export * from './mock-treasurer.js';
 export * from './mock-wallet.js';

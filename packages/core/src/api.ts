@@ -1,9 +1,10 @@
 // Owner: B. REST DTOs (zod) for every route in PLAN §3. Server validates with these; web parses with these.
 import { z } from 'zod';
 import { AnalysisReport, BaseUnits, InvoiceSourceKind, IsoDateTime, LlmProviderName, Verdict } from './analysis.js';
-import { AppEvent, TransferStatusSchema } from './events.js';
+import { AppEvent } from './events.js';
 import type { AgentReply } from './llm.js';
 import type { ExecutionResult, InvoiceState, PaymentPlan } from './orchestrator.js';
+import { TransferStatusSchema } from './wallet.js';
 
 const isObject = (v: unknown) => typeof v === 'object' && v !== null;
 /** Owned by orchestrator.ts (A); checked structurally there. */
@@ -115,7 +116,12 @@ export type WalletResponse = z.infer<typeof WalletResponse>;
 export const ReceiveRequest = z.object({
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
-  expiryMinutes: z.number().int().positive().max(60 * 24 * 7).optional(),
+  expiryMinutes: z
+    .number()
+    .int()
+    .positive()
+    .max(60 * 24 * 7)
+    .optional(),
 });
 export type ReceiveRequest = z.infer<typeof ReceiveRequest>;
 
@@ -149,7 +155,10 @@ export type TransfersResponse = z.infer<typeof TransfersResponse>;
 // POST /api/agent/chat
 export const ChatRequest = z.object({
   message: z.string().min(1).max(2000),
-  history: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() })).max(20).optional(),
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() }))
+    .max(20)
+    .optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequest>;
 

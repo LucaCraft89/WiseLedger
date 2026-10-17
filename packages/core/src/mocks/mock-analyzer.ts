@@ -22,7 +22,9 @@ export interface MockAnalyzerOptions {
   now?: () => Date;
 }
 
-export const MOCK_ASSET_ID = 'rgb:mock-tusdt';
+import { MOCK_ASSET_ID } from './mock-wallet.js';
+
+export { MOCK_ASSET_ID };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

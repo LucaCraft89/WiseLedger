@@ -2,17 +2,7 @@
 import { z } from 'zod';
 import { AnalysisReport, IsoDateTime, RiskFlag } from './analysis.js';
 import type { InvoiceState } from './orchestrator.js';
-import type { TransferStatus } from './wallet.js';
-
-/** Mirrors wallet.ts TransferStatus (compile-time checked below). */
-export const TransferStatusSchema = z.enum(['WaitingCounterparty', 'WaitingConfirmations', 'Settled', 'Failed']);
-type _TransferStatusMatches = [TransferStatus] extends [z.infer<typeof TransferStatusSchema>]
-  ? [z.infer<typeof TransferStatusSchema>] extends [TransferStatus]
-    ? true
-    : never
-  : never;
-const _transferStatusCheck: _TransferStatusMatches = true;
-void _transferStatusCheck;
+import { TransferStatusSchema } from './wallet.js';
 
 /** InvoiceState is owned by orchestrator.ts; validated as a non-empty string here. */
 const InvoiceStateSchema = z.custom<InvoiceState>((v) => typeof v === 'string' && v.length > 0);

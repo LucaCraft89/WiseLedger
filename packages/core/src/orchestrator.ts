@@ -51,19 +51,19 @@ export function assertTransition(from: InvoiceState, to: InvoiceState): void {
   if (!canTransition(from, to)) throw new IllegalTransition(from, to);
 }
 
-export const PayeeSchema = z.object({
+export const PlanPayeeSchema = z.object({
   name: z.string(),
   /** RGB recipient ID decoded from the invoice, used by the payee book. */
   recipientId: z.string().optional(),
 });
-export type Payee = z.infer<typeof PayeeSchema>;
+export type PlanPayee = z.infer<typeof PlanPayeeSchema>;
 
 export const PaymentPlanInputSchema = z.object({
   invoiceId: z.string(),
   rgbInvoice: z.string(),
   assetId: z.string(),
   amount: AmountSchema,
-  payee: PayeeSchema,
+  payee: PlanPayeeSchema,
   /** 'now' or an ISO timestamp for a scheduled payment */
   executeAt: z.union([z.literal('now'), z.iso.datetime({ offset: true })]),
   labels: z.array(z.string()),

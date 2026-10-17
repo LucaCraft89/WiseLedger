@@ -1,7 +1,6 @@
 // Owner: B. LLM provider port (QVAC / qvac serve --openai / mock) and the Treasurer agent port.
 import type { ZodType } from 'zod';
-import type { LlmProviderName } from './analysis.js';
-import type { EmitFn } from './analysis.js';
+import type { EmitFn, LlmProviderName } from './analysis.js';
 import type { Confirmation, ExecutionResult, PaymentPlan } from './orchestrator.js';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
@@ -63,7 +62,13 @@ export interface LlmResult {
   json?: unknown;
   toolCalls: ToolCall[];
   stopReason: 'eos' | 'length' | 'cancelled' | 'error' | 'tool';
-  stats?: { promptTokens?: number; completionTokens?: number; tokensPerSecond?: number; ttftMs?: number; totalMs?: number };
+  stats?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    tokensPerSecond?: number;
+    ttftMs?: number;
+    totalMs?: number;
+  };
 }
 
 export type LlmEvent =
