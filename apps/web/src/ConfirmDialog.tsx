@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import type { RiskFlag, Verdict } from './api/contracts.js';
-import { BLOCK_EXPLANATION, confirmGate, gateHint, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
+import {
+  assetIdHint,
+  BLOCK_EXPLANATION,
+  confirmGate,
+  gateHint,
+  type PaymentProgress,
+  REVIEW_TICK_LABEL,
+} from './lib/confirm.js';
 import { splitFlags } from './lib/payment.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
- * block → confirm disabled with an explanation; review → tick box required (sends override: true).
+ * block → explanation and one "close without paying" button (no pay button); review → tick box required (sends override: true).
  */
 export function ConfirmDialog(props: {
   verdict: Verdict;
@@ -54,7 +61,12 @@ export function ConfirmDialog(props: {
         </p>
       )}
 
-      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600 }}>{props.sentence}</p>}
+      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600, marginBottom: 4 }}>{props.sentence}</p>}
+      {assetIdHint(props.sentence) && (
+        <p data-testid="asset-id-hint" style={{ fontSize: '0.9em', marginTop: 0 }}>
+          {assetIdHint(props.sentence)}
+        </p>
+      )}
 
       {props.verdict === 'block' && (
         <p style={{ background: '#f8d7da', padding: 10 }} data-testid="block-explanation">
@@ -63,8 +75,14 @@ export function ConfirmDialog(props: {
       )}
 
       {props.verdict === 'review' && (
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} /> {REVIEW_TICK_LABEL}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <input
+            type="checkbox"
+            checked={ticked}
+            onChange={(e) => setTicked(e.target.checked)}
+            style={{ width: 'auto', margin: 0 }}
+          />
+          {REVIEW_TICK_LABEL}
         </label>
       )}
 
@@ -98,6 +116,10 @@ export function ConfirmDialog(props: {
             Go back
           </button>
         </div>
+      ) : props.verdict === 'block' ? (
+        <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
+          Close this invoice without paying
+        </button>
       ) : (
         <div>
           <button
@@ -111,11 +133,9 @@ export function ConfirmDialog(props: {
           <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
             Do not pay
           </button>
-          {props.verdict !== 'block' && (
-            <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
-              {gateHint(props.verdict, ticked)}
-            </p>
-          )}
+          <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
+            {gateHint(props.verdict, ticked)}
+          </p>
         </div>
       )}
     </section>
