@@ -6,10 +6,10 @@ Fattura n. 117/2026 del 05/10/2026
 Scadenza: 04/11/2026
 
 Descrizione                         Q.tà   Prezzo    Importo
-Logo redesign                          1    100.00    100.00
+Logo redesign                          1     40.00     40.00
 Business card layout                   1     20.00     20.00
 
-TOTALE: EUR 120.00
+TOTALE: EUR 60.00
 
 Pagamento: RGB, asset TUSDT al cambio del giorno
-RGB invoice: rgb:mock/rgb:mock-tusdt/120000000/1900000000
+RGB invoice: rgb:mock/rgb:mock-tusdt/60000000/1900000000
