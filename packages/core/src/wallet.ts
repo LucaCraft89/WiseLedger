@@ -35,6 +35,8 @@ export const TransferInfoSchema = z.object({
   status: TransferStatusSchema,
   txid: z.string().optional(),
   rgbInvoice: z.string().optional(),
+  /** RGB recipient ID (blinded UTXO) the transfer pays; matches DecodedInvoice.recipientId of the invoice paid. */
+  recipientId: z.string().optional(),
   /** ISO timestamps */
   createdAt: z.string(),
   updatedAt: z.string(),

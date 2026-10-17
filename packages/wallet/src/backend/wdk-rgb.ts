@@ -442,6 +442,7 @@ export class WdkRgbWallet implements WalletPort {
           status: toStatus(t.status),
           ...(t.txid ? { txid: t.txid } : {}),
           ...(t.invoiceString ? { rgbInvoice: t.invoiceString } : {}),
+          ...(t.recipientId ? { recipientId: t.recipientId } : {}),
           createdAt: iso(t.createdAt),
           updatedAt: iso(t.updatedAt),
         });
