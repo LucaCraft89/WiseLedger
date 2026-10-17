@@ -363,7 +363,10 @@ describe('M3 routes', () => {
     const res = await inject('POST', '/api/agent/chat/stream', { message: 'What is my balance?' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('application/x-ndjson');
-    const lines = res.body.trim().split('\n').map((l) => JSON.parse(l));
+    const lines = res.body
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     const last = lines.at(-1);
     expect(last.t).toBe('reply');
     expect(typeof last.reply.text).toBe('string');
