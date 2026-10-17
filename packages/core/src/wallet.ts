@@ -149,7 +149,9 @@ export type WalletErrorCode =
   | 'InvalidInvoice'
   | 'TransferFailed'
   | 'SubmitTimeout'
-  | 'PolicyDenied';
+  | 'PolicyDenied'
+  | 'NetworkUnavailable'
+  | 'WalletLocked';
 
 export class WalletError extends Error {
   readonly code: WalletErrorCode;
@@ -206,6 +208,21 @@ export class SubmitTimeout extends WalletError {
 export class PolicyDenied extends WalletError {
   constructor(message = 'Your spending rules do not allow this payment.') {
     super('PolicyDenied', message);
+  }
+}
+
+/** A read (sync, balance, transfer list) could not reach the indexer or proxy after retries. Nothing was sent. */
+export class NetworkUnavailable extends WalletError {
+  constructor(
+    message = 'The Bitcoin network service is not answering right now. Nothing was sent; try again shortly.',
+  ) {
+    super('NetworkUnavailable', message);
+  }
+}
+/** The seed is encrypted at rest and no (or a wrong) passphrase was given. */
+export class WalletLocked extends WalletError {
+  constructor(message = 'The wallet is locked. Enter your wallet passphrase to unlock it.') {
+    super('WalletLocked', message);
   }
 }
 
