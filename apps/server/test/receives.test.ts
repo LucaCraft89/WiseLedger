@@ -73,6 +73,20 @@ describe('SqliteReceiveStore', () => {
     store.close();
   });
 
+  it('the pending transfer rgb-lib makes with the request (WaitingCounterparty) is not a payment yet', () => {
+    const store = new InvoiceStore(':memory:');
+    let now = T0;
+    const receives = new SqliteReceiveStore(store, () => now);
+    receives.add({ rgbInvoice: 'rgb:inv', recipientId: 'utxob:abc', expiresAt: '2026-10-17T11:00:00.000Z' });
+    expect(receives.reconcile([incoming('WaitingCounterparty')])).toMatchObject([
+      { status: 'waiting', transferId: '12' },
+    ]);
+    expect(receives.list()[0]?.status).toBe('waiting');
+    now = new Date('2026-10-17T12:00:00.000Z'); // still unpaid after expiry
+    expect(receives.reconcile([incoming('WaitingCounterparty')])).toMatchObject([{ status: 'expired' }]);
+    store.close();
+  });
+
   it('expires when nobody paid in time; outgoing transfers never match', () => {
     const store = new InvoiceStore(':memory:');
     let now = T0;

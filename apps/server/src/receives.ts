@@ -122,7 +122,10 @@ export class SqliteReceiveStore {
         (x) => x.recipientId === req.recipientId || (x.rgbInvoice !== undefined && x.rgbInvoice === req.rgbInvoice),
       );
       let next: ReceiveStatus = req.status;
-      if (t) next = t.status === 'Settled' ? 'received' : t.status === 'Failed' ? 'failed' : 'incoming';
+      // rgb-lib records a pending incoming transfer as soon as the request is made (WaitingCounterparty): nobody has
+      // paid yet, so the request stays "waiting" (and can still expire) until the payer's transfer arrives.
+      const paidYet = t && t.status !== 'WaitingCounterparty';
+      if (t && paidYet) next = t.status === 'Settled' ? 'received' : t.status === 'Failed' ? 'failed' : 'incoming';
       else if (Date.parse(req.expiresAt) < nowMs) next = 'expired';
       const transferId = t?.transferId;
       if (next === req.status && transferId === req.transferId) continue;
