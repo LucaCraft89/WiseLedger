@@ -3,6 +3,7 @@
 import multipart from '@fastify/multipart';
 import { Scheduler } from 'ai';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { walletConfigFromEnv } from 'wallet';
 import { loadConfig, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
 import { SqliteGuardStore } from './guard-store.js';
@@ -14,6 +15,7 @@ import { Orchestrator } from './orchestrator.js';
 import { createProviders, type ProviderOptions, type Providers } from './providers.js';
 import { SqliteReceiveStore } from './receives.js';
 import { registerRoutes } from './routes.js';
+import { SelfCheck } from './selfcheck.js';
 import { chatInvoices, InvoiceStore } from './store.js';
 
 export interface App {
@@ -77,6 +79,17 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     throw err;
   }
   const { wallet, analyzer, treasurer } = providers;
+  const chain =
+    config.walletBackend === 'mock'
+      ? undefined
+      : walletConfigFromEnv({ ...process.env, WALLET_BACKEND: config.walletBackend, RGB_NETWORK: config.rgbNetwork });
+  const selfCheck = new SelfCheck({
+    wallet: () => (providers.holder.state === 'ready' ? (providers.holder.current ?? undefined) : undefined),
+    network: config.walletBackend === 'mock' ? 'mock' : config.rgbNetwork,
+    assetAllowlist: config.assetAllowlist,
+    ...(chain ? { indexerUrl: chain.indexerUrl, transportEndpoint: chain.transportEndpoint } : {}),
+    log: { warn: (m) => app.log.warn(m), info: (m) => app.log.info(m) },
+  });
   const fiscalService = fiscal ?? new WalletFiscalService({ wallet, store, labels });
   let scheduler: Scheduler | undefined;
   const orchestrator = new Orchestrator({
@@ -140,11 +153,13 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
             `Invoice ${inv.filename} (${inv.id}) was being paid when the app stopped. It was not sent again; a wallet sync will show whether the payment went through.`,
         ),
       ...providers.problems(),
+      ...selfCheck.problems(),
     ],
   });
   registerOnboardingRoutes(app, providers.holder);
   app.addHook('onClose', async () => {
     scheduler.stop();
+    selfCheck.stop();
     if (mockSettle) clearInterval(mockSettle);
     await orchestrator.idle();
     await providers.close();
@@ -155,6 +170,8 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
   if (touched > 0) app.log.info({ recovery }, 'Recovered invoices interrupted by the last shutdown');
   // After recovery: jobs missed while the app was down run once now, then every interval.
   scheduler.start();
+  // What the demo still needs (sats, asset, UTXOs, indexer, proxy), in the log and in /api/health problems.
+  selfCheck.start();
   return { app, orchestrator, store, config, providers, labels, jobs, fiscal: fiscalService, scheduler };
 }
 
