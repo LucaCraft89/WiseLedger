@@ -1,11 +1,8 @@
 // Owner: B. Server-sent events (one union for invoice timelines, agent activity and transfers).
 import { z } from 'zod';
 import { AnalysisReport, IsoDateTime, RiskFlag } from './analysis.js';
-import type { InvoiceState } from './orchestrator.js';
+import { InvoiceStateSchema } from './orchestrator.js';
 import { TransferStatusSchema } from './wallet.js';
-
-/** InvoiceState is owned by orchestrator.ts; validated as a non-empty string here. */
-const InvoiceStateSchema = z.custom<InvoiceState>((v) => typeof v === 'string' && v.length > 0);
 
 export const Stage = z.enum([
   'reading',

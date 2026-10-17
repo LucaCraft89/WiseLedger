@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AnalysisReport, computeVerdict, type InvoiceExtraction, type RiskFlag } from '../src/analysis.js';
+import { AnalysisReport, computeVerdict, InvoiceExtraction, type RiskFlag } from '../src/analysis.js';
 import {
   ApiError,
   ChatRequest,
@@ -11,11 +11,11 @@ import {
   HealthResponse,
   InvoiceDetailResponse,
   InvoiceListResponse,
-  ReceiveRequest,
-  ReceiveResponse,
   RejectRequest,
   RejectResponse,
   TransfersResponse,
+  WalletReceiveRequest,
+  WalletReceiveResponse,
   WalletResponse,
 } from '../src/api.js';
 import { AppEvent } from '../src/events.js';
@@ -142,14 +142,9 @@ describe('API DTOs', () => {
       },
       { backend: 'mock', network: 'mainnet', ready: true, assets: [] },
     ],
-    ['ReceiveRequest', ReceiveRequest, { amount: '5000000', expiryMinutes: 60 }, { amount: '5.0' }],
-    ['ReceiveResponse', ReceiveResponse, { rgbInvoice: 'rgb:…', expiresAt: NOW }, { rgbInvoice: 'rgb:…' }],
-    [
-      'TransfersResponse',
-      TransfersResponse,
-      { transfers: [transfer] },
-      { transfers: [{ ...transfer, status: 'Done' }] },
-    ],
+    ['WalletReceiveRequest', WalletReceiveRequest, { amount: '5000000', expiryMinutes: 60 }, { amount: '5.0' }],
+    ['WalletReceiveResponse', WalletReceiveResponse, { rgbInvoice: 'rgb:…', expiresAt: NOW }, { rgbInvoice: 'rgb:…' }],
+    ['TransfersResponse', TransfersResponse, { transfers: [transfer] }, { transfers: [{ ...transfer, status: 'Done' }] }],
     ['ChatRequest', ChatRequest, { message: 'what is my balance' }, { message: '' }],
     [
       'ChatResponse',
@@ -254,9 +249,7 @@ describe('mocks', () => {
       labels: [],
     };
     const events: unknown[] = [];
-    const ok = await treasurer.execute(plan as never, { planId: 'p1', confirmedAt: NOW } as never, (e) =>
-      events.push(e),
-    );
+    const ok = await treasurer.execute(plan as never, { planId: 'p1', confirmedAt: NOW } as never, (e) => events.push(e));
     expect(ok).toMatchObject({ planId: 'p1', status: 'settled', transferId: 't1', txid: 'abc' });
     for (const e of events) expect(AppEvent.safeParse(e).success).toBe(true);
 
