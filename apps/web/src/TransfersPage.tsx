@@ -5,7 +5,7 @@ import { defaultFiscalRange, fiscalFilename, fiscalRangeError, recentTransfers }
 import { TransfersTable } from './TransfersTable.js';
 import { Empty, ErrorBox, Loading, useLoad, useToast } from './ui.js';
 
-const box = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
+const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
 /** #/transfers: every transfer with labels, plus the fiscal report download. */
 export function TransfersPage({ api }: { api: ApiClient }) {
@@ -76,7 +76,7 @@ export function FiscalForm({ api }: { api: ApiClient }) {
           </button>
         )}
       </div>
-      {problem && <p style={{ color: '#b00020', marginBottom: 0 }}>{problem}</p>}
+      {problem && <p style={{ color: 'var(--wl-c-error)', marginBottom: 0 }}>{problem}</p>}
     </div>
   );
 }

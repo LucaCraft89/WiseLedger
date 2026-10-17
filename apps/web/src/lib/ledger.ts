@@ -85,11 +85,11 @@ export const JOB_STATUS_WORDS: Record<Job['status'], string> = {
 };
 
 export const JOB_STATUS_COLORS: Record<Job['status'], string> = {
-  pending: '#fff3cd',
-  running: '#cce5ff',
-  done: '#d4edda',
-  cancelled: '#e2e3e5',
-  failed: '#f8d7da',
+  pending: 'var(--wl-c-pending-bg)',
+  running: 'var(--wl-c-running-bg)',
+  done: 'var(--wl-c-ok-bg)',
+  cancelled: 'var(--wl-c-neutral-bg)',
+  failed: 'var(--wl-c-error-bg)',
 };
 
 export const canCancelJob = (job: Pick<Job, 'status'>): boolean => job.status === 'pending';
@@ -186,9 +186,21 @@ export interface ChatTurn {
   text: string;
 }
 
-/** The history sent with each message: the last 6 turns. */
-export const chatHistory = (turns: readonly ChatTurn[], max = 6): ChatTurn[] =>
-  turns.slice(-max).map(({ role, text }) => ({ role, text }));
+/** "(done: create_receive_invoice {"amount":"100"} ok)" — what the Treasurer did in a turn, so a follow-up can refer to it. */
+export function toolNote(calls: readonly Pick<ToolCall, 'name' | 'args' | 'ok'>[] | undefined): string {
+  if (!calls?.length) return '';
+  const parts = calls.map((c) => `${c.name} ${JSON.stringify(c.args).slice(0, 120)} ${c.ok ? 'ok' : 'failed'}`);
+  return `\n(done: ${parts.join('; ')})`;
+}
+
+/** The history sent with each message: the last 10 turns, assistant turns with what their tools did. */
+export const chatHistory = (
+  turns: readonly (ChatTurn & { reply?: Pick<ChatResponse, 'toolCalls'> })[],
+  max = 10,
+): ChatTurn[] =>
+  turns
+    .slice(-max)
+    .map(({ role, text, reply }) => ({ role, text: role === 'assistant' ? text + toolNote(reply?.toolCalls) : text }));
 
 export const CHAT_SUGGESTIONS = [
   'What is my TUSDT balance?',

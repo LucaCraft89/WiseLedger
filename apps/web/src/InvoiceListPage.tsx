@@ -4,7 +4,7 @@ import type { InvoiceState, InvoiceSummaryDto } from './api/contracts.js';
 import { formatDate, STATE_LABELS, stateTone, TONE_COLORS, VERDICT_LABELS } from './lib/format.js';
 import { filterInvoices, HISTORY_FILTER_LABELS, HISTORY_FILTERS, type HistoryFilter } from './lib/payment.js';
 
-const cell = { padding: '6px 8px', borderBottom: '1px solid #ddd', textAlign: 'left' } as const;
+const cell = { padding: '6px 8px', borderBottom: '1px solid var(--wl-c-line)', textAlign: 'left' } as const;
 
 export function InvoiceListPage({ api }: { api: ApiClient }) {
   const [invoices, setInvoices] = useState<InvoiceSummaryDto[] | null>(null);
@@ -53,9 +53,9 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
               style={{
                 padding: '4px 12px',
                 borderRadius: 14,
-                border: '1px solid #888',
-                background: filter === f ? '#333' : '#fff',
-                color: filter === f ? '#fff' : '#333',
+                border: '1px solid var(--wl-c-faint)',
+                background: filter === f ? 'var(--wl-c-strong)' : 'var(--wl-c-surface)',
+                color: filter === f ? 'var(--wl-c-surface)' : 'var(--wl-c-strong)',
               }}
             >
               {HISTORY_FILTER_LABELS[f]} ({count})
@@ -63,7 +63,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
           );
         })}
       </nav>
-      {error && <p style={{ color: '#b00020' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--wl-c-error)' }}>{error}</p>}
       {!invoices && !error && <p>Loading your invoices…</p>}
       {invoices && invoices.length === 0 && (
         <p>

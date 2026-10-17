@@ -15,7 +15,7 @@ import { EXPLORER_BASE } from './PaymentCards.js';
 import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
-const box = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
+const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
 export function WalletPage({ api }: { api: ApiClient }) {
   const toast = useToast();
@@ -66,7 +66,7 @@ export function WalletPage({ api }: { api: ApiClient }) {
         <div key={a.assetId} style={box} data-testid="asset-balance">
           <div style={{ fontSize: '1.3em' }}>
             <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
-            <small style={{ color: '#555' }}>{a.name}</small>
+            <small style={{ color: 'var(--wl-c-muted)' }}>{a.name}</small>
           </div>
           <div>
             Available to spend: {formatAssetAmount(a.balance.spendable, a.precision)} · Confirmed:{' '}
@@ -75,7 +75,7 @@ export function WalletPage({ api }: { api: ApiClient }) {
               <> · Incoming included: {formatAssetAmount(a.balance.future, a.precision)}</>
             )}
           </div>
-          <div style={{ fontSize: '0.9em', color: '#555' }}>
+          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
             Token ID (the unique code of this token, used in every payment):{' '}
             <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
           </div>
@@ -139,11 +139,11 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
       live = false;
     };
   }, [api]);
-  if (error) return <p style={{ color: '#555' }}>Lightning: {error}</p>;
+  if (error) return <p style={{ color: 'var(--wl-c-muted)' }}>Lightning: {error}</p>;
   if (!ln) return null;
   if (!ln.enabled) {
     return (
-      <p data-testid="lightning-off" style={{ color: '#555' }}>
+      <p data-testid="lightning-off" style={{ color: 'var(--wl-c-muted)' }}>
         Lightning (instant payments) is off in this wallet. Invoices that ask for Lightning will be stopped.
       </p>
     );
@@ -162,14 +162,14 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
             ? 'No Lightning channel is ready yet, so payments go on-chain. A channel opens on first start; check back in a few minutes.'
             : `${usable} channel${usable === 1 ? '' : 's'} ready.`}
         </div>
-        {ln.problem && <div style={{ color: '#8a6d3b' }}>{ln.problem}</div>}
+        {ln.problem && <div style={{ color: 'var(--wl-c-warn-text)' }}>{ln.problem}</div>}
         {lightningTotals(ln).map((t) => (
           <div key={t.assetId ?? 'unknown'}>
             Can send now: <strong>{fmt(t.assetId, t.send)}</strong> · Can receive: {fmt(t.assetId, t.receive)}
           </div>
         ))}
         {ln.nodePubkey && (
-          <div style={{ fontSize: '0.9em', color: '#555' }}>
+          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
             Your Lightning node: <code title={ln.nodePubkey}>{shortId(ln.nodePubkey)}</code>{' '}
             <CopyButton value={ln.nodePubkey} what="Node ID" />
           </div>
@@ -288,14 +288,14 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           <input inputMode="numeric" value={expiry} onChange={(e) => setExpiry(e.target.value)} style={{ width: 80 }} />{' '}
           minutes
         </label>
-        {formError && <p style={{ color: '#b00020' }}>{formError}</p>}
+        {formError && <p style={{ color: 'var(--wl-c-error)' }}>{formError}</p>}
         <button type="submit" disabled={busy}>
           {busy ? 'Creating…' : 'Create payment request'}
         </button>
       </form>
 
       {created && (
-        <div style={{ ...box, background: '#f8f9fa' }} data-testid="receive-invoice">
+        <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
           <strong>Your payment request</strong>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
             <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />

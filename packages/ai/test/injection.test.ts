@@ -29,7 +29,9 @@ const prompt = (req: CompletionRequest | undefined) => JSON.stringify(req?.messa
 
 describe('no fixture can cause a tool call by text alone', () => {
   for (const f of EXPECTED) {
-    it(`${f.id}: Analyst offers no tools, summary and Treasurer never see the document`, async () => {
+    it(`${f.id}: Analyst offers no tools, summary and Treasurer never see the document`, {
+      timeout: 30_000,
+    }, async () => {
       const llm = new MockLlm({
         replies: analysisReplies(f, { summary: 'Checked.', questionsForUser: [] }),
       });

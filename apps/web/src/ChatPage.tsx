@@ -24,7 +24,7 @@ type Message = StoredMessage;
 const bubble = (role: ChatTurn['role']) =>
   ({
     alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
-    background: role === 'user' ? '#e7f1ff' : '#f1f3f5',
+    background: role === 'user' ? 'var(--wl-c-bubble-user)' : 'var(--wl-c-bubble)',
     borderRadius: 8,
     padding: '8px 12px',
     maxWidth: '85%',
@@ -93,19 +93,19 @@ export function ChatPage({ api }: { api: ApiClient }) {
           </button>
         )}
       </div>
-      <p style={{ marginTop: 0, color: '#555' }}>
+      <p style={{ marginTop: 0, color: 'var(--wl-c-muted)' }}>
         AI running on this computer. It can check your balance, label payments, prepare reports and schedule payments.
         It never pays without your confirmation.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }} data-testid="chat-log">
-        {messages.length === 0 && <p style={{ color: '#555', fontStyle: 'italic' }}>Try one of these:</p>}
+        {messages.length === 0 && <p style={{ color: 'var(--wl-c-muted)', fontStyle: 'italic' }}>Try one of these:</p>}
         {messages.map((m) => (
           <div key={m.id} style={bubble(m.role)}>
             {m.role === 'assistant' ? <Markdown text={m.text} /> : <div>{m.text}</div>}
             {m.reply && <ReplyExtras api={api} reply={m.reply} restored={m.restored ?? false} />}
           </div>
         ))}
-        {busy && <div style={{ ...bubble('assistant'), color: '#555' }}>Thinking…</div>}
+        {busy && <div style={{ ...bubble('assistant'), color: 'var(--wl-c-muted)' }}>Thinking…</div>}
         <div ref={endRef} />
       </div>
       {error ? <ErrorBox error={error} /> : null}
@@ -151,7 +151,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         </button>
       </form>
       {voiceHint && draft && (
-        <p style={{ margin: '6px 0 0', color: '#555', fontSize: '0.9em' }} role="status">
+        <p style={{ margin: '6px 0 0', color: 'var(--wl-c-muted)', fontSize: '0.9em' }} role="status">
           We wrote down what you said. Check the text, fix it if needed, then press Send.
         </p>
       )}
@@ -227,7 +227,11 @@ function MicButton({
       title={`Speak your request (up to ${VOICE_MAX_SECONDS} seconds). The AI on this computer writes it down; you check it before sending.`}
       disabled={st.s === 'transcribing' || (disabled && !recording)}
       onClick={() => void (recording ? stop() : start())}
-      style={recording ? { background: '#b00020', color: '#fff', borderColor: '#b00020' } : undefined}
+      style={
+        recording
+          ? { background: 'var(--wl-c-error)', color: 'var(--wl-c-surface)', borderColor: 'var(--wl-c-error)' }
+          : undefined
+      }
     >
       {st.s === 'transcribing' ? 'Listening…' : recording ? `● Stop (${secs}s)` : 'Speak'}
     </button>
@@ -247,7 +251,7 @@ function ReplyExtras({ api, reply, restored }: { api: ApiClient; reply: ChatResp
       )}
       {reply.needsConfirmation &&
         (restored ? (
-          <p style={{ fontSize: '0.9em', color: '#555', margin: '6px 0 0' }}>
+          <p style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)', margin: '6px 0 0' }}>
             This confirmation was from an earlier visit. Ask again to prepare it now.
           </p>
         ) : (
@@ -270,8 +274,8 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
         fontSize: '0.8em',
         borderRadius: 10,
         padding: '0 8px',
-        background: call.ok ? '#d4edda' : '#f8d7da',
-        color: call.ok ? '#155724' : '#b00020',
+        background: call.ok ? 'var(--wl-c-ok-bg)' : 'var(--wl-c-error-bg)',
+        color: call.ok ? 'var(--wl-c-ok-text)' : 'var(--wl-c-error)',
       }}
     >
       {toolChipText(call)}
@@ -337,7 +341,13 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
   return (
     <div
       data-testid="confirm-card"
-      style={{ border: '2px solid #f0ad4e', background: '#fff', borderRadius: 6, padding: 12, marginTop: 8 }}
+      style={{
+        border: '2px solid var(--wl-c-warn-line)',
+        background: 'var(--wl-c-surface)',
+        borderRadius: 6,
+        padding: 12,
+        marginTop: 8,
+      }}
     >
       <strong>Please check and confirm</strong>
       <p style={{ margin: '6px 0' }}>{nc.sentence}</p>
@@ -346,14 +356,14 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
           <a href={invoiceLink}>Open the invoice to confirm the payment</a>
         </p>
       ) : st.s === 'done' ? (
-        <p style={{ margin: 0, color: '#155724' }}>
+        <p style={{ margin: 0, color: 'var(--wl-c-ok-text)' }}>
           {st.text} <a href="#/schedule">See scheduled payments</a>
         </p>
       ) : st.s === 'cancelled' ? (
-        <p style={{ margin: 0, color: '#555' }}>Cancelled. Nothing was scheduled.</p>
+        <p style={{ margin: 0, color: 'var(--wl-c-muted)' }}>Cancelled. Nothing was scheduled.</p>
       ) : (
         <>
-          {st.s === 'error' && <p style={{ color: '#b00020', margin: '0 0 6px' }}>{st.text}</p>}
+          {st.s === 'error' && <p style={{ color: 'var(--wl-c-error)', margin: '0 0 6px' }}>{st.text}</p>}
           <button type="button" onClick={() => void confirm()} disabled={st.s === 'busy'}>
             {st.s === 'busy' ? 'Scheduling…' : 'Confirm'}
           </button>{' '}

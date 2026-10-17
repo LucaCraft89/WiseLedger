@@ -7,7 +7,7 @@ import { explorerTxUrl, shortId } from './lib/payment.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
 import { Empty, ErrorBox, errorText, Loading, useLoad, useToast } from './ui.js';
 
-const row = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 8 } as const;
+const row = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 8 } as const;
 
 /** #/schedule: scheduled payments, with Cancel for the ones still waiting. */
 export function SchedulePage({ api }: { api: ApiClient }) {
@@ -77,7 +77,7 @@ export function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onCh
           )}
         </p>
       )}
-      {job.lastError && <p style={{ color: '#b00020', margin: '4px 0 0' }}>Problem: {job.lastError}</p>}
+      {job.lastError && <p style={{ color: 'var(--wl-c-error)', margin: '4px 0 0' }}>Problem: {job.lastError}</p>}
       {canCancelJob(job) &&
         (asking ? (
           <p style={{ margin: '8px 0 0' }}>

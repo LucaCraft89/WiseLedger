@@ -25,7 +25,13 @@ export function ResultCard({
   return (
     <div
       data-testid="paid-card"
-      style={{ background: '#d4edda', borderLeft: '6px solid #28a745', borderRadius: 4, padding: 12, marginTop: 16 }}
+      style={{
+        background: 'var(--wl-c-ok-bg)',
+        borderLeft: '6px solid var(--wl-c-ok-line)',
+        borderRadius: 4,
+        padding: 12,
+        marginTop: 16,
+      }}
     >
       <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
       {sentence && <div>You paid {sentence}.</div>}
@@ -87,12 +93,18 @@ export function FailureCard({
     <div
       data-testid="failure-card"
       role="alert"
-      style={{ background: '#f8d7da', borderLeft: '6px solid #c82333', borderRadius: 4, padding: 12, marginTop: 16 }}
+      style={{
+        background: 'var(--wl-c-error-bg)',
+        borderLeft: '6px solid var(--wl-c-danger)',
+        borderRadius: 4,
+        padding: 12,
+        marginTop: 16,
+      }}
     >
       <strong style={{ fontSize: '1.2em' }}>{unsure ? 'We are not sure the payment went through' : 'Not paid'}</strong>
       <div>{errorWords(code, message)}</div>
       {message && message !== errorWords(code, message) && (
-        <div style={{ fontSize: '0.85em', color: '#555' }}>Details: {message}</div>
+        <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>Details: {message}</div>
       )}
       {transferId && (
         <div style={{ fontSize: '0.9em', marginTop: 4 }}>
@@ -129,7 +141,7 @@ export function FailureCard({
             : 'Nothing is retried automatically.'}
         </div>
       )}
-      {error && <p style={{ color: '#b00020', margin: '8px 0 0' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--wl-c-error)', margin: '8px 0 0' }}>{error}</p>}
     </div>
   );
 }

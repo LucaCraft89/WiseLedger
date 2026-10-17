@@ -15,12 +15,12 @@ import { errorText, useToast } from './ui.js';
 
 type Assets = WalletResponse['assets'];
 
-const cell = { padding: '6px 8px', borderBottom: '1px solid #eee', verticalAlign: 'top' } as const;
+const cell = { padding: '6px 8px', borderBottom: '1px solid var(--wl-c-line-soft)', verticalAlign: 'top' } as const;
 const chip = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
-  background: '#e7f1ff',
+  background: 'var(--wl-c-bubble-user)',
   borderRadius: 12,
   padding: '0 8px',
   margin: '0 4px 4px 0',
@@ -161,8 +161,10 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
             onBlur={() => s.mode === 'editing' && !s.draft.trim() && dispatch({ type: 'cancel' })}
             style={{ width: 110 }}
           />
-          <small style={{ color: '#555' }}> Enter to save, Esc to cancel</small>
-          {s.mode === 'editing' && s.error && <div style={{ color: '#b00020', fontSize: '0.85em' }}>{s.error}</div>}
+          <small style={{ color: 'var(--wl-c-muted)' }}> Enter to save, Esc to cancel</small>
+          {s.mode === 'editing' && s.error && (
+            <div style={{ color: 'var(--wl-c-error)', fontSize: '0.85em' }}>{s.error}</div>
+          )}
         </span>
       )}
     </div>

@@ -191,7 +191,7 @@ describe('Treasurer chat (MockLlm)', () => {
   it('a payment request made in chat is reported to the server (listed under Get paid)', async () => {
     const made: unknown[] = [];
     const llm = new MockLlm({
-      replies: [call('create_receive_invoice', { amount: '7000000' }), { text: 'Here is your payment request.' }],
+      replies: [call('create_receive_invoice', { amount: '7' }), { text: 'Here is your payment request.' }],
     });
     const t = new Treasurer({
       llm,
@@ -207,6 +207,21 @@ describe('Treasurer chat (MockLlm)', () => {
     expect(r.toolCalls[0]).toMatchObject({ name: 'create_receive_invoice', ok: true });
     expect(made).toHaveLength(1);
     expect(made[0]).toMatchObject({ amount: '7000000', rgbInvoice: expect.any(String) });
+  });
+
+  it('earlier turns reach the model in order, before the new message (up to 10)', async () => {
+    const llm = new MockLlm({ fallback: { text: 'Done.' } });
+    const t = new Treasurer({ llm, wallet: new MockWallet({ stepMs: 0 }), guard: confirmationGuard(), now: () => NOW });
+    const history = Array.from({ length: 12 }, (_, i) => ({
+      role: (i % 2 ? 'assistant' : 'user') as 'user' | 'assistant',
+      text: `turn ${i}`,
+    }));
+    await t.chat('make it 50 instead', history, () => {});
+    const msgs = llm.calls[0]?.messages ?? [];
+    expect(msgs.map((m) => m.role)).toEqual(['system', ...history.slice(-10).map((h) => h.role), 'user']);
+    expect(msgs.at(-2)?.content).toBe('turn 11');
+    expect(msgs.at(-1)?.content).toBe('make it 50 instead');
+    expect(String(msgs[0]?.content)).toMatch(/earlier messages of this conversation/);
   });
 
   it('safeName strips quotes, newlines and instruction-like names', () => {

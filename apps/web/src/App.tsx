@@ -10,6 +10,7 @@ import { screenForOnboarding } from './lib/onboarding.js';
 import { SetupScreen, UnlockScreen } from './OnboardingScreens.js';
 import { SchedulePage } from './SchedulePage.js';
 import { SettingsPage } from './SettingsPage.js';
+import { ThemeSwitch } from './ThemeSwitch.js';
 import { TransfersPage } from './TransfersPage.js';
 import { UploadPage } from './UploadPage.js';
 import { WalletPage } from './WalletPage.js';
@@ -103,6 +104,7 @@ export function App() {
               ))}
             </nav>
           )}
+          <ThemeSwitch />
         </header>
         {api.mode === 'fake' && (
           <p role="note" style={{ background: 'var(--wl-review-bg)', padding: '2px 8px', borderRadius: 4 }}>
