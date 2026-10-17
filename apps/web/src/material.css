@@ -1,0 +1,445 @@
+/* Material You (Material 3) layer over the WiseLedger brand (brand.css stays the source of the brand tokens).
+   Color roles are tonal steps of the brand: primary = WiseLedger blue, secondary = navy, tertiary = rust, focus = gold,
+   surfaces = the cream page. Styling only: no component depends on these classes beyond brand.css. */
+
+:root {
+  /* color roles (light scheme) */
+  --md-primary: #0b4f8f;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d4e3ff;
+  --md-on-primary-container: #001c3a;
+  --md-secondary: #3f5f86;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #d6e4f7;
+  --md-on-secondary-container: #0b1d33;
+  --md-tertiary: #a9420f;
+  --md-on-tertiary: #ffffff;
+  --md-tertiary-container: #ffdbcb;
+  --md-on-tertiary-container: #370e00;
+  --md-error: #b3261e;
+  --md-error-container: #f9dedc;
+  --md-on-error-container: #410e0b;
+  --md-surface: #fbf8f1;
+  --md-surface-dim: #e2ded5;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f6f2ea;
+  --md-surface-container: #f0ece4;
+  --md-surface-container-high: #eae6de;
+  --md-surface-container-highest: #e4e1d8;
+  --md-on-surface: #1b1c1a;
+  --md-on-surface-variant: #45474e;
+  --md-outline: #75777f;
+  --md-outline-variant: #c5c6cf;
+  --md-focus: #ffc20e;
+  /* shape scale */
+  --md-shape-xs: 4px;
+  --md-shape-sm: 8px;
+  --md-shape-md: 12px;
+  --md-shape-lg: 16px;
+  --md-shape-xl: 28px;
+  --md-shape-full: 999px;
+  /* elevation (tonal surfaces carry most of it; shadows stay soft) */
+  --md-elev-1: 0 1px 2px rgb(0 0 0 / 0.18), 0 1px 3px 1px rgb(0 0 0 / 0.08);
+  --md-elev-2: 0 1px 2px rgb(0 0 0 / 0.18), 0 2px 6px 2px rgb(0 0 0 / 0.1);
+  --md-elev-3: 0 4px 8px 3px rgb(0 0 0 / 0.1), 0 1px 3px rgb(0 0 0 / 0.18);
+  /* motion */
+  --md-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* re-point the brand radius so brand.css components pick up the M3 shapes */
+  --wl-radius: var(--md-shape-md);
+  --wl-page: var(--md-surface);
+}
+
+body {
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* type scale: display/headline in the brand serif, titles/body/labels in Inter */
+h1 {
+  font-size: 2.25rem; /* headline-large */
+  line-height: 2.75rem;
+  color: var(--md-primary);
+}
+h2 {
+  font-size: 1.75rem; /* headline-medium */
+  line-height: 2.25rem;
+  color: var(--md-on-surface);
+}
+h3 {
+  font-family: var(--wl-font-body);
+  font-weight: 600;
+  font-size: 1.375rem; /* title-large */
+  line-height: 1.75rem;
+  color: var(--md-on-surface);
+}
+h4 {
+  font-family: var(--wl-font-body);
+  font-weight: 600;
+  font-size: 1rem; /* title-medium */
+  letter-spacing: 0.01em;
+  color: var(--md-on-surface);
+}
+small,
+.wl-caption {
+  color: var(--md-on-surface-variant);
+}
+a {
+  color: var(--md-primary);
+  text-underline-offset: 3px;
+}
+
+/* ---------- top app bar + navigation ---------- */
+.wl-shell {
+  max-width: 880px;
+  padding-top: 0;
+}
+.wl-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: 0 -24px 24px;
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--md-surface-container) 92%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--md-outline-variant);
+  border-radius: 0 0 var(--md-shape-lg) var(--md-shape-lg);
+}
+@media (max-width: 600px) {
+  .wl-header {
+    margin: 0 -16px 16px;
+    padding: 8px 16px;
+  }
+}
+.wl-header h1 {
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+}
+.wl-header h1 img {
+  border-radius: var(--md-shape-md);
+  background: var(--md-primary-container);
+}
+.wl-nav {
+  gap: 4px;
+  padding: 4px;
+  background: var(--md-surface-container-high);
+  border-radius: var(--md-shape-full);
+}
+.wl-nav a {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--md-shape-full);
+  color: var(--md-on-surface-variant);
+  font: 600 14px / 1 var(--wl-font-body);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition:
+    background-color 200ms var(--md-ease),
+    color 200ms var(--md-ease);
+}
+.wl-nav a:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: var(--md-on-surface);
+}
+.wl-nav a[aria-current="page"] {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  text-decoration: none;
+}
+
+/* ---------- buttons: filled (default), tonal/outlined (secondary), tertiary (accent) ---------- */
+button {
+  min-height: 44px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--md-shape-full);
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  font: 600 14px / 1 var(--wl-font-body);
+  letter-spacing: 0.01em;
+  box-shadow: none;
+  transition:
+    box-shadow 200ms var(--md-ease),
+    background-color 200ms var(--md-ease);
+}
+button:hover:not(:disabled) {
+  /* state layer: on-primary at 8% */
+  background: color-mix(in srgb, var(--md-primary) 92%, var(--md-on-primary));
+  border-color: transparent;
+  box-shadow: var(--md-elev-1);
+}
+button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--md-primary) 88%, var(--md-on-primary));
+  box-shadow: none;
+}
+button:disabled {
+  background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+  border-color: transparent;
+  color: color-mix(in srgb, var(--md-on-surface) 38%, transparent);
+}
+button.wl-secondary {
+  background: transparent;
+  color: var(--md-primary);
+  border: 1px solid var(--md-outline);
+}
+button.wl-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+  color: var(--md-primary);
+  box-shadow: none;
+}
+button.wl-accent {
+  background: var(--md-tertiary);
+  color: var(--md-on-tertiary);
+}
+button.wl-accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-tertiary) 92%, var(--md-on-tertiary));
+}
+
+/* ---------- text fields (outlined) ---------- */
+input,
+select,
+textarea {
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-xs);
+  background: transparent;
+  color: var(--md-on-surface);
+  transition: border-color 150ms var(--md-ease);
+}
+textarea {
+  padding: 12px 16px;
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--md-on-surface);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--md-primary);
+  box-shadow: inset 0 0 0 1px var(--md-primary);
+  outline: none;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: auto;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--md-primary);
+}
+input[type="file"] {
+  padding: 10px 16px;
+  border-style: dashed;
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container-low);
+}
+input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--md-shape-full);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font: 600 14px / 1 var(--wl-font-body);
+  cursor: pointer;
+}
+label {
+  color: var(--md-on-surface-variant);
+}
+
+/* keyboard focus stays the brand gold ring (AA on every surface) */
+:focus-visible {
+  outline: 3px solid var(--md-focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--md-primary);
+}
+
+/* ---------- cards ---------- */
+.wl-card {
+  background: var(--md-surface-container-low);
+  border: 0;
+  border-radius: var(--md-shape-lg);
+  padding: 20px;
+  box-shadow: var(--md-elev-1);
+}
+.wl-card + .wl-card {
+  margin-top: 12px;
+}
+section,
+article {
+  border-radius: var(--md-shape-lg);
+}
+
+/* ---------- verdict badges → assist chips ---------- */
+.wl-badge {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--md-shape-sm);
+  font: 600 14px / 1 var(--wl-font-body);
+}
+.wl-badge[data-tone="ok"] {
+  border: 1px solid var(--wl-ok);
+}
+.wl-badge[data-tone="review"] {
+  border: 1px solid var(--wl-review);
+}
+.wl-badge[data-tone="block"] {
+  border: 1px solid var(--wl-block);
+}
+
+/* ---------- confirm dialog (inline-styled in ConfirmDialog.tsx) ---------- */
+[role="dialog"] {
+  border: 0 !important;
+  border-radius: var(--md-shape-xl) !important;
+  padding: 24px !important;
+  background: var(--md-surface-container-high);
+  box-shadow: var(--md-elev-3);
+}
+[role="dialog"] h3 {
+  font-family: var(--wl-font-head);
+  font-weight: 400;
+  font-size: 1.5rem;
+  color: var(--md-on-surface);
+}
+
+/* ---------- lists, tables, details ---------- */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  background: var(--md-surface-container-lowest);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-md);
+  overflow: hidden;
+  font-size: 14px;
+}
+th {
+  background: var(--md-surface-container);
+  color: var(--md-on-surface-variant);
+  font-weight: 600;
+  text-align: left;
+}
+th,
+td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+tbody tr:hover td {
+  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
+}
+details {
+  background: var(--md-surface-container-low);
+  border-radius: var(--md-shape-md);
+  padding: 12px 16px;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+code {
+  padding: 1px 6px;
+  border-radius: var(--md-shape-xs);
+  background: var(--md-surface-container-high);
+  font-size: 0.9em;
+}
+pre {
+  padding: 12px 16px;
+  border-radius: var(--md-shape-md);
+  background: var(--md-surface-container-high);
+}
+hr {
+  border: 0;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+/* notes and status lines (inline-colored by the screens) get M3 shape */
+p[role="note"],
+p[role="alert"],
+div[role="alert"] {
+  border-radius: var(--md-shape-md);
+}
+[role="alert"] {
+  padding: 12px 16px;
+  background: var(--md-error-container);
+  color: var(--md-on-error-container);
+}
+
+/* recovery words: tonal tiles */
+.wl-words li {
+  background: var(--md-surface-container-high);
+  border: 0;
+  border-radius: var(--md-shape-md);
+}
+
+.wl-skip {
+  border-radius: var(--md-shape-full);
+  box-shadow: var(--md-elev-2);
+}
+
+/* small inline actions (Copy next to a code, buttons inside table cells) → tonal, compact: one filled action per area */
+code + button,
+td button {
+  min-height: 36px;
+  padding: 0 14px;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  white-space: nowrap;
+}
+code + button:hover:not(:disabled),
+td button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-secondary-container) 92%, var(--md-on-secondary-container));
+  color: var(--md-on-secondary-container);
+  box-shadow: none;
+}
+td button.wl-secondary {
+  background: transparent;
+  color: var(--md-primary);
+}
+
+/* suggestion chips (chat prompts) */
+.wl-chips button {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-sm);
+  background: var(--md-surface-container-low);
+  color: var(--md-on-surface-variant);
+  font-weight: 500;
+}
+.wl-chips button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, var(--md-surface-container-low));
+  color: var(--md-on-surface);
+  box-shadow: none;
+}
+
+/* voice: tonal button (the filled Send stays the one main action) */
+button[aria-label^="Speak"],
+button[aria-label^="Stop recording"] {
+  background: var(--md-tertiary-container);
+  color: var(--md-on-tertiary-container);
+}
+button[aria-label^="Speak"]:hover:not(:disabled),
+button[aria-label^="Stop recording"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-tertiary-container) 90%, var(--md-on-tertiary-container));
+  color: var(--md-on-tertiary-container);
+}
+
+/* dialog actions: the first button is the filled main action, the others are outlined */
+[role="dialog"] button + button {
+  background: transparent;
+  color: var(--md-primary);
+  border: 1px solid var(--md-outline);
+}
+[role="dialog"] button + button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+  color: var(--md-primary);
+  box-shadow: none;
+}
