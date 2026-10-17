@@ -12,6 +12,7 @@ import {
   type ToolCall,
   toolChipText,
 } from './lib/ledger.js';
+import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type VoiceRecording } from './lib/voice.js';
 import { ErrorBox, errorText, useToast } from './ui.js';
 
 interface Message extends ChatTurn {
@@ -38,6 +39,8 @@ export function ChatPage({ api }: { api: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [voiceHint, setVoiceHint] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the end when a message or "Thinking…" appears
   useEffect(() => {
@@ -95,19 +98,114 @@ export function ChatPage({ api }: { api: ApiClient }) {
           void send(draft);
         }}
       >
+        <MicButton
+          api={api}
+          disabled={busy}
+          onError={setError}
+          onText={(text) => {
+            setError(null);
+            setDraft((d) => (d.trim() ? `${d.trim()} ${text}` : text).slice(0, 2000));
+            setVoiceHint(true);
+            inputRef.current?.focus();
+          }}
+        />
         <input
+          ref={inputRef}
           aria-label="Message to the Treasurer"
           value={draft}
           maxLength={2000}
           placeholder="Type a request, e.g. What is my TUSDT balance?"
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (!e.target.value) setVoiceHint(false);
+          }}
           style={{ flex: 1 }}
         />
         <button type="submit" disabled={busy || !draft.trim()}>
           {busy ? 'Sending…' : 'Send'}
         </button>
       </form>
+      {voiceHint && draft && (
+        <p style={{ margin: '6px 0 0', color: '#555', fontSize: '0.9em' }} role="status">
+          We wrote down what you said. Check the text, fix it if needed, then press Send.
+        </p>
+      )}
     </section>
+  );
+}
+
+type MicState = { s: 'idle' } | { s: 'recording'; since: number } | { s: 'transcribing' };
+
+/** Click to start, click to stop. The transcript goes into the text box; nothing is sent automatically. */
+function MicButton({
+  api,
+  disabled,
+  onText,
+  onError,
+}: {
+  api: ApiClient;
+  disabled: boolean;
+  onText: (text: string) => void;
+  onError: (err: unknown) => void;
+}) {
+  const [st, setSt] = useState<MicState>({ s: 'idle' });
+  const [now, setNow] = useState(Date.now());
+  const recRef = useRef<VoiceRecording | null>(null);
+  const stopRef = useRef<() => void>(() => {});
+
+  useEffect(() => () => recRef.current?.cancel(), []);
+  useEffect(() => {
+    if (st.s !== 'recording') return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [st.s]);
+
+  if (!canRecordVoice()) return null;
+
+  async function start() {
+    onError(null);
+    try {
+      recRef.current = await startRecording(() => stopRef.current());
+      setNow(Date.now());
+      setSt({ s: 'recording', since: Date.now() });
+    } catch (err) {
+      onError(micErrorText(err));
+    }
+  }
+
+  async function stop() {
+    const rec = recRef.current;
+    recRef.current = null;
+    if (!rec) return;
+    setSt({ s: 'transcribing' });
+    try {
+      const wav = await rec.stop();
+      const { text } = await api.transcribe(wav);
+      if (text.trim()) onText(text.trim());
+      else
+        onError('We could not make out any words. Try again a little closer to the microphone, or type your request.');
+    } catch (err) {
+      onError(errorText(err, 'We could not turn your voice into text. Try again, or type your request.'));
+    } finally {
+      setSt({ s: 'idle' });
+    }
+  }
+  stopRef.current = () => void stop();
+
+  const recording = st.s === 'recording';
+  const secs = recording ? Math.min(VOICE_MAX_SECONDS, Math.floor((now - st.since) / 1000)) : 0;
+  return (
+    <button
+      type="button"
+      aria-pressed={recording}
+      aria-label={recording ? 'Stop recording and write down what I said' : 'Speak your request'}
+      title={`Speak your request (up to ${VOICE_MAX_SECONDS} seconds). The AI on this computer writes it down; you check it before sending.`}
+      disabled={st.s === 'transcribing' || (disabled && !recording)}
+      onClick={() => void (recording ? stop() : start())}
+      style={recording ? { background: '#b00020', color: '#fff', borderColor: '#b00020' } : undefined}
+    >
+      {st.s === 'transcribing' ? 'Listening…' : recording ? `● Stop (${secs}s)` : 'Speak'}
+    </button>
   );
 }
 

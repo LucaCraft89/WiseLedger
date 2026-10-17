@@ -9,3 +9,4 @@ export * from './rules/index.js';
 export * from './runtime.js';
 export * from './scheduler.js';
 export * from './treasurer/treasurer.js';
+export * from './voice.js';
