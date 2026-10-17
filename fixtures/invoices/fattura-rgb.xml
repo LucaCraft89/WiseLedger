@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>08877665544</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>00015</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>0000000</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>08877665544</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>TIPOGRAFIA MOLE SRL</Denominazione></Anagrafica>
+        <RegimeFiscale>RF01</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>Via Garibaldi 7</Indirizzo><CAP>10122</CAP><Comune>Torino</Comune><Provincia>TO</Provincia><Nazione>IT</Nazione></Sede>
+      <Contatti><Email>fatture@tipografiamole.example</Email></Contatti>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        <CodiceFiscale>CNCBST26A01L219X</CodiceFiscale>
+        <Anagrafica><Denominazione>Coin Cube Studio</Denominazione></Anagrafica>
+      </DatiAnagrafici>
+      <Sede><Indirizzo>Corso Vittorio 1</Indirizzo><CAP>10121</CAP><Comune>Torino</Comune><Provincia>TO</Provincia><Nazione>IT</Nazione></Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD01</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>2026-10-08</Data>
+        <Numero>FPA-2026/015</Numero>
+        <ImportoTotaleDocumento>48.80</ImportoTotaleDocumento>
+        <Causale>Biglietti da visita e volantini. Pagamento RGB: rgb:mock/rgb:mock-tusdt/48800000/1900000000</Causale>
+      </DatiGeneraliDocumento>
+    </DatiGenerali>
+    <DatiBeniServizi>
+      <DettaglioLinee>
+        <NumeroLinea>1</NumeroLinea>
+        <Descrizione>Biglietti da visita, 500 pz</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>30.00</PrezzoUnitario>
+        <PrezzoTotale>30.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DettaglioLinee>
+        <NumeroLinea>2</NumeroLinea>
+        <Descrizione>Volantini A5, 200 pz</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>10.00</PrezzoUnitario>
+        <PrezzoTotale>10.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DatiRiepilogo>
+        <AliquotaIVA>22.00</AliquotaIVA>
+        <ImponibileImporto>40.00</ImponibileImporto>
+        <Imposta>8.80</Imposta>
+        <EsigibilitaIVA>I</EsigibilitaIVA>
+      </DatiRiepilogo>
+    </DatiBeniServizi>
+    <DatiPagamento>
+      <CondizioniPagamento>TP02</CondizioniPagamento>
+      <DettaglioPagamento>
+        <ModalitaPagamento>MP23</ModalitaPagamento>
+        <DataScadenzaPagamento>2026-11-07</DataScadenzaPagamento>
+        <ImportoPagamento>48.80</ImportoPagamento>
+      </DettaglioPagamento>
+    </DatiPagamento>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>

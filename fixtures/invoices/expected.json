@@ -193,6 +193,42 @@
       "issueDate": "2026-10-09",
       "dueDate": "2026-11-08",
       "note": "image-only scan: slightly rotated, grey, noisy; no text layer"
+    },
+    {
+      "id": "fattura-rgb",
+      "file": "fattura-rgb.xml",
+      "kind": "xml",
+      "issuer": "TIPOGRAFIA MOLE SRL",
+      "vatId": "IT08877665544",
+      "invoiceNumber": "FPA-2026/015",
+      "total": "48.80",
+      "currency": "EUR",
+      "paymentMethod": "rgb",
+      "rgbInvoice": "rgb:mock/rgb:mock-tusdt/48800000/1900000000",
+      "verdict": "review",
+      "flags": ["R8_CURRENCY"],
+      "lineAmounts": ["30.00", "10.00", "8.80"],
+      "issueDate": "2026-10-08",
+      "dueDate": "2026-11-07",
+      "note": "FatturaPA XML read without the model; EUR total, RGB payment request in Causale → rate question"
+    },
+    {
+      "id": "fattura-iban",
+      "file": "fattura-iban.xml",
+      "kind": "xml",
+      "issuer": "IDRAULICA PO SNC",
+      "vatId": "IT09988776655",
+      "invoiceNumber": "231/2026",
+      "total": "1220.00",
+      "currency": "EUR",
+      "paymentMethod": "iban",
+      "rgbInvoice": "",
+      "verdict": "block",
+      "flags": ["R1_RGB_INVOICE", "R3_AMOUNT", "R6_PRESSURE", "R8_CURRENCY"],
+      "lineAmounts": ["1000.00", "220.00"],
+      "issueDate": "2026-10-15",
+      "dueDate": "2026-10-17",
+      "note": "FatturaPA XML, bank transfer only, \"bank details changed, pay today\""
     }
   ],
   "payeeBook": [

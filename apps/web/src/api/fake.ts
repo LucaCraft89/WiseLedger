@@ -77,7 +77,6 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
 export const FAKE_HINTS = [
   'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
   'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
-  'Confirm the payment sentence and watch it reach Settled on the invoice page.',
 ];
 
 export interface FakeOptions {

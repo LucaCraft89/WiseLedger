@@ -33,8 +33,16 @@ export function paidSentence(plan: PlanLike, assets: readonly AssetMeta[]): stri
   const asset = findAsset(plan.assetId, assets);
   const amount = asset
     ? `${formatAssetAmount(plan.amount, asset.precision)} ${asset.ticker}`
-    : `${plan.amount} base units`;
+    : `${plan.amount} smallest units of an unknown token`;
   return `${amount} (asset ${plan.assetId}) to ${plan.payee.name}`;
+}
+
+/** Shown under a sentence that names the asset ID ("(asset rgb:…)"), so the code is not a mystery. */
+export const ASSET_ID_HINT =
+  'The code after “asset” is the unique ID of the token. It makes sure the right token is paid, even if two tokens share a name.';
+
+export function assetIdHint(sentence: string | undefined): string | null {
+  return sentence && /\(asset [^)]+\)/.test(sentence) ? ASSET_ID_HINT : null;
 }
 
 export const BLOCK_EXPLANATION = 'This invoice was stopped because it looks unsafe. You cannot pay it from here.';

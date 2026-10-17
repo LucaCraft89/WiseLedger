@@ -43,14 +43,17 @@ export function WalletPage({ api }: { api: ApiClient }) {
     <section>
       <h2>Wallet</h2>
       <p>
-        {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} · {w.ready ? 'ready' : 'not ready yet'}{' '}
+        Wallet: {BACKEND_WORDS[w.backend]} · Network: {NETWORK_WORDS[w.network]} ·{' '}
+        {w.ready ? 'Ready to use' : 'Not ready yet: press Refresh in a minute'}{' '}
         <button type="button" onClick={() => void load()}>
           Refresh
         </button>
       </p>
 
       <h3>Balances</h3>
-      {w.assets.length === 0 && <Empty text="This wallet holds no RGB assets yet." />}
+      {w.assets.length === 0 && (
+        <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
+      )}
       {w.assets.map((a) => (
         <div key={a.assetId} style={box} data-testid="asset-balance">
           <div style={{ fontSize: '1.3em' }}>
@@ -65,8 +68,8 @@ export function WalletPage({ api }: { api: ApiClient }) {
             )}
           </div>
           <div style={{ fontSize: '0.9em', color: '#555' }}>
-            Asset ID: <code title={a.assetId}>{shortId(a.assetId)}</code>{' '}
-            <CopyButton value={a.assetId} what="Asset ID" />
+            Token ID (the unique code of this token, used in every payment):{' '}
+            <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
           </div>
         </div>
       ))}
@@ -143,9 +146,9 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         expiryMinutes: minutes,
       });
       setCreated(res);
-      toast('Receive invoice created', 'success');
+      toast('Payment request created', 'success');
     } catch (err) {
-      const msg = errorText(err, 'Could not create the receive invoice.');
+      const msg = errorText(err, 'Could not create the payment request.');
       setFormError(msg);
       toast(msg, 'error');
     } finally {
@@ -163,7 +166,10 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           void submit();
         }}
       >
-        <p style={{ marginTop: 0 }}>Create an RGB invoice and give it to the person who pays you.</p>
+        <p style={{ marginTop: 0 }}>
+          Create a payment request (an “RGB invoice”) and send it to the person who will pay you. They paste it into
+          their wallet.
+        </p>
         <label style={{ display: 'block', marginBottom: 8 }}>
           Asset{' '}
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
@@ -192,18 +198,18 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         </label>
         {formError && <p style={{ color: '#b00020' }}>{formError}</p>}
         <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create receive invoice'}
+          {busy ? 'Creating…' : 'Create payment request'}
         </button>
       </form>
 
       {created && (
         <div style={{ ...box, background: '#f8f9fa' }} data-testid="receive-invoice">
-          <strong>Your receive invoice</strong>
+          <strong>Your payment request</strong>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
-            <Qr value={created.rgbInvoice} size={200} alt="QR code of the RGB receive invoice" />
+            <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
             <div style={{ minWidth: 0, flex: 1 }}>
               <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
-              <CopyButton value={created.rgbInvoice} what="Invoice" label="Copy invoice" />
+              <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
               {created.amount && asset && (
                 <p>
                   Amount: {formatAssetAmount(created.amount, asset.precision)} {asset.ticker}

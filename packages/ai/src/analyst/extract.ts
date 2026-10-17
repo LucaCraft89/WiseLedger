@@ -15,17 +15,19 @@ const nul = z.string().nullable();
 export const LlmExtraction = z.object({
   issuerName: nul,
   issuerVatId: nul,
-  issuerEmail: nul,
+  issuerEmail: nul.optional(),
   invoiceNumber: nul,
   issueDate: nul,
   dueDate: nul,
   currency: nul,
   total: nul,
-  lineItems: z.array(z.object({ description: z.string(), quantity: z.number().nullable(), amount: nul })).default([]),
+  lineItems: z
+    .array(z.object({ description: z.string(), quantity: z.number().nullable().optional(), amount: nul }))
+    .default([]),
   paymentMethod: z.enum(['rgb', 'iban', 'btc', 'ln', 'unknown']),
   rgbInvoice: nul,
-  iban: nul,
-  btcAddress: nul,
+  iban: nul.optional(),
+  btcAddress: nul.optional(),
   pressureLanguage: z.boolean(),
   pressureQuote: nul,
   confidence: z.number(),

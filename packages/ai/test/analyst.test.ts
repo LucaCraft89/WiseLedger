@@ -3,7 +3,7 @@ import { MockLlm, MockWallet } from 'core/mocks';
 import { describe, expect, it } from 'vitest';
 import { Analyst } from '../src/analyst/analyze.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { EXPECTED, PAYEE_BOOK, perfectAnswer, sourceOf } from './fixtures.js';
+import { analysisReplies, EXPECTED, PAYEE_BOOK, perfectAnswer, sourceOf } from './fixtures.js';
 import { CONFIG, historyOf } from './helpers.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z');
@@ -25,10 +25,7 @@ describe('Analyst v1 with MockLlm', () => {
   for (const f of EXPECTED) {
     it(`${f.id} → ${JSON.stringify(f.verdict)}`, async () => {
       const llm = new MockLlm({
-        replies: [
-          { json: perfectAnswer(f) },
-          { json: { summary: `Summary for ${f.id}.`, questionsForUser: ['Is this right?'] } },
-        ],
+        replies: analysisReplies(f, { summary: `Summary for ${f.id}.`, questionsForUser: ['Is this right?'] }),
       });
       const events: AppEvent[] = [];
       // Only `duplicate` was seen before (ok-basic paid earlier); other fixtures get an empty history.

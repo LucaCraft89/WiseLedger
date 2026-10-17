@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Analyst } from '../src/analyst/analyze.js';
 import { loadInvoice, sanitize } from '../src/extract/text.js';
 import { type ChatInvoice, confirmationGuard, Treasurer } from '../src/treasurer/treasurer.js';
-import { EXPECTED, type ExpectedFixture, PAYEE_BOOK, perfectAnswer, sourceOf } from './fixtures.js';
+import { analysisReplies, EXPECTED, type ExpectedFixture, PAYEE_BOOK, sourceOf } from './fixtures.js';
 import { CONFIG, historyOf } from './helpers.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z');
@@ -31,12 +31,13 @@ describe('no fixture can cause a tool call by text alone', () => {
   for (const f of EXPECTED) {
     it(`${f.id}: Analyst offers no tools, summary and Treasurer never see the document`, async () => {
       const llm = new MockLlm({
-        replies: [{ json: perfectAnswer(f) }, { json: { summary: 'Checked.', questionsForUser: [] } }],
+        replies: analysisReplies(f, { summary: 'Checked.', questionsForUser: [] }),
       });
       const report = await analyst(llm).analyze(sourceOf(f), { invoiceId: f.id }, () => {});
       expect(llm.calls.every((c) => c.tools === undefined && c.toolChoice === undefined)).toBe(true);
       const lines = await rawLines(f, [report.extraction.issuer.name]);
-      for (const line of lines) expect(prompt(llm.calls[1]), line).not.toContain(line);
+      // The last call is the summary (FatturaPA XML has no extraction call at all).
+      for (const line of lines) expect(prompt(llm.calls.at(-1)), line).not.toContain(line);
 
       // The Treasurer chat sees this invoice only as short validated fields; a spend tool never executes from chat.
       const wallet = new MockWallet({ stepMs: 0 });
@@ -62,7 +63,8 @@ describe('no fixture can cause a tool call by text alone', () => {
   }
 
   it('a hostile model that answers with tool calls makes the Analyst stop: review, nothing to pay', async () => {
-    for (const f of EXPECTED.filter((x) => x.kind !== 'image')) {
+    // XML is read without the model, so only the documents a model reads are in scope here.
+    for (const f of EXPECTED.filter((x) => x.kind === 'text' || x.kind === 'pdf')) {
       const llm = new MockLlm({
         fallback: { toolCall: { name: 'execute_plan', arguments: { planId: 'plan_evil' } } },
       });
