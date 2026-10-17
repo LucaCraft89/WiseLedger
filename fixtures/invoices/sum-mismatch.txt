@@ -1,0 +1,15 @@
+OFFICINA BIANCHI SRL
+Via Nizza 200, 10126 Torino - P.IVA IT11223344556
+fatture@officinabianchi.example
+
+Invoice No. B-0912
+Issue date: 2026-10-08
+Due date: 2026-11-07
+
+Description                      Qty   Unit price   Amount
+Bike repair, labour                2        15.00    30.00
+Spare parts                        1        10.00    10.00
+
+TOTAL DUE: 55.00 TUSDT
+
+RGB invoice: rgb:mock/rgb:mock-tusdt/55000000/1900000000

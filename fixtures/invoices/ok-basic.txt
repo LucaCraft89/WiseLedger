@@ -1,0 +1,19 @@
+ACME SRL
+Via Roma 12, 10121 Torino (TO) - P.IVA IT01234567890
+billing@acme.example
+
+INVOICE No. 2026-042
+Issue date: 2026-10-10
+Due date: 2026-11-09
+
+Bill to: Coin Cube Studio, Torino
+
+Description                      Qty   Unit price   Amount
+Web hosting, October 2026          1        20.00    20.00
+Domain renewal acme-client.it      1         5.00     5.00
+
+TOTAL DUE: 25.00 TUSDT
+
+Payment: RGB (asset TUSDT)
+RGB invoice: rgb:mock/rgb:mock-tusdt/25000000/1900000000
+Thank you for your business.
