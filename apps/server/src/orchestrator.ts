@@ -541,7 +541,8 @@ export class Orchestrator {
   /** Global `transfer` events for transfers not linked to an invoice. The first pass only records the baseline. */
   private emitUnlinkedTransferChanges(transfers: TransferInfo[]): void {
     const first = this.knownTransfers === null;
-    const known = (this.knownTransfers ??= new Map());
+    const known = this.knownTransfers ?? new Map<string, TransferStatus>();
+    this.knownTransfers = known;
     for (const t of transfers) {
       if (this.store.invoiceForTransfer(t.transferId)) continue;
       const prev = known.get(t.transferId);
