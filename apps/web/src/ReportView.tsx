@@ -1,15 +1,27 @@
 import type { AnalysisReport } from './api/contracts.js';
 import { FlagList } from './FlagCard.js';
-import { VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_LABELS } from './lib/format.js';
+import { VERDICT_ACCENT, VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_ICON, VERDICT_LABELS } from './lib/format.js';
+import { splitFlags } from './lib/payment.js';
 
 /** The Analyst's report: verdict banner, flags by severity, plain-language summary, questions. */
 export function ReportView({ report }: { report: AnalysisReport }) {
   const ex = report.extraction;
+  const { alerts, notes } = splitFlags(report.flags);
   return (
     <div>
       <h3>What we found</h3>
-      <div style={{ background: VERDICT_COLORS[report.verdict], padding: 12 }}>
-        <strong style={{ fontSize: '1.2em' }}>{VERDICT_LABELS[report.verdict]}</strong>
+      <div
+        style={{
+          background: VERDICT_COLORS[report.verdict],
+          border: `2px solid ${VERDICT_ACCENT[report.verdict]}`,
+          borderRadius: 8,
+          padding: 12,
+        }}
+      >
+        <strong style={{ fontSize: '1.2em' }}>
+          <span aria-hidden="true">{VERDICT_ICON[report.verdict]} </span>
+          {VERDICT_LABELS[report.verdict]}
+        </strong>
         <div>{VERDICT_EXPLAIN[report.verdict]}</div>
       </div>
 
@@ -28,7 +40,13 @@ export function ReportView({ report }: { report: AnalysisReport }) {
       </ul>
 
       <h4>Checks</h4>
-      {report.flags.length === 0 ? <p>All checks passed.</p> : <FlagList flags={report.flags} />}
+      {alerts.length === 0 ? <p>All checks passed.</p> : <FlagList flags={alerts} />}
+      {notes.length > 0 && (
+        <>
+          <h4>Good to know</h4>
+          <FlagList flags={notes} />
+        </>
+      )}
 
       {report.questionsForUser.length > 0 && (
         <>

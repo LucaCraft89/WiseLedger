@@ -1,5 +1,7 @@
 import QRCode from 'qrcode';
 import { Component, createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import { ApiCallError } from './api/client.js';
+import { apiErrorWords } from './lib/payment.js';
 
 type ToastKind = 'info' | 'success' | 'error';
 interface ToastItem {
@@ -15,8 +17,10 @@ const ToastContext = createContext<ShowToast>(() => {});
 export const useToast = (): ShowToast => useContext(ToastContext);
 
 /** Error → message for a toast (ApiCallError messages are already plain language). */
-export const errorText = (err: unknown, fallback = 'Something went wrong. Please try again.'): string =>
-  err instanceof Error && err.message ? err.message : fallback;
+export const errorText = (err: unknown, fallback = 'Something went wrong. Please try again.'): string => {
+  if (err instanceof ApiCallError) return apiErrorWords(err.code, err.message, err.status);
+  return err instanceof Error && err.message ? err.message : fallback;
+};
 
 const TOAST_COLORS: Record<ToastKind, string> = { info: '#e2e3e5', success: '#d4edda', error: '#f8d7da' };
 
@@ -146,4 +150,68 @@ export function Qr({ value, size = 200, alt }: { value: string; size?: number; a
   }, [value, size]);
   if (!src) return <div style={{ width: size, height: size, background: '#f1f3f5' }} />;
   return <img src={src} width={size} height={size} alt={alt} style={{ imageRendering: 'pixelated' }} />;
+}
+
+/** Small "loading" line used by every list. */
+export function Loading({ text = 'Loading…' }: { text?: string }) {
+  return (
+    <p role="status" style={{ color: '#555' }}>
+      {text}
+    </p>
+  );
+}
+
+/** Plain empty state for a list. */
+export function Empty({ text }: { text: string }) {
+  return <p style={{ color: '#555', fontStyle: 'italic' }}>{text}</p>;
+}
+
+/** Error message in plain words with an optional "Try again" button. */
+export function ErrorBox({ error, retry }: { error: unknown; retry?: () => void }) {
+  return (
+    <div role="alert" style={{ background: '#f8d7da', padding: '8px 12px', borderRadius: 6, marginBottom: 12 }}>
+      <span>{typeof error === 'string' ? error : errorText(error)}</span>{' '}
+      {retry && (
+        <button type="button" onClick={retry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Loads data on mount and on `reload()`, tracking loading and error. `load` must be stable (useCallback). */
+export function useLoad<T>(load: () => Promise<T>): {
+  data: T | null;
+  error: unknown;
+  loading: boolean;
+  reload: () => void;
+} {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    void tick;
+    let live = true;
+    setLoading(true);
+    setError(null);
+    load().then(
+      (d) => {
+        if (!live) return;
+        setData(d);
+        setLoading(false);
+      },
+      (err: unknown) => {
+        if (!live) return;
+        setError(err);
+        setLoading(false);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [load, tick]);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+  return { data, error, loading, reload };
 }

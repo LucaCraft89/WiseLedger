@@ -8,19 +8,77 @@ import {
   type AnalysisReport,
   type AppEvent,
   buildConfirmationSentence,
+  type ChatResponse,
   type ExecutionResult,
+  formatAssetAmount,
   type InvoiceSourceKind,
   type InvoiceState,
   type InvoiceSummaryDto,
+  LabelsPutRequest,
+  MemoryJobStore,
+  MemoryLabelStore,
+  MOCK_ASSET_ID,
   MOCK_FAIL_AMOUNT,
   MOCK_TIMEOUT_AMOUNT,
   MockAnalyzer,
   MockTreasurer,
   MockWallet,
   makePlan,
+  mockInvoice,
+  type OnboardingState,
   type PaymentPlan,
   sha256Hex,
+  type TransferDto,
 } from './contracts.js';
+import { createFakeOnboarding } from './fake-onboarding.js';
+
+const MONTHS = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Next Friday (never today) at 09:00 local time. */
+export function nextFriday(now: Date = new Date()): Date {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0);
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7));
+  return d;
+}
+
+/** Month named in the message (the most recent past one), else the previous month: first and last day. */
+export function monthRange(message: string, now: Date = new Date()): { from: string; to: string; label: string } {
+  const lower = message.toLowerCase();
+  const named = MONTHS.findIndex((m) => lower.includes(m));
+  let year = now.getFullYear();
+  let month = named;
+  if (named < 0) {
+    month = now.getMonth() - 1;
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+  } else if (named >= now.getMonth()) year -= 1;
+  const last = new Date(year, month + 1, 0).getDate();
+  const label = `${MONTHS[month]?.replace(/^./, (c) => c.toUpperCase())} ${year}`;
+  return { from: `${year}-${pad2(month + 1)}-01`, to: `${year}-${pad2(month + 1)}-${pad2(last)}`, label };
+}
+
+/** Getting-started hints of the fake /api/health (the real server sends faucet and asset hints). */
+export const FAKE_HINTS = [
+  'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
+  'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
+  'Confirm the payment sentence and watch it reach Settled on the invoice page.',
+];
 
 export interface FakeOptions {
   /** Gap between analysis stages (ms). */
@@ -29,6 +87,8 @@ export interface FakeOptions {
   transferStepMs?: number;
   /** Treasurer poll interval (ms). */
   pollMs?: number;
+  /** First-run state the fake starts in (default `ready`, like the mock wallet backend). */
+  onboarding?: OnboardingState;
 }
 
 interface Rec {
@@ -59,6 +119,7 @@ function kindOf(name: string): InvoiceSourceKind {
 
 export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const wallet = new MockWallet({ stepMs: opts.transferStepMs ?? 1500 });
+  const { state: onboardingState, ...onboarding } = createFakeOnboarding(opts.onboarding);
   const stageDelayMs = opts.stageDelayMs ?? 600;
   const analyzer = new MockAnalyzer({ stageDelayMs });
   const failAnalyzer = new MockAnalyzer({ stageDelayMs, amount: MOCK_FAIL_AMOUNT });
@@ -71,6 +132,142 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const recs = new Map<string, Rec>();
   let seq = 0;
   let address: string | undefined;
+  const jobs = new MemoryJobStore();
+  const labels = new MemoryLabelStore();
+  const transferInvoice = new Map<string, string>();
+  let jobSeq = 0;
+
+  // Two past payments, so the transfers table, labels and "my last payment" have something to work with.
+  let seeded: Promise<void> | undefined;
+  const seed = () => {
+    seeded ??= (async () => {
+      const far = Math.floor(Date.now() / 1000) + 365 * 86_400;
+      for (const amount of ['120000000', '25000000']) {
+        await wallet.pay({ assetId: MOCK_ASSET_ID, amount, rgbInvoice: mockInvoice(MOCK_ASSET_ID, amount, far) });
+      }
+    })();
+    return seeded;
+  };
+
+  async function transferList(): Promise<TransferDto[]> {
+    await seed();
+    const list = (await wallet.listTransfers()).reverse();
+    return Promise.all(
+      list.map(async (t) => ({
+        transferId: t.transferId,
+        ...(t.assetId ? { assetId: t.assetId } : {}),
+        amount: t.amount,
+        direction: t.direction === 'outgoing' ? ('out' as const) : ('in' as const),
+        status: t.status,
+        ...(t.txid ? { txid: t.txid } : {}),
+        ...(transferInvoice.has(t.transferId) ? { invoiceId: transferInvoice.get(t.transferId) } : {}),
+        labels: (await labels.get(t.transferId))?.labels ?? [],
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+      })),
+    );
+  }
+
+  async function assetMeta(assetId: string) {
+    return (await wallet.listAssets()).find((a) => a.assetId === assetId);
+  }
+
+  /** Pattern-matches the four example requests; the real Treasurer runs the local model with tools. */
+  async function fakeChat(message: string): Promise<ChatResponse> {
+    const m = message.toLowerCase();
+    if (/balance|how much/.test(m)) {
+      const assets = await wallet.listAssets();
+      const result = assets.map((a) => ({
+        assetId: a.assetId,
+        ticker: a.ticker,
+        precision: a.precision,
+        spendable: a.balance.spendable,
+        settled: a.balance.settled,
+      }));
+      const t = assets.find((a) => a.ticker === 'TUSDT') ?? assets[0];
+      const text = t
+        ? `You can spend ${formatAssetAmount(t.balance.spendable, t.precision)} ${t.ticker} (${formatAssetAmount(t.balance.settled, t.precision)} confirmed).`
+        : 'This wallet holds no assets yet.';
+      return { text, toolCalls: [{ name: 'get_balance', args: { assetId: 'TUSDT' }, ok: true, result }] };
+    }
+    const labelMatch = /label .*last payment as\s+["']?([^"'.]+)/i.exec(message);
+    if (labelMatch?.[1]) {
+      const label = labelMatch[1].trim().toLowerCase().slice(0, 40);
+      const outgoing = (await transferList()).filter((t) => t.direction === 'out');
+      const listCall = {
+        name: 'list_transfers',
+        args: {},
+        ok: true,
+        result: outgoing.slice(0, 10).map((t) => ({ transferId: t.transferId, amount: t.amount, labels: t.labels })),
+      };
+      const last = outgoing[0];
+      if (!last) return { text: 'There are no payments to label yet.', toolCalls: [listCall] };
+      const current = (await labels.get(last.transferId))?.labels ?? [];
+      const entry = await labels.set(last.transferId, [...new Set([...current, label])]);
+      const asset = last.assetId ? await assetMeta(last.assetId) : undefined;
+      const amount = asset ? `${formatAssetAmount(last.amount, asset.precision)} ${asset.ticker}` : last.amount;
+      return {
+        text: `Done: your last payment (${amount}) is now labelled "${label}".`,
+        toolCalls: [
+          listCall,
+          { name: 'label_transfer', args: { transferId: last.transferId, label }, ok: true, result: entry },
+        ],
+      };
+    }
+    if (/report|fiscal|tax/.test(m)) {
+      const r = monthRange(message);
+      const rows = (await transferList()).filter(
+        (t) => t.createdAt.slice(0, 10) >= r.from && t.createdAt.slice(0, 10) <= r.to,
+      ).length;
+      const filename = `wiseledger-report-${r.from}_${r.to}.csv`;
+      return {
+        text: `Your report for ${r.label} is ready (${rows} transfers). Use the Download link.`,
+        toolCalls: [
+          {
+            name: 'fiscal_report',
+            args: { from: r.from, to: r.to, format: 'csv' },
+            ok: true,
+            result: { filename, format: 'csv', rows, from: r.from, to: r.to },
+          },
+        ],
+      };
+    }
+    if (/\bpay\b/.test(m)) {
+      const target = [...recs.values()]
+        .reverse()
+        .find(
+          (r) =>
+            r.summary.state === 'AWAITING_CONFIRMATION' &&
+            r.plan &&
+            (!/acme/.test(m) || (r.summary.issuerName ?? '').toLowerCase().includes('acme')),
+        );
+      if (!target?.plan) {
+        return {
+          text: 'I could not find an invoice waiting for payment. Check the invoice first (any file name works in demo mode), then ask me again.',
+          toolCalls: [{ name: 'schedule_payment', args: {}, ok: false, error: 'No invoice waiting for payment' }],
+        };
+      }
+      const executeAt = (/friday/.test(m) ? nextFriday() : new Date(Date.now() + 86_400_000)).toISOString();
+      const invoiceId = target.summary.id;
+      const sentence = buildConfirmationSentence({ ...target.plan, executeAt }, await assetMeta(target.plan.assetId));
+      const needsConfirmation = {
+        needsConfirmation: true as const,
+        kind: 'schedule' as const,
+        planId: target.plan.planId,
+        invoiceId,
+        sentence,
+      };
+      return {
+        text: `Please confirm: ${sentence}`,
+        toolCalls: [{ name: 'schedule_payment', args: { invoiceId, executeAt }, ok: true, result: needsConfirmation }],
+        needsConfirmation,
+      };
+    }
+    return {
+      text: 'In demo mode I understand: your balance, labelling your last payment, a report for a month, and paying the Acme invoice on Friday.',
+      toolCalls: [],
+    };
+  }
 
   const get = (id: string): Rec => {
     const r = recs.get(id);
@@ -94,6 +291,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
 
   async function analyze(r: Rec, filename: string, content: string) {
     const id = r.summary.id;
+    const started = Date.now();
     const report = await analyzerFor(filename).analyze(
       { kind: r.summary.kind, path: `fake://${filename}`, sha256: await sha256Hex(content), filename },
       { invoiceId: id },
@@ -107,7 +305,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         if (e.type === 'stage' && e.stage === 'extracting' && e.status === 'end') setState(r, 'EXTRACTED');
       },
     );
-    r.report = report;
+    // Pretend timings (the mock has none) so the Local AI panel shows numbers in demo mode.
+    const ms = Math.max(1, Date.now() - started);
+    r.report = report.timings ? report : { ...report, timings: { extractMs: ms / 2, summaryMs: ms / 2 } };
     r.summary = {
       ...r.summary,
       verdict: report.verdict,
@@ -142,6 +342,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     emit(r, { type: 'stage', invoiceId: id, at: at(), stage: 'executing', status: 'start' });
     const result = await treasurer.execute(plan, { planId: plan.planId, confirmedAt: at() }, (e) => emit(r, e));
     r.execution = result;
+    if (result.transferId) transferInvoice.set(result.transferId, id);
     const ok = result.status !== 'failed';
     emit(r, { type: 'stage', invoiceId: id, at: at(), stage: 'executing', status: ok ? 'end' : 'error' });
     if (result.status === 'settled' || result.status === 'submitted') setState(r, 'PAID');
@@ -162,6 +363,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         llm: { provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true },
         wallet: { backend: 'mock', network: 'mock', ready: true },
         problems: [],
+        onboarding: onboardingState(),
+        network: 'mock',
+        hints: FAKE_HINTS,
       };
     },
     async createInvoice(input: InvoiceInput) {
@@ -210,6 +414,27 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       if (r.report?.verdict === 'review' && req.override !== true) {
         throw new ApiCallError('NEEDS_OVERRIDE', 'Please tick the box to say you checked the warnings.');
       }
+      if (req.executeAt) {
+        if (Number.isNaN(Date.parse(req.executeAt)) || Date.parse(req.executeAt) <= Date.now()) {
+          throw new ApiCallError('BAD_DATE', 'The payment date must be in the future.');
+        }
+        const scheduled: PaymentPlan = { ...r.plan, executeAt: req.executeAt };
+        r.plan = scheduled;
+        r.confirmationSentence = buildConfirmationSentence(scheduled, await assetMeta(scheduled.assetId));
+        setState(r, 'CONFIRMED');
+        const now = new Date().toISOString();
+        await jobs.put({
+          jobId: `job_fake_${++jobSeq}`,
+          planId: scheduled.planId,
+          invoiceId: id,
+          runAt: req.executeAt,
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+        });
+        setState(r, 'SCHEDULED');
+        return { invoiceId: id, state: r.summary.state, planId: scheduled.planId };
+      }
       const plan = r.plan;
       setState(r, 'CONFIRMED');
       setTimeout(() => void execute(r, plan).catch((err) => fail(r, err)), 50);
@@ -257,5 +482,34 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         ...(inv.amount ? { amount: inv.amount } : {}),
       };
     },
+    async transfers() {
+      return { transfers: await transferList() };
+    },
+    async setLabels(transferId, req) {
+      const parsed = LabelsPutRequest.safeParse(req);
+      if (!parsed.success) {
+        throw new ApiCallError('BAD_LABELS', 'Labels must be 1 to 40 characters, at most 10 per transfer.');
+      }
+      if (!(await wallet.getTransfer(transferId))) throw new ApiCallError('NOT_FOUND', 'This transfer does not exist.');
+      const clean = [...new Set(parsed.data.labels.map((l) => l.trim().toLowerCase()))];
+      return labels.set(transferId, clean);
+    },
+    chat: (req) => fakeChat(req.message),
+    async schedule() {
+      return { jobs: await jobs.list() };
+    },
+    async cancelJob(jobId) {
+      const job = (await jobs.list()).find((j) => j.jobId === jobId);
+      const ok = await jobs.cancel(jobId);
+      const r = job ? recs.get(job.invoiceId) : undefined;
+      if (ok && r?.plan && r.summary.state === 'SCHEDULED') {
+        r.plan = { ...r.plan, executeAt: 'now' };
+        r.confirmationSentence = buildConfirmationSentence(r.plan, await assetMeta(r.plan.assetId));
+        setState(r, 'AWAITING_CONFIRMATION');
+      }
+      return { ok };
+    },
+    fiscalUrl: () => null,
+    ...onboarding,
   };
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { RiskFlag, Verdict } from './api/contracts.js';
 import { BLOCK_EXPLANATION, confirmGate, gateHint, type PaymentProgress, REVIEW_TICK_LABEL } from './lib/confirm.js';
+import { splitFlags } from './lib/payment.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
@@ -19,6 +20,8 @@ export function ConfirmDialog(props: {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Info flags are calm notes, not points to check.
+  const { alerts } = splitFlags(props.flags);
   const gate = confirmGate(props.verdict, ticked);
 
   const run = (fn: () => Promise<void>) => async () => {
@@ -44,10 +47,10 @@ export function ConfirmDialog(props: {
       </h3>
 
       {/* The flag cards are already shown in "Checks" above: one line here, so nothing is read twice. */}
-      {props.flags.length > 0 && props.verdict !== 'block' && (
+      {alerts.length > 0 && props.verdict !== 'block' && (
         <p data-testid="flags-pointer">
-          {props.flags.length === 1 ? 'There is 1 point' : `There are ${props.flags.length} points`} to check in
-          “Checks” above. Read {props.flags.length === 1 ? 'it' : 'them'} before you pay.
+          {alerts.length === 1 ? 'There is 1 point' : `There are ${alerts.length} points`} to check in “Checks” above.
+          Read {alerts.length === 1 ? 'it' : 'them'} before you pay.
         </p>
       )}
 
