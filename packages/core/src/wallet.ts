@@ -1,0 +1,204 @@
+// Wallet contract (lane A). Amounts are always base units as decimal strings
+// (TUSDT precision 6: "5000000" = 5 tokens). Assets are identified by asset ID, never by ticker.
+import { z } from 'zod';
+import type { PaymentPlan } from './orchestrator.js';
+
+/** Base units as a non-negative decimal integer string. */
+export const AmountSchema = z.string().regex(/^(0|[1-9][0-9]*)$/, 'amount must be base units as a decimal string');
+export type Amount = z.infer<typeof AmountSchema>;
+
+export const TransferStatusSchema = z.enum(['WaitingCounterparty', 'WaitingConfirmations', 'Settled', 'Failed']);
+export type TransferStatus = z.infer<typeof TransferStatusSchema>;
+
+export const AssetBalanceSchema = z.object({
+  settled: AmountSchema,
+  future: AmountSchema,
+  spendable: AmountSchema,
+});
+export type AssetBalance = z.infer<typeof AssetBalanceSchema>;
+
+export const AssetInfoSchema = z.object({
+  assetId: z.string(),
+  ticker: z.string(),
+  name: z.string(),
+  precision: z.number().int().min(0).max(18),
+  schema: z.literal('NIA'),
+  balance: AssetBalanceSchema,
+});
+export type AssetInfo = z.infer<typeof AssetInfoSchema>;
+
+export const TransferInfoSchema = z.object({
+  transferId: z.string(),
+  assetId: z.string().optional(),
+  amount: AmountSchema,
+  direction: z.enum(['outgoing', 'incoming', 'issuance']),
+  status: TransferStatusSchema,
+  txid: z.string().optional(),
+  rgbInvoice: z.string().optional(),
+  /** ISO timestamps */
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type TransferInfo = z.infer<typeof TransferInfoSchema>;
+
+export const DecodedInvoiceSchema = z.object({
+  rgbInvoice: z.string(),
+  recipientId: z.string(),
+  /** Absent when the payer chooses the asset (our receive invoices are created without assetId). */
+  assetId: z.string().optional(),
+  amount: AmountSchema.optional(),
+  network: z.string(),
+  /** ISO timestamp; absent = no expiry */
+  expiresAt: z.string().optional(),
+  transportEndpoints: z.array(z.string()),
+});
+export type DecodedInvoice = z.infer<typeof DecodedInvoiceSchema>;
+
+export const PaymentRequestSchema = z.object({
+  rgbInvoice: z.string(),
+  assetId: z.string(),
+  amount: AmountSchema,
+  /** sat/vB. Backends always pass one to the chain (the estimate is 0 on Mutinynet); default comes from config. */
+  feeRate: z.number().positive().optional(),
+});
+export type PaymentRequest = z.infer<typeof PaymentRequestSchema>;
+
+export const CreateReceiveRequestSchema = z.object({
+  assetId: z.string().optional(),
+  amount: AmountSchema.optional(),
+  expirySec: z.number().int().positive(),
+});
+export type CreateReceiveRequest = z.infer<typeof CreateReceiveRequestSchema>;
+
+export const ReceiveInvoiceSchema = z.object({
+  rgbInvoice: z.string(),
+  recipientId: z.string(),
+  assetId: z.string().optional(),
+  amount: AmountSchema.optional(),
+  expiresAt: z.string(),
+});
+export type ReceiveInvoice = z.infer<typeof ReceiveInvoiceSchema>;
+
+export interface IssueNiaRequest {
+  /** Uppercase ticker, e.g. TUSDT */
+  ticker: string;
+  name: string;
+  precision: number;
+  amounts: Amount[];
+}
+
+export interface QuoteResult {
+  /** Fee in sats, decimal string */
+  fee: string;
+  feeRate: number;
+}
+
+export interface PayResult {
+  transferId: string;
+  txid?: string;
+}
+
+export interface WalletInfo {
+  backend: 'mock' | 'wdk-rgb' | 'rgb-lib';
+  network: string;
+}
+
+export interface WalletPort {
+  init(): Promise<WalletInfo>;
+  /** Bitcoin address for funding. Real backends may return a new address on every call. */
+  receiveAddress(): Promise<string>;
+  listAssets(): Promise<AssetInfo[]>;
+  /** Throws UnknownAsset. */
+  assetBalance(assetId: string): Promise<AssetBalance>;
+  /** Creates colorable UTXOs when fewer than needed are free; returns how many were created. */
+  createUtxosIfNeeded(): Promise<{ created: number }>;
+  issueAssetNia(req: IssueNiaRequest): Promise<AssetInfo>;
+  createReceiveInvoice(req: CreateReceiveRequest): Promise<ReceiveInvoice>;
+  /** Throws InvalidInvoice. Does not check expiry (pay() does). */
+  decodeInvoice(rgbInvoice: string): Promise<DecodedInvoice>;
+  quotePay(req: PaymentRequest): Promise<QuoteResult>;
+  /**
+   * Throws InsufficientFunds, InvoiceExpired, NoUtxo, UnknownAsset, InvalidInvoice, TransferFailed, SubmitTimeout.
+   * After SubmitTimeout never retry automatically: sync() and inspect listTransfers().
+   */
+  pay(req: PaymentRequest): Promise<PayResult>;
+  getTransfer(transferId: string): Promise<TransferInfo | null>;
+  listTransfers(assetId?: string): Promise<TransferInfo[]>;
+  sync(): Promise<void>;
+}
+
+export type WalletErrorCode =
+  | 'InsufficientFunds'
+  | 'InvoiceExpired'
+  | 'NoUtxo'
+  | 'UnknownAsset'
+  | 'InvalidInvoice'
+  | 'TransferFailed'
+  | 'SubmitTimeout';
+
+export class WalletError extends Error {
+  readonly code: WalletErrorCode;
+  constructor(code: WalletErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = code;
+    this.code = code;
+  }
+}
+export class InsufficientFunds extends WalletError {
+  constructor(message = 'Not enough spendable balance for this payment.') {
+    super('InsufficientFunds', message);
+  }
+}
+export class InvoiceExpired extends WalletError {
+  constructor(message = 'The RGB invoice has expired. Ask the supplier for a new one.') {
+    super('InvoiceExpired', message);
+  }
+}
+export class NoUtxo extends WalletError {
+  constructor(message = 'The wallet has no free UTXO to receive or send RGB assets.') {
+    super('NoUtxo', message);
+  }
+}
+export class UnknownAsset extends WalletError {
+  constructor(assetId: string) {
+    super('UnknownAsset', `The wallet does not hold asset ${assetId}.`);
+  }
+}
+export class InvalidInvoice extends WalletError {
+  constructor(message = 'This is not a valid RGB invoice.') {
+    super('InvalidInvoice', message);
+  }
+}
+export class TransferFailed extends WalletError {
+  constructor(message = 'The transfer failed.', options?: { cause?: unknown }) {
+    super('TransferFailed', message, options);
+  }
+}
+/** The send may or may not have gone out: sync and check the transfer state, never retry blindly. */
+export class SubmitTimeout extends WalletError {
+  constructor(message = 'The payment was submitted but no answer came back in time. Checking its state.') {
+    super('SubmitTimeout', message);
+  }
+}
+
+export function isWalletError(e: unknown): e is WalletError {
+  return e instanceof WalletError;
+}
+
+export type GuardReason =
+  | 'unknown_plan'
+  | 'not_confirmed'
+  | 'hash_mismatch'
+  | 'over_cap'
+  | 'asset_not_allowed'
+  | 'insufficient_funds'
+  | 'already_executed'
+  | 'invoice_expired'
+  | 'policy_denied';
+
+export type GuardResult<TPlan> = { ok: true; plan: TPlan } | { ok: false; reason: GuardReason; message: string };
+
+/** Deterministic check between the Treasurer and the wallet (implemented by lane A in M2.S2). */
+export interface PaymentGuard<TPlan = PaymentPlan> {
+  check(planId: string): Promise<GuardResult<TPlan>>;
+}

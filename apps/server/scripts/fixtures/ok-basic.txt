@@ -1,0 +1,8 @@
+INVOICE 2026-042
+Acme Srl, Via Roma 1, 10121 Torino (IT) - VAT IT01234567890
+Date: 2026-10-10   Due: 2026-11-09
+
+Web hosting, October    1 x 25.00 TUSDT    25.00 TUSDT
+Total: 25.00 TUSDT
+
+Pay with RGB (asset TUSDT): see the RGB invoice attached by the supplier.
