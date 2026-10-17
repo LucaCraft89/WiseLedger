@@ -185,6 +185,8 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
   const kick = () => {
     void sync?.kick().catch(() => undefined);
   };
+  // First sync right away (background), so /api/health shows a sync time without waiting a full interval.
+  kick();
 
   const ai = opts.llm || config.llmProvider !== 'mock' ? realAi(config, wallet, opts) : mockAi(config, wallet);
   const treasurer = new GuardedTreasurer(ai.treasurer, ai.beforeExecute, kick);
