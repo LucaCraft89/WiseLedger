@@ -3,7 +3,7 @@
 // Payment outcome by file name: *fail* → TransferFailed, *timeout* → SubmitTimeout (MockWallet amounts).
 
 import type { ApiClient, InvoiceInput } from './client.js';
-import { ApiCallError } from './client.js';
+import { ApiCallError, LIGHTNING_OFF } from './client.js';
 import {
   type AnalysisReport,
   type AppEvent,
@@ -15,6 +15,7 @@ import {
   type InvoiceState,
   type InvoiceSummaryDto,
   LabelsPutRequest,
+  type LightningStatusResponse,
   MemoryJobStore,
   MemoryLabelStore,
   MOCK_ASSET_ID,
@@ -48,6 +49,8 @@ const MONTHS = [
   'december',
 ];
 const pad2 = (n: number) => String(n).padStart(2, '0');
+/** Lightning payments carry a payment hash instead of a txid (wallet contract, optional field). */
+const paymentHashOf = (t: object): string | undefined => (t as { paymentHash?: string }).paymentHash;
 
 /** Next Friday (never today) at 09:00 local time. */
 export function nextFriday(now: Date = new Date()): Date {
@@ -164,6 +167,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         direction: t.direction === 'outgoing' ? ('out' as const) : ('in' as const),
         status: t.status,
         ...(t.txid ? { txid: t.txid } : {}),
+        ...(paymentHashOf(t) ? { paymentHash: paymentHashOf(t) } : {}),
         ...(transferInvoice.has(t.transferId) ? { invoiceId: transferInvoice.get(t.transferId) } : {}),
         labels: (await labels.get(t.transferId))?.labels ?? [],
         createdAt: t.createdAt,
@@ -501,6 +505,11 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     },
     async receives() {
       return { receives: receiveList.map((r) => ({ ...r })) };
+    },
+    async lightning() {
+      // Only what the mock wallet itself reports; without a Lightning mock the panel says Lightning is off.
+      const ln = (wallet as { lightningStatus?: () => Promise<LightningStatusResponse> }).lightningStatus;
+      return ln ? ln.call(wallet) : LIGHTNING_OFF;
     },
     async transfers() {
       return { transfers: await transferList() };

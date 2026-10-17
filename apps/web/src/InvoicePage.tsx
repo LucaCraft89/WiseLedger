@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { AppEvent, InvoiceDetailResponse, PaymentPlan, Stage } from './api/contracts.js';
+import {
+  type AppEvent,
+  type InvoiceDetailResponse,
+  isLightningInvoice,
+  type PaymentPlan,
+  type Stage,
+} from './api/contracts.js';
 import { ConfirmDialog, PaymentProgressView } from './ConfirmDialog.js';
 import { StatusChip } from './InvoiceListPage.js';
 import { aiRunStats, recordAiRun } from './lib/ai-stats.js';
@@ -88,7 +94,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const { invoice, plan, confirmationSentence, execution } = detail;
   const timeline = buildFullTimeline(events);
   const history = stateHistory(events);
-  const progress = paymentProgress(invoice.state, events, execution);
+  const progress = paymentProgress(invoice.state, events, execution, isLightningInvoice(plan?.rgbInvoice));
   // A failed payment gets its own card with the error in plain words.
   const errors = progress.failed ? [] : events.filter((e) => e.type === 'error');
   const live = liveAiView(events);
@@ -267,6 +273,8 @@ function FinalStatus({
         sentence={plan ? paidSentence(plan, assets) : undefined}
         transferId={progress.transferId}
         txid={progress.txid}
+        {...(progress.paymentHash ? { paymentHash: progress.paymentHash } : {})}
+        lightning={isLightningInvoice(plan?.rgbInvoice)}
       />
     );
   }
