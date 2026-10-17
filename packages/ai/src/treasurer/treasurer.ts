@@ -85,6 +85,36 @@ export interface ChatInvoice {
    * confirmation sentence ("via Lightning (instant)"); it never goes into a prompt.
    */
   payment?: { amount: string; assetId: string; rgbInvoice?: string };
+  /** The Analyst's verdict, so chat can say why an invoice was stopped or needs review. */
+  verdict?: 'ok' | 'review' | 'block';
+  /** Codes of the warn/block flags (FLAG_CODES). Shown as fixed words from CHECK_WORDS, never as flag messages. */
+  flagCodes?: string[];
+}
+
+/**
+ * Plain words for each rule, written by us. Flag messages and evidence can quote the invoice (untrusted), so the
+ * Treasurer only ever sees these fixed phrases; unknown codes are dropped.
+ */
+export const CHECK_WORDS: Record<string, string> = {
+  R1_RGB_INVOICE: 'payment request problem',
+  R2_ASSET: 'token not accepted',
+  R3_AMOUNT: 'amount problem',
+  R4_DUPLICATE: 'already received or paid',
+  R5_NEW_PAYEE: 'new or look-alike supplier',
+  R6_PRESSURE: 'pressure or changed bank details',
+  R7_INJECTION: 'hidden orders to the AI',
+  R8_CURRENCY: 'different currency',
+  R9_MISSING_FIELDS: 'missing details',
+  R10_DATES: 'strange dates',
+  AI_UNAVAILABLE: 'the local AI could not check it',
+};
+const VERDICT_WORDS = { ok: 'looks fine', review: 'check before paying', block: 'do not pay' } as const;
+
+/** " check=do not pay (already received or paid; amount problem)" — code-built, for the chat context. */
+export function checkText(i: Pick<ChatInvoice, 'verdict' | 'flagCodes'>): string {
+  if (!i.verdict) return '';
+  const reasons = [...new Set((i.flagCodes ?? []).map((c) => CHECK_WORDS[c]).filter(Boolean))];
+  return ` check="${VERDICT_WORDS[i.verdict]}"${reasons.length ? ` reasons="${reasons.join('; ')}"` : ''}`;
 }
 type AnyTool = ToolDef<Record<string, unknown>>;
 
@@ -488,6 +518,7 @@ export class Treasurer implements TreasurerAgent {
       }).join(', ')}. A payment "on <weekday>" means the next one, at 09:00.`,
       'Use IDs exactly as written in CONTEXT. Spend tools only prepare a payment; the user confirms it on screen.',
       'After a tool result, answer in one or two short sentences, in the same language as the user.',
+      'Each invoice shows the safety check (check, reasons). To say why an invoice was stopped or needs review, use them; you never see the document itself.',
       'CONTEXT',
       `Assets: ${assets.map((a) => `${a.ticker} assetId=${a.assetId}`).join('; ') || 'none'}`,
       'Invoices (newest first; the first one is the latest):',
@@ -496,7 +527,7 @@ export class Treasurer implements TreasurerAgent {
             .slice(0, 10)
             .map(
               (i, n) =>
-                `- invoiceId=${i.invoiceId}${n === 0 ? ' (latest)' : ''}${i.createdAt ? ` uploaded=${i.createdAt.slice(0, 10)}` : ''} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${i.payment ? '' : ' (cannot be paid)'}`,
+                `- invoiceId=${i.invoiceId}${n === 0 ? ' (latest)' : ''}${i.createdAt ? ` uploaded=${i.createdAt.slice(0, 10)}` : ''} supplier="${safeName(i.supplier)}" total=${i.total ?? '?'} ${i.currency ?? ''} state=${i.state}${checkText(i)}${i.payment ? '' : ' (cannot be paid)'}`,
             )
         : ['- none']),
       'Recent transfers (newest first):',

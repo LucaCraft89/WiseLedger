@@ -3,7 +3,7 @@ import { MemoryLabelStore, MOCK_ASSET_ID, MockLlm, MockWallet, mockInvoice } fro
 import { describe, expect, it } from 'vitest';
 import type { ChatInvoice } from '../src/index.js';
 import { QvacProvider } from '../src/llm/qvac.js';
-import { confirmationGuard, newestFirst, safeName, Treasurer } from '../src/treasurer/treasurer.js';
+import { checkText, confirmationGuard, newestFirst, safeName, Treasurer } from '../src/treasurer/treasurer.js';
 
 const NOW = new Date('2026-10-17T10:00:00Z'); // Saturday
 const INVOICES: ChatInvoice[] = [
@@ -160,6 +160,32 @@ describe('Treasurer chat (MockLlm)', () => {
     const system = String(llm.calls[0]?.messages[0]?.content);
     expect(system).toContain('Invoices (newest first; the first one is the latest):');
     expect(system).toMatch(/invoiceId=inv_new \(latest\) uploaded=2026-10-17/);
+  });
+
+  it('chat sees the safety check as fixed words (verdict + reasons), never flag messages', async () => {
+    const checked: ChatInvoice[] = [
+      { ...(INVOICES[0] as ChatInvoice), verdict: 'ok', flagCodes: [] },
+      { ...(INVOICES[1] as ChatInvoice), verdict: 'block', flagCodes: ['R4_DUPLICATE', 'R3_AMOUNT', 'X_UNKNOWN'] },
+    ];
+    expect(checkText(checked[1] as ChatInvoice)).toBe(
+      ' check="do not pay" reasons="already received or paid; amount problem"',
+    );
+    const llm = new MockLlm({ fallback: { text: 'It was stopped: already paid.' } });
+    const t = new Treasurer({
+      llm,
+      wallet: new MockWallet({ stepMs: 0 }),
+      guard: confirmationGuard(),
+      invoices: async () => checked,
+      now: () => NOW,
+      timeZone: 'UTC',
+    });
+    await t.chat('why was the other invoice stopped?', [], () => {});
+    const system = String(llm.calls[0]?.messages[0]?.content);
+    expect(system).toMatch(/invoiceId=inv_acme .*check="looks fine"/);
+    expect(system).toMatch(
+      /invoiceId=inv_scam .*check="do not pay" reasons="already received or paid; amount problem"/,
+    );
+    expect(system).not.toMatch(/X_UNKNOWN|ignore previous/i);
   });
 
   it('safeName strips quotes, newlines and instruction-like names', () => {

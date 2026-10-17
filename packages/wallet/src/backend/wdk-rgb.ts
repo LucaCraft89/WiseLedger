@@ -85,6 +85,8 @@ interface SdkAsset {
 interface RgbLibClient {
   transportEndpoint: string;
   wallet: {
+    /** rgb-lib: `online` may be null when `skipSync` is true (a local read of the last synced state). */
+    getBtcBalance?(online: null, skipSync: boolean): { vanilla: SdkBalance; colored: SdkBalance };
     blindReceive(
       assetId: string | null,
       assignment: string,
@@ -290,7 +292,21 @@ export class WdkRgbWallet implements WalletPort {
     return this.rgb.getAddress();
   }
 
+  /**
+   * BTC balance as of the last sync. rgb-sdk's getBtcBalance() runs a full indexer sync on every call (skip_sync =
+   * false), a blocking native call of ~3 s on Mutinynet that froze the whole server on each /api/health and
+   * /api/wallet. The background sync loop (and the kick after a payment) keep the local state fresh, so read it
+   * with skip_sync = true; fall back to the SDK call only if the rgb-lib client is not reachable.
+   */
   btcBalance(): { vanilla: SdkBalance; colored: SdkBalance } {
+    const lib = (this.rgb as unknown as { client?: RgbLibClient }).client?.wallet;
+    if (lib?.getBtcBalance) {
+      try {
+        return lib.getBtcBalance(null, true);
+      } catch {
+        // fall through to the syncing call
+      }
+    }
     return this.rgb.getBtcBalance();
   }
 

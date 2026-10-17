@@ -147,3 +147,37 @@ describe('mapWalletError', () => {
     expect(mapWalletError(new Error(msg)).code).toBe(code);
   });
 });
+
+describe('WdkRgbWallet.btcBalance', () => {
+  const bal = (n: number) => ({ settled: n, future: n, spendable: n });
+  function withSdk(sdk: Record<string, unknown>) {
+    const account = { getRgbWallet: () => sdk, getAddress: () => 'bcrt1qx' } as unknown as RgbAccount;
+    const cfg = walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' });
+    return new WdkRgbWallet(cfg, { account });
+  }
+
+  it('reads the last synced state (skip_sync) instead of syncing on every call', () => {
+    const libGet = vi.fn(() => ({ vanilla: bal(1000), colored: bal(0) }));
+    const sdkGet = vi.fn(() => ({ vanilla: bal(5), colored: bal(0) }));
+    const w = withSdk({ client: { wallet: { getBtcBalance: libGet } }, getBtcBalance: sdkGet });
+    expect(w.btcBalance().vanilla.spendable).toBe(1000);
+    expect(libGet).toHaveBeenCalledWith(null, true);
+    expect(sdkGet).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the SDK call when the rgb-lib client is not reachable or fails', () => {
+    const sdkGet = vi.fn(() => ({ vanilla: bal(5), colored: bal(0) }));
+    expect(withSdk({ getBtcBalance: sdkGet }).btcBalance().vanilla.spendable).toBe(5);
+    const failing = withSdk({
+      client: {
+        wallet: {
+          getBtcBalance: () => {
+            throw new Error('x');
+          },
+        },
+      },
+      getBtcBalance: sdkGet,
+    });
+    expect(failing.btcBalance().vanilla.spendable).toBe(5);
+  });
+});

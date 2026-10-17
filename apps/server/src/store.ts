@@ -424,6 +424,13 @@ export function chatInvoices(store: InvoiceStore): ChatInvoice[] {
       ...(pp && inv.report?.verdict !== 'block'
         ? { payment: { amount: pp.amount, assetId: pp.assetId, rgbInvoice: pp.rgbInvoice } }
         : {}),
+      // The safety check for chat ("why was it stopped?"): verdict and flag codes only, never flag text.
+      ...(inv.report
+        ? {
+            verdict: inv.report.verdict,
+            flagCodes: [...new Set(inv.report.flags.filter((f) => f.severity !== 'info').map((f) => f.code))],
+          }
+        : {}),
     };
   });
 }
