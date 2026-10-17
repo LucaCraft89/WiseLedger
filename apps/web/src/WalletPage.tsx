@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { formatAssetAmount, type WalletReceiveResponse, type WalletResponse } from './api/contracts.js';
 import { formatDate } from './lib/format.js';
+import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
-import { CopyButton, errorText, Qr, useToast } from './ui.js';
+import { TransfersTable } from './TransfersTable.js';
+import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 const box = { border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
@@ -31,14 +33,11 @@ export function WalletPage({ api }: { api: ApiClient }) {
     return (
       <section>
         <h2>Wallet</h2>
-        <p style={{ color: '#b00020' }}>{error}</p>
-        <button type="button" onClick={() => void load()}>
-          Try again
-        </button>
+        <ErrorBox error={error} retry={() => void load()} />
       </section>
     );
   }
-  if (!w) return <p>Opening the wallet…</p>;
+  if (!w) return <Loading text="Opening the wallet…" />;
 
   return (
     <section>
@@ -51,7 +50,7 @@ export function WalletPage({ api }: { api: ApiClient }) {
       </p>
 
       <h3>Balances</h3>
-      {w.assets.length === 0 && <p>This wallet holds no RGB assets yet.</p>}
+      {w.assets.length === 0 && <Empty text="This wallet holds no RGB assets yet." />}
       {w.assets.map((a) => (
         <div key={a.assetId} style={box} data-testid="asset-balance">
           <div style={{ fontSize: '1.3em' }}>
@@ -78,6 +77,8 @@ export function WalletPage({ api }: { api: ApiClient }) {
         </p>
       )}
 
+      <RecentTransfers api={api} assets={w.assets} />
+
       {w.address && (
         <>
           <h3>Bitcoin address</h3>
@@ -94,6 +95,23 @@ export function WalletPage({ api }: { api: ApiClient }) {
 
       <ReceiveForm api={api} wallet={w} />
     </section>
+  );
+}
+
+function RecentTransfers({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
+  const load = useCallback(async () => recentTransfers((await api.transfers()).transfers, 10), [api]);
+  const { data, error, loading, reload } = useLoad(load);
+  return (
+    <>
+      <h3>Recent transfers</h3>
+      <p style={{ marginTop: 0 }}>
+        <a href="#/transfers">All transfers and fiscal report</a> · <a href="#/schedule">Scheduled payments</a>
+      </p>
+      {error ? <ErrorBox error={error} retry={reload} /> : null}
+      {loading && !data ? <Loading text="Loading transfers…" /> : null}
+      {data && data.length === 0 && <Empty text="No transfers yet." />}
+      {data && data.length > 0 && <TransfersTable api={api} transfers={data} assets={assets} />}
+    </>
   );
 }
 

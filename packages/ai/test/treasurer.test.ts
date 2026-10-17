@@ -107,7 +107,7 @@ describe('Treasurer tools', () => {
     const bal = await t.runTool('get_balance', {}, ctx);
     expect(bal.ok).toBe(true);
     expect(bal.result).toEqual([
-      expect.objectContaining({ assetId: MOCK_ASSET_ID, ticker: 'TUSDT', spendable: '1000000000' }),
+      expect.objectContaining({ assetId: MOCK_ASSET_ID, ticker: 'TUSDT', spendable: '1000.00 TUSDT' }),
     ]);
     const inv = await t.runTool('create_receive_invoice', { amount: '5000000', expiryMinutes: 30 }, ctx);
     expect(inv.ok).toBe(true);

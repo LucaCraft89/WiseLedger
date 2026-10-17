@@ -12,6 +12,7 @@
     "smoke": "tsx scripts/wallet-smoke.ts",
     "issue-asset": "tsx scripts/issue-asset.ts",
     "payee": "tsx scripts/payee.ts",
+    "restore-check": "tsx scripts/restore-check.ts",
     "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run",
     "demo:prepare": "tsx scripts/demo-prepare.ts"
   },

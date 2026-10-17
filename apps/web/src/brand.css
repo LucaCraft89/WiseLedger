@@ -1,0 +1,259 @@
+/* WiseLedger brand tokens and base styles. Source of truth: docs/BRAND.md.
+   Fonts are bundled (no network): the app is local-first and must work offline. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/dm-serif-display/latin-400.css";
+
+:root {
+  /* brand */
+  --wl-blue: #0b4f8f;
+  --wl-navy: #063f73;
+  --wl-rust: #a9420f;
+  --wl-gold: #ffc20e;
+  --wl-white: #ffffff;
+  /* neutrals */
+  --wl-ink: #1b2733;
+  --wl-muted: #52606d;
+  --wl-page: #f7f4ec;
+  --wl-line: #c9d1d9;
+  /* functional (text on its own background is AA, see docs/BRAND.md) */
+  --wl-ok-bg: #e3f3e8;
+  --wl-ok-text: #0f4d2a;
+  --wl-ok: #1e7b45;
+  --wl-review-bg: #fff1c7;
+  --wl-review-text: #5b3a00;
+  --wl-review: #8a5a00;
+  --wl-block-bg: #fbe3e1;
+  --wl-block-text: #7a1511;
+  --wl-block: #b3261e;
+  --wl-info-bg: #eef1f4;
+  /* type and shape */
+  --wl-font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --wl-font-head: "DM Serif Display", Georgia, "Times New Roman", serif;
+  --wl-radius: 8px;
+  --wl-tap: 44px;
+}
+
+body {
+  margin: 0;
+  background: var(--wl-page);
+  color: var(--wl-ink);
+  font-family: var(--wl-font-body);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--wl-font-head);
+  font-weight: 400;
+  color: var(--wl-navy);
+  line-height: 1.2;
+}
+h1 {
+  font-size: 2rem;
+}
+h2 {
+  font-size: 1.75rem;
+}
+h3 {
+  font-size: 1.375rem;
+}
+h4 {
+  font-size: 1.05rem;
+}
+
+small,
+.wl-caption {
+  font-size: 14px;
+}
+
+a {
+  color: var(--wl-blue);
+}
+a:hover {
+  color: var(--wl-navy);
+}
+
+/* default button = primary; inline-styled buttons keep their own look */
+button {
+  min-height: var(--wl-tap);
+  padding: 0 16px;
+  border: 2px solid var(--wl-blue);
+  border-radius: var(--wl-radius);
+  background: var(--wl-blue);
+  color: var(--wl-white);
+  font: 700 14px / 1 var(--wl-font-body);
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--wl-navy);
+  border-color: var(--wl-navy);
+}
+button:disabled {
+  background: #dfe4e9;
+  border-color: #dfe4e9;
+  color: var(--wl-muted);
+  cursor: not-allowed;
+}
+button.wl-secondary {
+  background: var(--wl-white);
+  color: var(--wl-blue);
+}
+button.wl-secondary:hover:not(:disabled) {
+  background: #e8f0f8;
+  color: var(--wl-navy);
+}
+button.wl-accent {
+  background: var(--wl-rust);
+  border-color: var(--wl-rust);
+}
+
+input,
+select,
+textarea {
+  min-height: var(--wl-tap);
+  padding: 0 12px;
+  border: 1px solid var(--wl-muted);
+  border-radius: var(--wl-radius);
+  background: var(--wl-white);
+  color: var(--wl-ink);
+  font: 400 16px / 1.4 var(--wl-font-body);
+  box-sizing: border-box;
+}
+textarea {
+  padding: 10px 12px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--wl-gold);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--wl-navy);
+}
+
+/* cards and verdict badges (documented in docs/BRAND.md section 5) */
+.wl-card {
+  background: var(--wl-white);
+  border: 1px solid var(--wl-line);
+  border-radius: var(--wl-radius);
+  padding: 16px;
+}
+.wl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--wl-radius);
+  font: 700 14px / 1 var(--wl-font-body);
+}
+.wl-badge[data-tone="ok"] {
+  background: var(--wl-ok-bg);
+  color: var(--wl-ok-text);
+  border: 2px solid var(--wl-ok);
+}
+.wl-badge[data-tone="review"] {
+  background: var(--wl-review-bg);
+  color: var(--wl-review-text);
+  border: 2px solid var(--wl-review);
+}
+.wl-badge[data-tone="block"] {
+  background: var(--wl-block-bg);
+  color: var(--wl-block-text);
+  border: 2px solid var(--wl-block);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* layout: one column, readable width, no horizontal scroll down to small laptops (900 px) and phones */
+.wl-shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .wl-shell {
+    padding: 16px;
+  }
+}
+.wl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wl-nav {
+  display: flex;
+  gap: 4px 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wl-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--wl-tap);
+}
+.wl-nav a[aria-current="page"] {
+  font-weight: 700;
+  color: var(--wl-navy);
+  text-decoration-thickness: 3px;
+}
+main:focus {
+  outline: none;
+}
+img,
+table,
+pre {
+  max-width: 100%;
+}
+code,
+pre {
+  overflow-wrap: anywhere;
+}
+pre {
+  white-space: pre-wrap;
+}
+
+/* "Skip to content": hidden until focused with the keyboard */
+.wl-skip {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  background: var(--wl-white);
+  padding: 8px 12px;
+  border-radius: var(--wl-radius);
+  z-index: 100;
+}
+.wl-skip:focus {
+  top: 8px;
+}
+
+/* recovery words: numbered grid, shown once at wallet creation */
+.wl-words {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.wl-words li {
+  background: var(--wl-info-bg);
+  border: 1px solid var(--wl-line);
+  border-radius: var(--wl-radius);
+  padding: 8px 12px;
+  font-size: 18px;
+}
+.wl-words-n {
+  color: var(--wl-muted);
+  font-size: 14px;
+}

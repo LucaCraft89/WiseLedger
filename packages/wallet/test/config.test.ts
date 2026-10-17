@@ -10,6 +10,8 @@ describe('walletConfigFromEnv', () => {
       indexerUrl: 'https://esplora.signet.kaleidoswap.com',
       transportEndpoint: 'rpcs://proxy.kaleidoswap.com/json-rpc',
       feeRate: 2,
+      paymentCap: '100000000',
+      dailyCap: '500000000',
     });
     expect(libNetwork(c.network)).toBe('signet');
   });

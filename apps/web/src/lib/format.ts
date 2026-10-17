@@ -59,11 +59,12 @@ export function stateTone(state: InvoiceState): 'good' | 'attention' | 'bad' | '
   return 'neutral';
 }
 
+/** Brand functional colours (docs/BRAND.md): ok green, review amber, block red, neutral grey. */
 export const TONE_COLORS = {
-  good: '#d4edda',
-  attention: '#fff3cd',
-  bad: '#f8d7da',
-  neutral: '#e2e3e5',
+  good: '#e3f3e8',
+  attention: '#fff1c7',
+  bad: '#fbe3e1',
+  neutral: '#eef1f4',
 } as const;
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
@@ -78,15 +79,21 @@ export const VERDICT_EXPLAIN: Record<Verdict, string> = {
   block: 'This invoice looks dangerous. We will not pay it.',
 };
 
-export const VERDICT_COLORS: Record<Verdict, string> = { ok: '#d4edda', review: '#fff3cd', block: '#f8d7da' };
+export const VERDICT_COLORS: Record<Verdict, string> = { ok: '#e3f3e8', review: '#fff1c7', block: '#fbe3e1' };
+
+/** Solid border/badge colour per verdict (white text on it is AA). */
+export const VERDICT_ACCENT: Record<Verdict, string> = { ok: '#1e7b45', review: '#8a5a00', block: '#b3261e' };
+
+/** Icon next to the verdict word, so colour is never the only signal. */
+export const VERDICT_ICON: Record<Verdict, string> = { ok: '✓', review: '!', block: '✕' };
 
 export const SEVERITY_WORDS: Record<Severity, string> = { info: 'Note', warn: 'Warning', block: 'Danger' };
 
 /** info grey, warn amber, block red: background and left border. */
 export const SEVERITY_COLORS: Record<Severity, { bg: string; border: string }> = {
-  info: { bg: '#f1f3f5', border: '#adb5bd' },
-  warn: { bg: '#fff3cd', border: '#e0a800' },
-  block: { bg: '#f8d7da', border: '#c82333' },
+  info: { bg: '#eef1f4', border: '#52606d' },
+  warn: { bg: '#fff1c7', border: '#8a5a00' },
+  block: { bg: '#fbe3e1', border: '#b3261e' },
 };
 
 const LLM_STATE_WORDS = { unloaded: 'not loaded', loading: 'loading…', ready: 'ready', error: 'not working' } as const;

@@ -1,0 +1,14 @@
+LIBRERIA DEL PO
+Via Po 18, 10123 Torino
+P.IVA IT03344556677
+
+INVOICE No. 412
+Date: 2026-10-09   Due: 2026-11-08
+
+Description               Qty   Amount
+Books, accounting basics    1     9.90
+
+TOTAL DUE: 9.90 TUSDT
+
+RGB invoice:
+rgb:mock/rgb:mock-tusdt/9900000/1900000000
