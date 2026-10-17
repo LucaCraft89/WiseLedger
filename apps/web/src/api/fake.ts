@@ -25,10 +25,12 @@ import {
   MockWallet,
   makePlan,
   mockInvoice,
+  type OnboardingState,
   type PaymentPlan,
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
+import { createFakeOnboarding } from './fake-onboarding.js';
 
 const MONTHS = [
   'january',
@@ -71,6 +73,13 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
   return { from: `${year}-${pad2(month + 1)}-01`, to: `${year}-${pad2(month + 1)}-${pad2(last)}`, label };
 }
 
+/** Getting-started hints of the fake /api/health (the real server sends faucet and asset hints). */
+export const FAKE_HINTS = [
+  'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
+  'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
+  'Confirm the payment sentence and watch it reach Settled on the invoice page.',
+];
+
 export interface FakeOptions {
   /** Gap between analysis stages (ms). */
   stageDelayMs?: number;
@@ -78,6 +87,8 @@ export interface FakeOptions {
   transferStepMs?: number;
   /** Treasurer poll interval (ms). */
   pollMs?: number;
+  /** First-run state the fake starts in (default `ready`, like the mock wallet backend). */
+  onboarding?: OnboardingState;
 }
 
 interface Rec {
@@ -108,6 +119,7 @@ function kindOf(name: string): InvoiceSourceKind {
 
 export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const wallet = new MockWallet({ stepMs: opts.transferStepMs ?? 1500 });
+  const { state: onboardingState, ...onboarding } = createFakeOnboarding(opts.onboarding);
   const stageDelayMs = opts.stageDelayMs ?? 600;
   const analyzer = new MockAnalyzer({ stageDelayMs });
   const failAnalyzer = new MockAnalyzer({ stageDelayMs, amount: MOCK_FAIL_AMOUNT });
@@ -348,6 +360,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         llm: { provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true },
         wallet: { backend: 'mock', network: 'mock', ready: true },
         problems: [],
+        onboarding: onboardingState(),
+        network: 'mock',
+        hints: FAKE_HINTS,
       };
     },
     async createInvoice(input: InvoiceInput) {
@@ -492,5 +507,6 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       return { ok };
     },
     fiscalUrl: () => null,
+    ...onboarding,
   };
 }

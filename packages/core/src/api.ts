@@ -205,6 +205,8 @@ export const HealthResponse = z.object({
     model: z.string(),
     state: z.enum(['unloaded', 'loading', 'ready', 'error']),
     onDevice: z.boolean(),
+    /** Time the model took to load, once warm (optional, M3). */
+    warmUpMs: z.number().optional(),
   }),
   wallet: z.object({
     backend: z.enum(['mock', 'wdk-rgb', 'rgb-lib']),
@@ -214,8 +216,52 @@ export const HealthResponse = z.object({
   }),
   /** Plain-language problems found at startup ("No TUSDT yet: run pnpm demo:prepare"). */
   problems: z.array(z.string()),
+  // M3 additions, optional so an older server still parses.
+  /** First-run state of the wallet (see GET /api/onboarding). */
+  onboarding: z.enum(['needs_setup', 'locked', 'ready']).optional(),
+  network: z.enum(['mutinynet', 'regtest', 'mock']).optional(),
+  /** Getting-started hints in plain words (faucet, issue the test asset, regtest mining). */
+  hints: z.array(z.string()).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
+
+// First run (M3). While not `ready`, wallet routes answer 409 WALLET_NOT_READY.
+export const OnboardingState = z.enum(['needs_setup', 'locked', 'ready']);
+export type OnboardingState = z.infer<typeof OnboardingState>;
+
+// GET /api/onboarding
+export const OnboardingStatusResponse = z.object({
+  state: OnboardingState,
+  /** True once the recovery words were shown to the user. */
+  seedShown: z.boolean(),
+  network: z.enum(['mutinynet', 'regtest', 'mock']),
+  walletBackend: z.string(),
+  /** Minimum passphrase length (an empty passphrase means none). */
+  minPassphrase: z.number().int().min(0),
+});
+export type OnboardingStatusResponse = z.infer<typeof OnboardingStatusResponse>;
+
+// POST /api/onboarding/create → 201; the words are returned ONCE (409 ALREADY_SET_UP afterwards).
+export const OnboardingCreateRequest = z.object({ passphrase: z.string().optional() });
+export type OnboardingCreateRequest = z.infer<typeof OnboardingCreateRequest>;
+export const OnboardingCreateResponse = z.object({ mnemonic: z.string(), words: z.array(z.string()) });
+export type OnboardingCreateResponse = z.infer<typeof OnboardingCreateResponse>;
+
+// POST /api/onboarding/seed-confirmed
+export const OnboardingSeedConfirmedRequest = z.object({ confirmed: z.literal(true) });
+export type OnboardingSeedConfirmedRequest = z.infer<typeof OnboardingSeedConfirmedRequest>;
+export const OnboardingOkResponse = z.object({ ok: z.boolean() });
+export type OnboardingOkResponse = z.infer<typeof OnboardingOkResponse>;
+
+// POST /api/onboarding/restore · 400 INVALID_MNEMONIC
+export const OnboardingRestoreRequest = z.object({ mnemonic: z.string().min(1), passphrase: z.string().optional() });
+export type OnboardingRestoreRequest = z.infer<typeof OnboardingRestoreRequest>;
+export const OnboardingRestoreResponse = z.object({ ok: z.boolean(), note: z.string().optional() });
+export type OnboardingRestoreResponse = z.infer<typeof OnboardingRestoreResponse>;
+
+// POST /api/onboarding/unlock · 401 WalletLocked (wrong passphrase) · 429 after 5 tries
+export const OnboardingUnlockRequest = z.object({ passphrase: z.string() });
+export type OnboardingUnlockRequest = z.infer<typeof OnboardingUnlockRequest>;
 
 // GET /api/schedule · POST /api/schedule/:jobId/cancel
 export const ScheduleListResponse = z.object({ jobs: z.array(JobSchema) });
@@ -254,6 +300,11 @@ export const API_ROUTES = {
   labelsPut: 'PUT /api/labels/:transferId',
   fiscal: 'GET /api/fiscal',
   health: 'GET /api/health',
+  onboarding: 'GET /api/onboarding',
+  onboardingCreate: 'POST /api/onboarding/create',
+  onboardingSeedConfirmed: 'POST /api/onboarding/seed-confirmed',
+  onboardingRestore: 'POST /api/onboarding/restore',
+  onboardingUnlock: 'POST /api/onboarding/unlock',
 } as const;
 
 /** Base units → display decimal: at least 2 decimals, trailing zeros trimmed ("25000000", 6 → "25.00"; "1234567", 6 → "1.234567"). */
