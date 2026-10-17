@@ -7,6 +7,7 @@ export * from './backup.js';
 export * from './config.js';
 export * from './guard.js';
 export * from './policy.js';
+export * from './retry.js';
 export * from './seed.js';
 export * from './sync.js';
 export * from './tools.js';

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { WdkRgbWallet } from '../src/backend/wdk-rgb.js';
 import { backupWallet, restoreWallet } from '../src/backup.js';
 import { walletConfigFromEnv } from '../src/config.js';
+import { readSeed, seedStatus } from '../src/seed.js';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wl-restore-'));
@@ -58,7 +59,7 @@ describe.skipIf(process.env.LIVE_WALLET !== '1')('backup → restore round trip 
     expect(fs.existsSync(file)).toBe(true);
     src.close();
 
-    const mnemonic = fs.readFileSync(path.join(root, '.data/regtest/wallet/mnemonic'), 'utf8');
+    const mnemonic = readSeed(path.join(root, '.data/regtest/wallet'), process.env.WALLET_PASSPHRASE);
     const target = path.join(tmp(), 'restored');
     await expect(
       restoreWallet({
@@ -73,7 +74,9 @@ describe.skipIf(process.env.LIVE_WALLET !== '1')('backup → restore round trip 
       mnemonic,
       backupFile: file,
       passphrase: 'correct horse battery',
+      lockPassphrase: 'restored wallet lock',
     });
+    expect(seedStatus(target)).toBe('locked');
     await restored.init();
     await restored.sync();
     const after = await restored.listAssets();
