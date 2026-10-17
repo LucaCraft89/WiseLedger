@@ -30,7 +30,7 @@ import { libNetwork, type WalletConfig } from '../config.js';
 import { loadOrCreateMnemonic } from '../seed.js';
 
 /** The rgb-sdk WalletManager methods we use (wdk-wallet-rgb 2.0.3 exposes some only there). */
-interface RgbSdkWallet {
+export interface RgbSdkWallet {
   registerWallet(): { address: string; btcBalance?: unknown };
   getBtcBalance(): { vanilla: SdkBalance; colored: SdkBalance };
   getAddress(): string;
@@ -72,7 +72,7 @@ interface SdkAsset {
   balance?: Partial<SdkBalance>;
 }
 
-interface SdkTransfer {
+export interface SdkTransfer {
   idx: number;
   batchTransferIdx: number;
   createdAt: number;
@@ -100,7 +100,7 @@ function transferAmount(t: SdkTransfer): string {
 }
 
 /** The WDK account surface we use (WalletAccountRgb from wdk-wallet-rgb). */
-interface RgbAccount {
+export interface RgbAccount {
   getRgbWallet(): RgbSdkWallet;
   getAddress(): Promise<string> | string;
   quoteTransfer(o: { token: string; recipient: string; amount: number; feeRate: number }): Promise<{ fee: bigint }>;
@@ -174,7 +174,16 @@ export class WdkRgbWallet implements WalletPort {
   private account: RgbAccount | null = null;
   private registered = false;
 
-  constructor(private readonly cfg: WalletConfig) {}
+  /** `deps.account` injects a fake WDK account in tests (no native code, no chain). */
+  constructor(
+    private readonly cfg: WalletConfig,
+    deps: { account?: RgbAccount } = {},
+  ) {
+    if (deps.account) {
+      this.account = deps.account;
+      this.registered = true;
+    }
+  }
 
   /** The rgb-sdk wallet, for scripts that need BTC-level calls. */
   get rgb(): RgbSdkWallet {
@@ -336,11 +345,18 @@ export class WdkRgbWallet implements WalletPort {
         feeRate,
       }));
     } catch (e) {
-      throw mapWalletError(e);
+      const err = mapWalletError(e);
+      if (!(err instanceof SubmitTimeout)) throw err;
+      // The send may already be out: never retry. Sync once and report the transfer if it exists.
+      try {
+        await this.sync();
+      } catch {
+        // offline: the caller checks the state later
+      }
+      const found = this.newOutgoing(req.assetId, before);
+      throw new SubmitTimeout(err.message, found ? String(found.batchTransferIdx) : undefined);
     }
-    const created = this.rgb
-      .listTransfers(req.assetId)
-      .find((t) => !before.has(t.batchTransferIdx) && toDirection(t.kind) === 'outgoing');
+    const created = this.newOutgoing(req.assetId, before);
     const transferId = created ? String(created.batchTransferIdx) : `tx:${hash}`;
     return { transferId, ...(hash && hash !== 'unknown' ? { txid: hash } : {}) };
   }
@@ -390,6 +406,12 @@ export class WdkRgbWallet implements WalletPort {
   private acct(): RgbAccount {
     if (!this.account) throw new Error('Wallet not initialised: call init() first.');
     return this.account;
+  }
+
+  private newOutgoing(assetId: string, before: Set<number>): SdkTransfer | undefined {
+    return this.rgb
+      .listTransfers(assetId)
+      .find((t) => !before.has(t.batchTransferIdx) && toDirection(t.kind) === 'outgoing');
   }
 
   private async precheck(req: PaymentRequest): Promise<void> {
