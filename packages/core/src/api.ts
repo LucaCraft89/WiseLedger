@@ -114,7 +114,12 @@ export type WalletResponse = z.infer<typeof WalletResponse>;
 export const WalletReceiveRequest = z.object({
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
-  expiryMinutes: z.number().int().positive().max(60 * 24 * 7).optional(),
+  expiryMinutes: z
+    .number()
+    .int()
+    .positive()
+    .max(60 * 24 * 7)
+    .optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -148,7 +153,10 @@ export type TransfersResponse = z.infer<typeof TransfersResponse>;
 // POST /api/agent/chat
 export const ChatRequest = z.object({
   message: z.string().min(1).max(2000),
-  history: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() })).max(20).optional(),
+  history: z
+    .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string() }))
+    .max(20)
+    .optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequest>;
 
