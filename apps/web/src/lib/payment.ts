@@ -7,7 +7,7 @@ export const FLAG_TITLES: Record<string, string> = {
   R2_ASSET: 'Unexpected token',
   R3_AMOUNT: 'Amount problem',
   R4_DUPLICATE: 'Already received',
-  R5_NEW_PAYEE: 'New supplier',
+  R5_NEW_PAYEE: 'Supplier check',
   R6_PRESSURE: 'Pressure to pay fast',
   R7_INJECTION: 'Hidden orders to the AI',
   R8_CURRENCY: 'Different currency',
@@ -21,7 +21,18 @@ export function flagTitle(code: string): string {
 }
 
 /** The word next to the colour bar of a flag card. */
-export const SEVERITY_ICON_WORD: Record<Severity, string> = { block: 'Stop', warn: 'Check', info: 'Info' };
+export const SEVERITY_ICON_WORD: Record<Severity, string> = { block: 'Stop', warn: 'Check', info: 'Note' };
+
+/**
+ * Warnings and stops (shown under "Checks") apart from calm info notes ("Good to know"), so an ok report
+ * with only info flags still reads "All checks passed".
+ */
+export function splitFlags<T extends { severity: Severity }>(flags: readonly T[]): { alerts: T[]; notes: T[] } {
+  return {
+    alerts: flags.filter((f) => f.severity !== 'info'),
+    notes: flags.filter((f) => f.severity === 'info'),
+  };
+}
 
 export const EVIDENCE_MAX = 80;
 

@@ -372,7 +372,7 @@ describe('flag cards', () => {
     expect(flagTitle('R1_RGB_INVOICE')).toBe('Payment request problem');
     expect(flagTitle('AI_UNAVAILABLE')).toBe('The AI could not read this invoice');
     expect(flagTitle('R99_NEW')).toBe('Something to check');
-    expect(SEVERITY_ICON_WORD).toEqual({ block: 'Stop', warn: 'Check', info: 'Info' });
+    expect(SEVERITY_ICON_WORD).toEqual({ block: 'Stop', warn: 'Check', info: 'Note' });
   });
 
   it('cuts evidence to one line of about 80 characters', () => {

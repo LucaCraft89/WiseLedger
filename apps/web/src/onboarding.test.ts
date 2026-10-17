@@ -10,6 +10,7 @@ import {
 import { createFakeClient } from './api/fake.js';
 import { FAKE_MAX_UNLOCK_TRIES, FAKE_MIN_PASSPHRASE } from './api/fake-onboarding.js';
 import { aiRunStats, formatAiRun, lastAiRun, localAiSentence, recordAiRun } from './lib/ai-stats.js';
+import { VERDICT_LABELS } from './lib/format.js';
 import {
   checkWord,
   mnemonicProblem,
@@ -18,7 +19,15 @@ import {
   pickCheckIndex,
   screenForOnboarding,
 } from './lib/onboarding.js';
-import { apiErrorWords, canRetry, ERROR_WORDS, errorWords } from './lib/payment.js';
+import {
+  apiErrorWords,
+  canRetry,
+  ERROR_WORDS,
+  errorWords,
+  flagTitle,
+  SEVERITY_ICON_WORD,
+  splitFlags,
+} from './lib/payment.js';
 import { errorText } from './ui.js';
 
 const at = '2026-10-17T10:00:00.000Z';
@@ -210,5 +219,17 @@ describe('local AI numbers', () => {
     );
     expect(localAiSentence({ provider: 'mock', onDevice: true })).toMatch(/^Demo mode: canned answers/);
     expect(localAiSentence({ provider: 'openai', onDevice: false })).toMatch(/another server/);
+  });
+});
+
+describe('supplier check and calm info notes', () => {
+  it('R5 is titled "Supplier check"; info flags are notes, apart from the checks', () => {
+    expect(flagTitle('R5_NEW_PAYEE')).toBe('Supplier check');
+    expect(SEVERITY_ICON_WORD.info).toBe('Note');
+    const note = { severity: 'info' as const, code: 'R5_NEW_PAYEE' };
+    const warn = { severity: 'warn' as const, code: 'R3_AMOUNT' };
+    expect(splitFlags([note, warn])).toEqual({ alerts: [warn], notes: [note] });
+    expect(splitFlags([note]).alerts).toHaveLength(0);
+    expect(VERDICT_LABELS.ok).toBe('Looks fine');
   });
 });
