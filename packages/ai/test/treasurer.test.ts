@@ -79,11 +79,43 @@ describe('Treasurer skeleton', () => {
 });
 
 describe.skipIf(process.env.LIVE_QVAC !== '1')('Treasurer on live QVAC', () => {
-  it('calls execute_plan with the confirmed planId', { timeout: 300_000 }, async () => {
-    const { plan, confirmation, guard, wallet } = await setup();
+  it('calls execute_plan with the confirmed planId in 5 of 5 runs, and a wrong plan surfaces as a guard rejection', {
+    timeout: 900_000,
+  }, async () => {
     const llm = new QvacProvider();
-    const r = await new Treasurer({ llm, wallet, guard, pollMs: 0 }).execute(plan, confirmation, () => {});
+    const log: string[] = [];
+    let good = 0;
+    for (let i = 1; i <= 5; i++) {
+      const { plan, confirmation, guard, wallet } = await setup(String(25_000_000 + i));
+      const t = Date.now();
+      const events: AppEvent[] = [];
+      const r = await new Treasurer({ llm, wallet, guard, pollMs: 0, maxRetries: 0 }).execute(plan, confirmation, (e) =>
+        events.push(e),
+      );
+      const calls = events
+        .filter((e) => e.type === 'toolCall')
+        .map((e) => `${(e as { name: string }).name}:${(e as { status: string }).status}`);
+      if (r.status === 'settled') good++;
+      log.push(`run ${i}: ${r.status} ${calls.join(' ')} ${((Date.now() - t) / 1000).toFixed(1)} s`);
+    }
+    // Wrong plan: the guard does not know it → failed result with the guard's reason, nothing sent.
+    const { plan, confirmation, wallet } = await setup('26000000');
+    const rejected = await new Treasurer({ llm, wallet, guard: confirmationGuard(), pollMs: 0 }).execute(
+      plan,
+      confirmation,
+      () => {},
+    );
+    log.push(`unconfirmed plan: ${rejected.status} ${rejected.error?.code}`);
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const dir = resolve(import.meta.dirname, '../../../.data');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      resolve(dir, 'treasurer-live.md'),
+      `${log.join('\n')}\n\n${good}/5 (${llm.model}, no retries allowed)\n`,
+    );
     await llm.unload();
-    expect(r.status).toBe('settled');
+    expect(good).toBe(5);
+    expect(rejected.error?.code).toBe('unknown_plan');
   });
 });
