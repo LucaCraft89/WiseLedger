@@ -41,7 +41,7 @@ function matches(type: FileType, data: Buffer): boolean {
       return asText(data) !== undefined;
     case 'xml': {
       const text = asText(data.subarray(0, 3).equals(UTF8_BOM) ? data.subarray(3) : data);
-      return text !== undefined && text.trimStart().startsWith('<');
+      return text?.trimStart().startsWith('<') === true;
     }
   }
 }
