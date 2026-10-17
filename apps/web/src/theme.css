@@ -127,16 +127,14 @@
   border-radius: 6px;
 }
 
-/* Dark mode switch, top right of the app bar. */
+/* Dark mode switch: last item of the app bar (wraps with the navigation on narrow screens). */
 .wl-header button.wl-theme-switch {
-  position: absolute;
-  top: 18px;
-  right: 24px;
+  order: 1;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 0 12px 0 8px;
+  padding: 0 10px 0 8px;
   border: 1px solid var(--md-outline-variant);
   border-radius: var(--md-shape-full);
   background: transparent;
@@ -177,12 +175,6 @@
   transform: translateX(16px);
   background: var(--md-on-primary);
 }
-@media (max-width: 600px) {
-  .wl-header button.wl-theme-switch {
-    top: 10px;
-    right: 16px;
-  }
-}
 
 /* Blinking caret after the Treasurer's reply while it is still being written. */
 .wl-caret {
@@ -198,4 +190,57 @@
   to {
     visibility: hidden;
   }
+}
+
+/* The chat input stays at the bottom of the window while the conversation grows. */
+.wl-chat-input {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0;
+  background: var(--md-surface);
+  border-top: 1px solid var(--md-outline-variant);
+  z-index: 5;
+}
+
+/* Upload: one large drop area (the file input inside stays keyboard and screen-reader reachable). */
+.wl-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 160px;
+  margin: 16px 0;
+  padding: 24px;
+  text-align: center;
+  border: 2px dashed var(--md-outline);
+  border-radius: var(--md-shape-lg);
+  background: var(--md-surface-container-low);
+  cursor: pointer;
+  transition:
+    background 0.15s var(--md-ease),
+    border-color 0.15s var(--md-ease);
+}
+.wl-dropzone:hover,
+.wl-dropzone:focus-within,
+.wl-dropzone-over {
+  border-color: var(--md-primary);
+  background: color-mix(in srgb, var(--md-primary) 8%, var(--md-surface-container-low));
+}
+.wl-dropzone-ready {
+  border-style: solid;
+  border-color: var(--md-primary);
+}
+.wl-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Logo and switch share the first row; the navigation takes its own row below. */
+.wl-header .wl-nav {
+  order: 2;
 }

@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import type { InvoiceState, InvoiceSummaryDto } from './api/contracts.js';
-import { formatDate, STATE_LABELS, stateTone, TONE_COLORS, VERDICT_LABELS } from './lib/format.js';
+import { formatDate, STATE_LABELS, shortDate, stateTone, TONE_COLORS, VERDICT_LABELS } from './lib/format.js';
 import { filterInvoices, HISTORY_FILTER_LABELS, HISTORY_FILTERS, type HistoryFilter } from './lib/payment.js';
 
 const cell = { padding: '6px 8px', borderBottom: '1px solid var(--wl-c-line)', textAlign: 'left' } as const;
+
+/** Tabs shared by My invoices and Scheduled payments (one entry in the main navigation). */
+export function InvoiceTabs({ current }: { current: 'invoices' | 'schedule' }) {
+  return (
+    <nav aria-label="Invoice sections" className="wl-tabs">
+      <a href="#/invoices" aria-current={current === 'invoices' ? 'page' : undefined}>
+        All invoices
+      </a>
+      <a href="#/schedule" aria-current={current === 'schedule' ? 'page' : undefined}>
+        Scheduled payments
+      </a>
+    </nav>
+  );
+}
 
 export function InvoiceListPage({ api }: { api: ApiClient }) {
   const [invoices, setInvoices] = useState<InvoiceSummaryDto[] | null>(null);
@@ -41,6 +55,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <h2>Your invoices</h2>
+      <InvoiceTabs current="invoices" />
       <nav aria-label="Filter invoices" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {HISTORY_FILTERS.map((f) => {
           const count = invoices ? filterInvoices(invoices, f).length : 0;
@@ -78,7 +93,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
               <tr>
                 <th style={cell}>File</th>
                 <th style={cell}>Supplier</th>
-                <th style={cell}>Amount</th>
+                <th style={{ ...cell, textAlign: 'right' }}>Amount</th>
                 <th style={cell}>Status</th>
                 <th style={cell}>Our check</th>
                 <th style={cell}>Date</th>
@@ -91,12 +106,16 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
                     <a href={`#/invoice/${encodeURIComponent(inv.id)}`}>{inv.filename}</a>
                   </td>
                   <td style={cell}>{inv.issuerName ?? '—'}</td>
-                  <td style={cell}>{inv.total ? `${inv.total} ${inv.currency ?? ''}`.trim() : '—'}</td>
+                  <td style={{ ...cell, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {inv.total ? `${inv.total} ${inv.currency ?? ''}`.trim() : '—'}
+                  </td>
                   <td style={cell}>
                     <StatusChip state={inv.state} />
                   </td>
                   <td style={cell}>{inv.verdict ? VERDICT_LABELS[inv.verdict] : 'Not checked yet'}</td>
-                  <td style={cell}>{formatDate(inv.createdAt)}</td>
+                  <td style={{ ...cell, whiteSpace: 'nowrap' }} title={formatDate(inv.createdAt)}>
+                    {shortDate(inv.createdAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>

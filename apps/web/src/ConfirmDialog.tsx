@@ -112,7 +112,13 @@ export function ConfirmDialog(props: {
           >
             Yes, do not pay
           </button>
-          <button type="button" disabled={busy} onClick={() => setRejecting(false)} style={{ padding: '8px 20px' }}>
+          <button
+            className="wl-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setRejecting(false)}
+            style={{ padding: '8px 20px' }}
+          >
             Go back
           </button>
         </div>
@@ -130,7 +136,13 @@ export function ConfirmDialog(props: {
           >
             Confirm and pay
           </button>
-          <button type="button" disabled={busy} onClick={() => setRejecting(true)} style={{ padding: '8px 20px' }}>
+          <button
+            className="wl-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setRejecting(true)}
+            style={{ padding: '8px 20px' }}
+          >
             Do not pay
           </button>
           <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>

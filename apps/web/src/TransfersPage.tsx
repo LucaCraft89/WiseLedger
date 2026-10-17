@@ -20,7 +20,7 @@ export function TransfersPage({ api }: { api: ApiClient }) {
       <h2>Transfers</h2>
       <p>
         <a href="#/wallet">← Back to the wallet</a>{' '}
-        <button type="button" onClick={reload} disabled={loading}>
+        <button className="wl-quiet" type="button" onClick={reload} disabled={loading}>
           Refresh
         </button>
       </p>

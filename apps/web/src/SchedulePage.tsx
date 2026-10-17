@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import type { Job } from './api/contracts.js';
+import { InvoiceTabs } from './InvoiceListPage.js';
 import { formatDate } from './lib/format.js';
 import { canCancelJob, JOB_STATUS_COLORS, JOB_STATUS_WORDS, sortJobs } from './lib/ledger.js';
 import { explorerTxUrl, shortId } from './lib/payment.js';
@@ -16,10 +17,11 @@ export function SchedulePage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Scheduled payments</h2>
+      <h2>Your invoices</h2>
+      <InvoiceTabs current="schedule" />
       <p>
         Payments you confirmed for a later date. They run on this computer, so keep WiseLedger open.{' '}
-        <button type="button" onClick={reload} disabled={loading}>
+        <button className="wl-quiet" type="button" onClick={reload} disabled={loading}>
           Refresh
         </button>
       </p>
@@ -85,13 +87,13 @@ export function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onCh
             <button type="button" onClick={() => void cancel()} disabled={busy}>
               {busy ? 'Cancelling…' : 'Yes, cancel it'}
             </button>{' '}
-            <button type="button" onClick={() => setAsking(false)} disabled={busy}>
+            <button className="wl-secondary" type="button" onClick={() => setAsking(false)} disabled={busy}>
               Keep it
             </button>
           </p>
         ) : (
           <p style={{ margin: '8px 0 0' }}>
-            <button type="button" onClick={() => setAsking(true)}>
+            <button className="wl-secondary" type="button" onClick={() => setAsking(true)}>
               Cancel
             </button>
           </p>

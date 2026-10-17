@@ -24,7 +24,8 @@ export function ThemeSwitch() {
       <span className="wl-theme-track" aria-hidden="true">
         <span className="wl-theme-thumb" />
       </span>
-      Dark mode
+      <span aria-hidden="true">{dark ? '☾' : '☀'}</span>
+      <span className="wl-visually-hidden">Dark mode</span>
     </button>
   );
 }

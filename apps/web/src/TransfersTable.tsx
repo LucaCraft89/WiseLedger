@@ -1,13 +1,14 @@
 import { useReducer, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { formatAssetAmount, type TransferDto, type WalletResponse } from './api/contracts.js';
-import { formatDate } from './lib/format.js';
+import { shortDate } from './lib/format.js';
 import {
   addLabel,
   DIRECTION_WORDS,
   LABEL_MAX_LEN,
   labelEditReducer,
   removeLabel,
+  TRANSFER_STATUS_TONE,
   TRANSFER_STATUS_WORDS,
 } from './lib/ledger.js';
 import { explorerTxUrl, shortId } from './lib/payment.js';
@@ -49,7 +50,7 @@ export function TransfersTable({
           <tr style={{ textAlign: 'left' }}>
             <th style={cell}>Date</th>
             <th style={cell}>Type</th>
-            <th style={cell}>Amount</th>
+            <th style={{ ...cell, textAlign: 'right' }}>Amount</th>
             <th style={cell}>Status</th>
             <th style={cell}>Labels</th>
             <th style={cell}>Transaction</th>
@@ -58,10 +59,26 @@ export function TransfersTable({
         <tbody>
           {transfers.map((t) => (
             <tr key={t.transferId}>
-              <td style={cell}>{formatDate(t.createdAt)}</td>
+              <td style={{ ...cell, whiteSpace: 'nowrap' }} title={new Date(t.createdAt).toLocaleString()}>
+                {shortDate(t.createdAt)}
+              </td>
               <td style={cell}>{DIRECTION_WORDS[t.direction]}</td>
-              <td style={{ ...cell, whiteSpace: 'nowrap' }}>{amountText(t, assets)}</td>
-              <td style={cell}>{TRANSFER_STATUS_WORDS[t.status]}</td>
+              <td style={{ ...cell, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {t.direction === 'out' ? '− ' : '+ '}
+                {amountText(t, assets)}
+              </td>
+              <td style={cell}>
+                <span
+                  style={{
+                    ...chip,
+                    background: TRANSFER_STATUS_TONE[t.status].bg,
+                    color: TRANSFER_STATUS_TONE[t.status].fg,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {TRANSFER_STATUS_WORDS[t.status]}
+                </span>
+              </td>
               <td style={cell}>
                 <LabelCell api={api} transferId={t.transferId} initial={t.labels} />
               </td>
