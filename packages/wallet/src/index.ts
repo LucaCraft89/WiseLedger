@@ -25,4 +25,6 @@ export async function createWallet(cfg: WalletConfig): Promise<WalletPort> {
       throw new Error('WALLET_BACKEND=rgb-lib is not implemented; use wdk-rgb or mock.');
   }
 }
+export * from './ln/node.js';
+export * from './ln/rail.js';
 export * from './lock.js';
