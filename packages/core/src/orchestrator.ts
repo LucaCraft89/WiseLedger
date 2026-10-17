@@ -18,7 +18,10 @@ export const InvoiceStateSchema = z.enum([
 ]);
 export type InvoiceState = z.infer<typeof InvoiceStateSchema>;
 
-/** Legal transitions. PAID and REJECTED are terminal; FAILED and BLOCKED only allow REJECTED (archive). */
+/**
+ * Legal transitions. PAID and REJECTED are terminal; BLOCKED only allows REJECTED (archive). FAILED → CONFIRMED is a
+ * user retry, allowed by the server only when the failure happened before signing (wallet RELEASE_ON_FAILURE).
+ */
 export const INVOICE_TRANSITIONS: Readonly<Record<InvoiceState, readonly InvoiceState[]>> = {
   UPLOADED: ['EXTRACTED', 'FAILED'],
   EXTRACTED: ['ANALYZED', 'FAILED'],
@@ -28,7 +31,7 @@ export const INVOICE_TRANSITIONS: Readonly<Record<InvoiceState, readonly Invoice
   EXECUTING: ['SCHEDULED', 'PAID', 'FAILED', 'BLOCKED'],
   SCHEDULED: ['EXECUTING', 'REJECTED'],
   PAID: [],
-  FAILED: ['REJECTED'],
+  FAILED: ['CONFIRMED', 'REJECTED'],
   REJECTED: [],
   BLOCKED: ['REJECTED'],
 };
