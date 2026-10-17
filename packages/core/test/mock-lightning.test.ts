@@ -25,4 +25,14 @@ describe('MockWallet Lightning rail', () => {
     const after = await w.lightningStatus();
     expect(BigInt(after.channels[0]?.localAsset ?? '0')).toBe(BigInt(before.channels[0]?.localAsset ?? '0') - 2000000n);
   });
+
+  it('refuses more than the channel holds, in plain words; distinct invoices get distinct hashes', async () => {
+    const w = new MockWallet({ stepMs: 0 });
+    const big = `${MOCK_LN_INVOICE_PREFIX}${MOCK_ASSET_ID}/60000000/${expiry}`;
+    await expect(w.pay({ rgbInvoice: big, assetId: MOCK_ASSET_ID, amount: '60000000' })).rejects.toThrow(
+      /Lightning channel/,
+    );
+    const other = `${MOCK_LN_INVOICE_PREFIX}${MOCK_ASSET_ID}/2000001/${expiry}`;
+    expect((await w.decodeInvoice(ln)).paymentHash).not.toBe((await w.decodeInvoice(other)).paymentHash);
+  });
 });

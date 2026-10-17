@@ -35,9 +35,13 @@ export const MOCK_TIMEOUT_AMOUNT = '13140000';
 
 /** Deterministic fake payment hash (64 hex) for a mock Lightning invoice. */
 function mockHash(invoice: string): string {
-  let h = 0;
-  for (const c of invoice) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return h.toString(16).padStart(8, '0').repeat(8);
+  let out = '';
+  for (let k = 0; k < 8; k++) {
+    let h = 2166136261 ^ k;
+    for (const c of invoice) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+    out += h.toString(16).padStart(8, '0');
+  }
+  return out;
 }
 
 export interface MockWalletOptions {
@@ -170,6 +174,12 @@ export class MockWallet implements WalletPort {
 
   async pay(req: PaymentRequest): Promise<PayResult> {
     await this.validate(req);
+    if (req.rgbInvoice.startsWith(MOCK_LN_INVOICE_PREFIX)) {
+      const local = BigInt((await this.lightningStatus()).channels[0]?.localAsset ?? '0');
+      if (BigInt(req.amount) > local) {
+        throw new InsufficientFunds('Not enough in the Lightning channel for this payment. Pay on-chain instead.');
+      }
+    }
     if (req.amount === this.failAmount) throw new TransferFailed('Simulated transfer failure (mock failure amount).');
     const t = this.record(req.assetId, BigInt(req.amount), 'outgoing', req.rgbInvoice);
     if (req.amount === this.timeoutAmount) throw new SubmitTimeout();
