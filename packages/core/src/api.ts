@@ -308,6 +308,11 @@ export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
 export const ReceivesListResponse = z.object({ receives: z.array(ReceiveRequestDto) });
 export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
 
+// POST /api/agent/transcribe: body = raw audio bytes (Content-Type audio/wav, 16 kHz mono preferred), max 2 MB / 30 s.
+// The text only fills the chat box; the user edits and sends it through POST /api/agent/chat.
+export const TranscribeResponse = z.object({ text: z.string(), ms: z.number().int().nonnegative() });
+export type TranscribeResponse = z.infer<typeof TranscribeResponse>;
+
 export const API_ROUTES = {
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
@@ -320,6 +325,7 @@ export const API_ROUTES = {
   walletReceives: 'GET /api/wallet/receives',
   transfers: 'GET /api/transfers',
   agentChat: 'POST /api/agent/chat',
+  agentTranscribe: 'POST /api/agent/transcribe',
   scheduleList: 'GET /api/schedule',
   scheduleCancel: 'POST /api/schedule/:jobId/cancel',
   labelsPut: 'PUT /api/labels/:transferId',

@@ -12,6 +12,7 @@
     "spike:hello": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-hello.ts",
     "spike:json": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-json.ts",
     "spike:vision": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-vision.ts",
+    "spike:voice": "QVAC_CONFIG_PATH=./qvac.config.json tsx spikes/qvac-voice.ts",
     "evals": "QVAC_CONFIG_PATH=./qvac.config.json tsx ../../evals/run.ts"
   },
   "dependencies": {
