@@ -58,6 +58,21 @@ describe('SqliteReceiveStore', () => {
     store.close();
   });
 
+  it('waitingRecently: an open request from the last hour keeps the wallet syncing fast', () => {
+    const store = new InvoiceStore(':memory:');
+    let now = T0;
+    const receives = new SqliteReceiveStore(store, () => now);
+    expect(receives.waitingRecently()).toBe(false);
+    receives.add({ rgbInvoice: 'rgb:inv', recipientId: 'utxob:abc', expiresAt: '2026-10-18T10:00:00.000Z' });
+    expect(receives.waitingRecently()).toBe(true);
+    now = new Date(T0.getTime() + 61 * 60_000);
+    expect(receives.waitingRecently()).toBe(false); // older than an hour: idle pace
+    now = T0;
+    receives.reconcile([incoming('Settled')]);
+    expect(receives.waitingRecently()).toBe(false); // received: nothing to wait for
+    store.close();
+  });
+
   it('expires when nobody paid in time; outgoing transfers never match', () => {
     const store = new InvoiceStore(':memory:');
     let now = T0;

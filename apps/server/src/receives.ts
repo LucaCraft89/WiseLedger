@@ -97,6 +97,12 @@ export class SqliteReceiveStore {
     return row ? toReceive(row) : undefined;
   }
 
+  /** True while a request handed out in the last hour still waits for its payment (the wallet then syncs fast). */
+  waitingRecently(withinMs = 60 * 60_000): boolean {
+    const since = this.now().getTime() - withinMs;
+    return this.list().some((r) => OPEN.includes(r.status) && Date.parse(r.createdAt) >= since);
+  }
+
   /** Newest first. */
   list(): ReceiveRequest[] {
     const rows = this.store.db.prepare('SELECT * FROM receives ORDER BY created_at DESC').all() as unknown as Row[];

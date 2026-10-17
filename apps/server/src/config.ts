@@ -18,6 +18,8 @@ export interface ServerConfig {
   dailyCap: string;
   /** Background wallet sync period for the real backend (env WALLET_SYNC_MS, default 15000). */
   walletSyncMs: number;
+  /** Background sync period while nothing is pending (each sync blocks the server 1–5 s on Mutinynet). */
+  walletSyncIdleMs: number;
   /** SQLite file (env DB_PATH), or `:memory:`. */
   dbPath: string;
   /** MockWallet status step and MockAnalyzer stage delay, in ms. */
@@ -82,6 +84,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     paymentCap: baseUnits(env, 'PAYMENT_CAP', '100000000'),
     dailyCap: baseUnits(env, 'DAILY_CAP', (BigInt(baseUnits(env, 'PAYMENT_CAP', '100000000')) * 5n).toString()),
     walletSyncMs: int(env, 'WALLET_SYNC_MS', 15_000, 1000),
+    walletSyncIdleMs: int(env, 'WALLET_SYNC_IDLE_MS', 60_000, 1000),
     dbPath: env.DB_PATH?.trim() || DEFAULT_DB_PATH,
     mockStepMs: int(env, 'MOCK_STEP_MS', 1000),
   };
