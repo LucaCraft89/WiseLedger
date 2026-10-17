@@ -12,6 +12,7 @@ import {
   type ConfirmResponse,
   canTransition,
   type ExecutionResult,
+  FLAG_CODES,
   IllegalTransition,
   type InvoiceAnalyzer,
   type InvoiceSourceKind,
@@ -202,10 +203,18 @@ export class Orchestrator {
     }
   }
 
-  /** ANALYZED → BLOCKED, or plan + sentence → AWAITING_CONFIRMATION. */
+  /**
+   * ANALYZED → BLOCKED (verdict block), or plan + sentence → AWAITING_CONFIRMATION. A report that is not blocked
+   * but has no payment we can make (e.g. AI_UNAVAILABLE) also waits for the user, without a plan: they can read
+   * it and reject it; confirm is refused with a plain 409.
+   */
   private async finishAnalysis(id: string, report: AnalysisReport): Promise<void> {
-    if (report.verdict === 'block' || !report.proposedPayment) {
+    if (report.verdict === 'block') {
       this.transition(id, 'BLOCKED');
+      return;
+    }
+    if (!report.proposedPayment) {
+      this.transition(id, 'AWAITING_CONFIRMATION');
       return;
     }
     const plan = await this.planFromReport(id, report);
@@ -313,6 +322,20 @@ export class Orchestrator {
     const report = inv.report;
     if (inv.state === 'BLOCKED' || report?.verdict === 'block') {
       throw new ApiFailure(409, 'VERDICT_BLOCK', 'This invoice was blocked as dangerous and cannot be paid.');
+    }
+    if (inv.state === 'AWAITING_CONFIRMATION' && report && !report.proposedPayment) {
+      if (report.flags.some((f) => f.code === FLAG_CODES.AI_UNAVAILABLE)) {
+        throw new ApiFailure(
+          409,
+          'AI_UNAVAILABLE',
+          'The local AI could not read this invoice, so there is no payment to confirm. Check it yourself or upload it again.',
+        );
+      }
+      throw new ApiFailure(
+        409,
+        'NO_PAYMENT',
+        'This invoice has no RGB payment we can make. Check it yourself, then reject it or ask the supplier for an RGB invoice.',
+      );
     }
     if (inv.state !== 'AWAITING_CONFIRMATION' || !report || !inv.plan) {
       throw new ApiFailure(409, 'INVALID_TRANSITION', `This invoice cannot be confirmed now (state ${inv.state}).`);

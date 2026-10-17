@@ -121,6 +121,55 @@ async function openWallet(config: ServerConfig, env: NodeJS.ProcessEnv): Promise
   }
 }
 
+/**
+ * Everything the server needs from B's `ai` package, behind one small interface, so the wiring can move to
+ * `createAiRuntime()` without touching the rest of the server.
+ */
+export interface AiProviders {
+  analyzer: InvoiceAnalyzer;
+  treasurer: TreasurerAgent;
+  /** Called with the human-confirmed plan before treasurer.execute (registers it with the guard). */
+  beforeExecute: (plan: PaymentPlan, confirmation: Confirmation) => Promise<void>;
+  llmStatus: () => LlmInfo;
+  /** Starts loading the model in the background; never rejects. */
+  warmUp: () => void;
+  close: () => Promise<void>;
+}
+
+/** Hermetic path: core's MockAnalyzer + MockTreasurer (tests, `pnpm demo:mock`). */
+function mockAi(config: ServerConfig, wallet: WalletPort): AiProviders {
+  const step = config.mockStepMs;
+  return {
+    analyzer: new MockAnalyzer({ stageDelayMs: Math.min(step, 300) }),
+    treasurer: new MockTreasurer(wallet, { pollMs: Math.max(10, Math.min(step / 4, 250)) }),
+    beforeExecute: async () => undefined,
+    llmStatus: () => ({ provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true }),
+    warmUp: () => undefined,
+    close: async () => undefined,
+  };
+}
+
+/** B's real Analyst + Treasurer on one shared model (qvac | openai, or an injected test LLM). */
+function realAi(config: ServerConfig, wallet: WalletPort, opts: ProviderOptions): AiProviders {
+  const model = opts.llm ?? createLlm(config.llmProvider);
+  const guard = confirmationGuard();
+  return {
+    analyzer: new LiveAnalyst(model, wallet, opts.history, config),
+    treasurer: new Treasurer({ llm: model, wallet, guard }),
+    beforeExecute: (plan, c) => guard.add(plan, c),
+    llmStatus: () => model.info(),
+    warmUp: () => {
+      model.warmUp?.().then(
+        () => opts.log?.info(`Model ${model.info().model} is ready`),
+        (err: unknown) => opts.log?.warn({ err }, 'Model warm-up failed'),
+      );
+    },
+    close: async () => {
+      await model.unload?.().catch(() => undefined);
+    },
+  };
+}
+
 export async function createProviders(config: ServerConfig, opts: ProviderOptions): Promise<Providers> {
   const env = opts.env ?? process.env;
   const wallet = opts.wallet ?? (await openWallet(config, env));
@@ -137,35 +186,12 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
     void sync?.kick().catch(() => undefined);
   };
 
-  let analyzer: InvoiceAnalyzer;
-  let treasurer: TreasurerAgent;
-  let llmInfo: () => LlmInfo;
-  let llm: LlmProvider | undefined;
-
-  if (config.llmProvider === 'mock' && !opts.llm) {
-    const step = config.mockStepMs;
-    analyzer = new MockAnalyzer({ stageDelayMs: Math.min(step, 300) });
-    treasurer = new GuardedTreasurer(
-      new MockTreasurer(wallet, { pollMs: Math.max(10, Math.min(step / 4, 250)) }),
-      async () => undefined,
-      kick,
-    );
-    llmInfo = () => ({ provider: 'mock', model: 'mock-analyzer', state: 'ready', onDevice: true });
-  } else {
-    const model = opts.llm ?? createLlm(config.llmProvider);
-    llm = model;
-    const guard = confirmationGuard();
-    analyzer = new LiveAnalyst(model, wallet, opts.history, config);
-    treasurer = new GuardedTreasurer(new Treasurer({ llm: model, wallet, guard }), (p, c) => guard.add(p, c), kick);
-    llmInfo = () => model.info();
-    // Load the model in the background: /api/health shows `loading` until it is warm.
-    if (model.warmUp) {
-      model.warmUp().then(
-        () => opts.log?.info(`Model ${model.info().model} is ready`),
-        (err: unknown) => opts.log?.warn({ err }, 'Model warm-up failed'),
-      );
-    }
-  }
+  const ai = opts.llm || config.llmProvider !== 'mock' ? realAi(config, wallet, opts) : mockAi(config, wallet);
+  const treasurer = new GuardedTreasurer(ai.treasurer, ai.beforeExecute, kick);
+  // Load the model in the background: /api/health shows `loading` until it is warm.
+  ai.warmUp();
+  const llmInfo = ai.llmStatus;
+  const analyzer = ai.analyzer;
 
   return {
     wallet,
@@ -182,7 +208,7 @@ export async function createProviders(config: ServerConfig, opts: ProviderOption
     },
     async close() {
       sync?.stop();
-      await llm?.unload?.().catch(() => undefined);
+      await ai.close();
       (wallet as { close?: () => void }).close?.();
     },
   };
