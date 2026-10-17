@@ -1,5 +1,5 @@
 # WiseLedger
-
+<img src="https://github.com/LucaCraft89/WiseLedger/coincube1024.png" alt="">
 **Team Coin³** · *Agentic Dollars on Bitcoin* hackathon, BLOX Turin, 17–18 October 2026
 
 > A local AI that reads your invoices, catches the fraudulent ones, and pays the good ones with RGB assets on Bitcoin, from your own self-custodial wallet. Nothing leaves your device.
