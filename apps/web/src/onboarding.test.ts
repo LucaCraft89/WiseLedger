@@ -260,3 +260,22 @@ describe('first-run and settings screens render', () => {
     expect(html).toContain('loaded in 4.2 s');
   });
 });
+
+describe('scheduled payment proof (PLAN §1.1)', () => {
+  it('a job that ran shows its transfer ID, txid and explorer link', async () => {
+    const { JobRow } = await import('./SchedulePage.js');
+    const job = {
+      jobId: 'job_1',
+      planId: 'plan_1',
+      invoiceId: 'inv_1',
+      runAt: '2026-10-17T18:00:00.000Z',
+      status: 'done' as const,
+      createdAt: '2026-10-17T17:00:00.000Z',
+      updatedAt: '2026-10-17T18:00:05.000Z',
+      result: { planId: 'plan_1', status: 'settled' as const, transferId: 'tr_42', txid: 'ab'.repeat(32) },
+    };
+    const html = renderToStaticMarkup(createElement(JobRow, { api: createFakeClient(), job, onChanged: () => {} }));
+    expect(html).toContain('job-proof');
+    expect(html).toContain(`https://mutinynet.com/tx/${'ab'.repeat(32)}`);
+  });
+});

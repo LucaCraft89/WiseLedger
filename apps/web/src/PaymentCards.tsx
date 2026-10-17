@@ -3,7 +3,7 @@ import { canRetry, DEFAULT_EXPLORER_URL, errorWords, explorerTxUrl, shortId } fr
 import { CopyButton, errorText } from './ui.js';
 
 /** From the root .env (RGB_EXPLORER_URL) via vite.config.ts; Mutinynet by default. */
-const EXPLORER_BASE: string = import.meta.env.VITE_RGB_EXPLORER_URL || DEFAULT_EXPLORER_URL;
+export const EXPLORER_BASE: string = import.meta.env.VITE_RGB_EXPLORER_URL || DEFAULT_EXPLORER_URL;
 
 /** Paid: what was paid, the transfer ID and the Bitcoin transaction with a link to the explorer. */
 export function ResultCard({ sentence, transferId, txid }: { sentence?: string; transferId?: string; txid?: string }) {
