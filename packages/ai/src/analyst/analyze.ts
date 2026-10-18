@@ -9,6 +9,8 @@ import {
   type InvoiceAnalyzer,
   type InvoiceSource,
   type LlmProvider,
+  PAYMENT_REQUEST_PAYEE,
+  type PaymentRequestFacts,
   type ProposedPayment,
   type RiskFlag,
   type Stage,
@@ -24,6 +26,13 @@ import {
   runRules,
 } from '../rules/index.js';
 import { extractInvoice } from './extract.js';
+import { groundExtraction, xmlText } from './grounding.js';
+import {
+  paymentRequestExtraction,
+  paymentRequestFacts,
+  paymentRequestOnly,
+  paymentRequestSummary,
+} from './payment-request.js';
 import { summarize } from './summarize.js';
 
 export interface AnalystDeps {
@@ -68,16 +77,21 @@ export class Analyst implements InvoiceAnalyzer {
     };
 
     const input = await stage('reading', () => loadInvoice(src));
+    // Only a payment request (bare rgb:… or RGB Lightning): read by the wallet's decoder, no model call.
+    const onlyRequest = input.mode === 'text' && !input.structured ? paymentRequestOnly(input.text) : undefined;
     let extracted: Pick<Awaited<ReturnType<typeof extractInvoice>>, 'extraction' | 'ms'>;
     try {
       const t0 = Date.now();
       extracted = await stage('extracting', async () =>
-        input.mode === 'text' && input.structured
-          ? { extraction: input.structured, ms: Date.now() - t0 } // FatturaPA: tagged fields, no model call
-          : extractInvoice(input, llm, {
-              ...(ctx.signal ? { signal: ctx.signal } : {}),
-              ...(onToken ? { onToken } : {}),
-            }),
+        onlyRequest
+          ? { extraction: paymentRequestExtraction(onlyRequest), ms: Date.now() - t0 }
+          : input.mode === 'text' && input.structured
+            ? // FatturaPA: tagged fields, no model call; grounded like any other source (passes trivially).
+              { extraction: groundExtraction(input.structured, xmlText(input.text)).extraction, ms: Date.now() - t0 }
+            : extractInvoice(input, llm, {
+                ...(ctx.signal ? { signal: ctx.signal } : {}),
+                ...(onToken ? { onToken } : {}),
+              }),
       );
     } catch (err) {
       // Never a silent pass: without a reliable extraction the user must review, and there is nothing to pay.
@@ -95,6 +109,7 @@ export class Analyst implements InvoiceAnalyzer {
           .catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
       }
       const partial: RuleInput = {
+        kind: onlyRequest ? 'payment_request' : 'invoice',
         extraction,
         ...(decoded ? { decoded } : {}),
         history: await history.seen({
@@ -115,22 +130,37 @@ export class Analyst implements InvoiceAnalyzer {
         if (balance) partial.balance = balance;
       }
       const result = runRules(partial);
+      // Read by the vision model: nothing could be checked against a text (confidence capped in extract.ts).
+      if (input.mode === 'image') result.flags.push(IMAGE_NOTE);
       for (const flag of result.flags) emit({ type: 'flag', invoiceId, at: at(), flag });
       return { ...result, ruleInput: partial, rgbCheck: rgbRequestCheck(partial) };
     });
     const rulesMs = Date.now() - rulesStarted;
 
-    const summary = await stage('summarizing', () =>
-      summarize(extraction, flags, verdict, llm, {
-        ...(rgbCheck ? { rgbCheck } : {}),
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
-        ...(onToken ? { onToken } : {}),
-      }),
+    const decoded = ruleInput.decoded && !('error' in ruleInput.decoded) ? ruleInput.decoded : undefined;
+    const facts: PaymentRequestFacts | undefined =
+      onlyRequest && decoded ? paymentRequestFacts(decoded, paymentAsset(ruleInput)) : undefined;
+    const summary = await stage('summarizing', async () =>
+      onlyRequest
+        ? // Facts from the decoder only: no model call is needed to say them.
+          {
+            summary: paymentRequestSummary(facts, flags, verdict, config, now()),
+            questionsForUser: [],
+            ms: 0,
+            fallback: false,
+          }
+        : summarize(extraction, flags, verdict, llm, {
+            ...(rgbCheck ? { rgbCheck } : {}),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+            ...(onToken ? { onToken } : {}),
+          }),
     );
 
     const proposedPayment = verdict === 'block' ? undefined : buildProposedPayment(ruleInput);
     const report: AnalysisReport = {
       invoiceId,
+      ...(onlyRequest ? { kind: 'payment_request' as const } : {}),
+      ...(facts ? { paymentRequest: facts } : {}),
       extraction,
       flags,
       verdict,
@@ -172,6 +202,13 @@ export class Analyst implements InvoiceAnalyzer {
   }
 }
 
+/** Info note on every report read from an image by the vision model. */
+export const IMAGE_NOTE = {
+  code: FLAG_CODES.R9_MISSING_FIELDS,
+  severity: 'info' as const,
+  message: 'Read from an image: check the details.',
+};
+
 export const AI_UNAVAILABLE_MESSAGE =
   'The local AI could not read this invoice, so nothing was checked. Check it yourself or try again in a minute.';
 
@@ -189,7 +226,9 @@ export function buildProposedPayment(input: RuleInput): ProposedPayment | undefi
   const assetId = paymentAsset(input);
   const amount = paymentAmount(input);
   if (!rgbInvoice || !assetId || !amount || !input.decoded || 'error' in input.decoded) return undefined;
-  return { rgbInvoice, assetId, amount, payee: input.extraction.issuer.name ?? 'Unknown supplier' };
+  const payee =
+    input.kind === 'payment_request' ? PAYMENT_REQUEST_PAYEE : (input.extraction.issuer.name ?? 'Unknown supplier');
+  return { rgbInvoice, assetId, amount, payee };
 }
 
 export type { DecodedInvoice };

@@ -16,15 +16,18 @@ import {
   type EmitFn,
   type ExecutionResult,
   FLAG_CODES,
+  formatAssetAmount,
   IllegalTransition,
   type InvoiceAnalyzer,
   type InvoiceSourceKind,
   type InvoiceState,
   type Job,
   makePlan,
+  PAYMENT_REQUEST_PAYEE,
   type PaymentPlan,
   type RejectRequest,
   type RejectResponse,
+  type SetAmountResponse,
   type TransferInfo,
   type TransferStatus,
   type TreasurerAgent,
@@ -55,6 +58,8 @@ export interface OrchestratorDeps {
   treasurer: TreasurerAgent & { executeNow?: ExecuteNowFn };
   wallet: WalletPort;
   uploadDir: string;
+  /** Max amount per payment in base units (PAYMENT_CAP), for amounts the user types (open-amount requests). */
+  paymentCap?: string;
   /** Stores the job of a scheduled payment (B's Scheduler.schedule). Without it, scheduled confirms are refused. */
   schedule?: (input: { planId: string; invoiceId: string; runAt: string }) => Promise<Job>;
   now?: () => Date;
@@ -351,11 +356,61 @@ export class Orchestrator {
     return buildConfirmationSentence(plan, asset);
   }
 
+  /**
+   * Open-amount payment request: the amount the user typed (base units) is checked here (> 0, ≤ payment cap,
+   * ≤ spendable) and becomes the proposed payment, so confirm() rebuilds and checks exactly this plan.
+   */
+  async setAmount(id: string, amount: string): Promise<SetAmountResponse> {
+    const inv = this.mustGet(id);
+    const report = inv.report;
+    const pr = report?.paymentRequest;
+    if (!report || report.kind !== 'payment_request' || !pr || pr.amount) {
+      throw new ApiFailure(409, 'AMOUNT_FIXED', 'This payment already has its amount; it cannot be changed.');
+    }
+    if (inv.state !== 'AWAITING_CONFIRMATION' || report.verdict === 'block') {
+      throw new ApiFailure(409, 'INVALID_TRANSITION', `The amount cannot be set now (state ${inv.state}).`);
+    }
+    const assetId = pr.assetId ?? pr.payAssetId;
+    const rgbInvoice = report.extraction.payment.rgbInvoice;
+    if (!assetId || !rgbInvoice) {
+      throw new ApiFailure(409, 'NO_PAYMENT', 'No token you accept is set up to pay this request.');
+    }
+    const asset = (await this.deps.wallet.listAssets()).find((a) => a.assetId === assetId);
+    const words = (v: string) =>
+      asset ? `${formatAssetAmount(v, asset.precision)} ${asset.ticker}` : `${v} base units`;
+    const value = BigInt(amount);
+    if (value <= 0n) throw new ApiFailure(400, 'AMOUNT_ZERO', 'Type an amount greater than zero.');
+    if (this.deps.paymentCap && value > BigInt(this.deps.paymentCap)) {
+      throw new ApiFailure(400, 'OVER_CAP', `This is above your payment limit of ${words(this.deps.paymentCap)}.`);
+    }
+    const spendable = (await this.deps.wallet.assetBalance(assetId)).spendable;
+    if (value > BigInt(spendable)) {
+      throw new ApiFailure(400, 'INSUFFICIENT_FUNDS', `You can spend at most ${words(spendable)} right now.`);
+    }
+    const withAmount: AnalysisReport = {
+      ...report,
+      proposedPayment: { rgbInvoice, assetId, amount, payee: PAYMENT_REQUEST_PAYEE },
+    };
+    const plan = await this.planFromReport(id, withAmount);
+    const confirmationSentence = await this.sentenceFor(plan);
+    this.store.update(id, { report: withAmount, plan, confirmationSentence });
+    return { invoiceId: id, plan, confirmationSentence };
+  }
+
   async confirm(id: string, req: ConfirmRequest): Promise<ConfirmResponse> {
     const inv = this.mustGet(id);
     const report = inv.report;
     if (inv.state === 'BLOCKED' || report?.verdict === 'block') {
       throw new ApiFailure(409, 'VERDICT_BLOCK', 'This invoice was blocked as dangerous and cannot be paid.');
+    }
+    if (
+      inv.state === 'AWAITING_CONFIRMATION' &&
+      report?.kind === 'payment_request' &&
+      !report.proposedPayment &&
+      report.paymentRequest &&
+      !report.paymentRequest.amount
+    ) {
+      throw new ApiFailure(409, 'AMOUNT_NEEDED', 'This request leaves the amount to you: type it first, then confirm.');
     }
     if (inv.state === 'AWAITING_CONFIRMATION' && report && !report.proposedPayment) {
       if (report.flags.some((f) => f.code === FLAG_CODES.AI_UNAVAILABLE)) {

@@ -1,0 +1,1 @@
+rgb:~/~/~/sb:utxob:kL5AxEhY-TsNtMhj-NknUXZ1-UNQg~Al-TKWS7VO-qjcNdD1-BERH9?expiry=1792566505&endpoints=rpcs://proxy.kaleidoswap.com/json-rpc

@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",
+    "@utexo/rgb-lib": "0.3.0-beta.8",
     "@utexo/wdk-wallet-rgb": "2.0.3",
     "core": "workspace:*",
     "zod": "^4.6.7"

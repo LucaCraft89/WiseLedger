@@ -1,4 +1,12 @@
-import type { AssetBalance, DecodedInvoice, HistoryMatch, InvoiceExtraction, PayeeBookEntry, RiskFlag } from 'core';
+import type {
+  AssetBalance,
+  DecodedInvoice,
+  DocumentKind,
+  HistoryMatch,
+  InvoiceExtraction,
+  PayeeBookEntry,
+  RiskFlag,
+} from 'core';
 
 export interface RuleConfig {
   /** Asset IDs the user accepts to pay with (ASSET_ALLOWLIST). First = default when the invoice lets the payer choose. */
@@ -33,6 +41,8 @@ export function unknownEndpoints(d: DecodedInvoice, allowlist: string[] | undefi
 
 /** Everything a rule may look at. Built by code before the rules run; rules are pure functions of it. */
 export interface RuleInput {
+  /** `payment_request`: the document is only an RGB payment request (no supplier, number, dates, total). */
+  kind?: DocumentKind;
   extraction: InvoiceExtraction;
   /** Result of WalletPort.decodeInvoice on the extracted RGB invoice. */
   decoded?: DecodedInvoice | { error: string };
@@ -82,3 +92,6 @@ export function paymentAmount(input: RuleInput): string | undefined {
   if (info && total && currency?.toUpperCase() === info.ticker.toUpperCase()) return toBaseUnits(total, info.precision);
   return undefined;
 }
+
+/** R3 / check line for an open-amount payment request (the user types the amount before paying). */
+export const OPEN_AMOUNT_MESSAGE = 'This request leaves the amount to you: you will type it before paying.';

@@ -308,6 +308,9 @@ importers:
       '@tetherto/wdk':
         specifier: 1.0.0-beta.19
         version: 1.0.0-beta.19(bare-pipe@4.4.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.6.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.4.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))
+      '@utexo/rgb-lib':
+        specifier: 0.3.0-beta.8
+        version: 0.3.0-beta.8
       '@utexo/wdk-wallet-rgb':
         specifier: 2.0.3
         version: 2.0.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.4.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.6.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.4.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.5)(debug@4.4.3)(typescript@7.0.2)

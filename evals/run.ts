@@ -2,14 +2,37 @@
 // verdict expected vs actual, precision/recall per verdict class, seconds per stage, and an outbound-connection check.
 // LLM_PROVIDER=qvac|openai|mock (default: qvac when LIVE_QVAC=1, else mock with perfect canned answers).
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import { Analyst } from '../packages/ai/src/analyst/analyze.js';
+import { groundExtraction, xmlText } from '../packages/ai/src/analyst/grounding.js';
+import { pdfText } from '../packages/ai/src/extract/text.js';
 import { createLlm, type LlmProviderKind } from '../packages/ai/src/llm/index.js';
 import { analysisReplies, EXPECTED, type ExpectedFixture, PAYEE_BOOK, sourceOf } from '../packages/ai/test/fixtures.js';
 import { CONFIG, historyOf } from '../packages/ai/test/helpers.js';
-import type { AnalysisReport, AppEvent, LlmProvider } from '../packages/core/src/index.js';
+import type { AnalysisReport, AppEvent, InvoiceSource, LlmProvider } from '../packages/core/src/index.js';
 import { MockLlm, MockWallet } from '../packages/core/src/mocks/index.js';
+import { decodeRgbInvoiceOffline } from '../packages/wallet/src/decode.js';
+
+const FIXTURES = resolve(import.meta.dirname, '../fixtures');
+
+/** The text a fixture prints (what grounding compares with): the file, the PDF text layer, or the image's source. */
+async function printedText(path: string, kind: string): Promise<string | undefined> {
+  if (kind === 'pdf') return pdfText(path);
+  if (kind === 'image') {
+    const src = resolve(FIXTURES, 'invoices/src', `${basename(path).replace(/\.[^.]+$/, '')}.txt`);
+    return existsSync(src) ? readFileSync(src, 'utf8') : undefined;
+  }
+  const text = readFileSync(path, 'utf8');
+  return kind === 'xml' ? xmlText(text) : text;
+}
+
+/** Fields in the output that the document does not print (invented by the model). */
+async function invented(r: AnalysisReport, src: InvoiceSource): Promise<string[] | undefined> {
+  const text = await printedText(src.path, src.kind);
+  return text === undefined ? undefined : groundExtraction(r.extraction, text).dropped;
+}
 
 const kind = (process.env.LLM_PROVIDER ?? (process.env.LIVE_QVAC === '1' ? 'qvac' : 'mock')) as LlmProviderKind;
 const NOW = new Date('2026-10-17T10:00:00Z');
@@ -120,6 +143,7 @@ async function main() {
   const totals: number[] = [];
   const weak: { id: string; score: number; why: string[] }[] = [];
   let verdictsOk = 0;
+  let inventedTotal = 0;
   /** [expected class, actual] per fixture; an accepted alternative ("review or block") counts as the actual one. */
   const pairs: [string, string][] = [];
 
@@ -150,6 +174,8 @@ async function main() {
 
     const fs = fieldScores(f, r);
     for (const k of FIELDS) if (fs[k]) fieldHits[k]++;
+    const inv = await invented(r, sourceOf(f));
+    if (inv) inventedTotal += inv.length;
     const expected = Array.isArray(f.verdict) ? f.verdict : [f.verdict];
     const vOk = expected.includes(r.verdict);
     if (vOk) verdictsOk++;
@@ -157,7 +183,7 @@ async function main() {
     const tm = r.timings ?? {};
     const sec = (ms?: number) => (ms === undefined ? '-' : (ms / 1000).toFixed(1));
     rows.push(
-      `| ${f.id} | ${FIELDS.map((k) => (fs[k] ? '✅' : '❌')).join(' | ')} | ${expected.join('/')} | ${vOk ? '✅' : '❌'} ${r.verdict} | ${r.flags.map((x) => x.code).join(', ') || '-'} | ${sec(tm.extractMs)} | ${sec(tm.summaryMs)} | ${secs.toFixed(1)} |`,
+      `| ${f.id} | ${FIELDS.map((k) => (fs[k] ? '✅' : '❌')).join(' | ')} | ${inv === undefined ? 'n/a' : inv.length ? `❌ ${inv.length} (${inv.join(', ')})` : '✅ 0'} | ${expected.join('/')} | ${vOk ? '✅' : '❌'} ${r.verdict} | ${r.flags.map((x) => x.code).join(', ') || '-'} | ${sec(tm.extractMs)} | ${sec(tm.summaryMs)} | ${secs.toFixed(1)} |`,
     );
     const ss = summaryScores(f, r);
     sumRows.push(
@@ -172,6 +198,56 @@ async function main() {
     why.push(`${secs.toFixed(1)} s`);
     weak.push({ id: f.id, score: (vOk ? 0 : 1000) + missed.length * 100 + sumMiss.length * 10 + secs / 10, why });
     console.log(`${f.id}: ${r.verdict} (${vOk ? 'ok' : 'MISS'}) ${secs.toFixed(1)} s`);
+  }
+
+  // Documents that are only an RGB payment request: decoded by rgb-lib's own parser (real, offline), no model call.
+  const prFile = JSON.parse(readFileSync(resolve(FIXTURES, 'payment-request-only/expected.json'), 'utf8')) as {
+    fixtures: {
+      id: string;
+      files: string[];
+      rgbInvoice: string;
+      verdict: string;
+      decoded: { amount?: string; expiresAt?: string };
+    }[];
+  };
+  const reqRows: string[] = [];
+  let prOk = 0;
+  let prCount = 0;
+  for (const f of prFile.fixtures) {
+    for (const file of f.files) {
+      prCount++;
+      const path = resolve(FIXTURES, 'payment-request-only', file);
+      const src: InvoiceSource = {
+        kind: file.endsWith('.pdf') ? 'pdf' : 'text',
+        path,
+        sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+        filename: file,
+      };
+      const wallet = new MockWallet({ now: () => NOW.getTime() });
+      const mockDecode = wallet.decodeInvoice.bind(wallet);
+      wallet.decodeInvoice = async (s: string) =>
+        s.startsWith('rgb:mock/') ? mockDecode(s) : decodeRgbInvoiceOffline(s);
+      const t = Date.now();
+      const r = await new Analyst({
+        llm: shared ?? new MockLlm({ replies: [] }),
+        wallet,
+        history: historyOf([], PAYEE_BOOK),
+        config: { ...CONFIG, networks: [...CONFIG.networks, 'signet'] },
+        now: () => NOW,
+        streamTokens: false,
+      }).analyze(src, { invoiceId: `${f.id}-${file}` }, () => {});
+      const secs = (Date.now() - t) / 1000;
+      const inv = (await invented(r, src)) ?? [];
+      inventedTotal += inv.length;
+      const pr = r.paymentRequest;
+      const factsOk = pr?.amount === f.decoded.amount && pr?.expiresAt === f.decoded.expiresAt;
+      const ok = r.kind === 'payment_request' && r.verdict === f.verdict && factsOk && inv.length === 0;
+      if (ok) prOk++;
+      reqRows.push(
+        `| ${f.id} | ${file} | ${r.kind ?? 'invoice'} | ${pr?.amount ?? 'open (user types it)'} | ${pr?.expiresAt ?? '-'} | ${factsOk ? '✅' : '❌'} | ${inv.length ? `❌ ${inv.join(', ')}` : '✅ 0'} | ${f.verdict} | ${r.verdict === f.verdict ? '✅' : '❌'} ${r.verdict} | ${r.flags.map((x) => x.code).join(', ')} | ${secs.toFixed(2)} |`,
+      );
+      console.log(`${f.id} ${file}: ${r.kind} ${r.verdict} (${ok ? 'ok' : 'MISS'}) ${secs.toFixed(2)} s`);
+    }
   }
 
   const n = EXPECTED.length;
@@ -204,11 +280,21 @@ Confusion (rows expected, columns actual):
 ${confusion.join('\n')}
 
 ## Extraction (call 1) and verdict, per fixture
-| fixture | ${FIELDS.join(' | ')} | expected | verdict | flags | extract s | summary s | total s |
-|---|${FIELDS.map(() => '---').join('|')}|---|---|---|---|---|---|
+"invented" = fields in the output that the document does not print (grounding check: text, PDF text layer, or the image's source text in fixtures/invoices/src; n/a when there is none).
+| fixture | ${FIELDS.join(' | ')} | invented | expected | verdict | flags | extract s | summary s | total s |
+|---|${FIELDS.map(() => '---').join('|')}|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 Field accuracy: ${FIELDS.map((k) => `${k} ${fieldHits[k]}/${n}`).join(' · ')}
+
+**Invented fields: ${inventedTotal}** (all fixtures, including the payment requests below).
+
+## Only a payment request (fixtures/payment-request-only)
+Decoded by rgb-lib's own parser (\`Invoice\`, no wallet, no network); no model call. Expected: kind payment_request, amount and expiry from the decode, no invoice field.
+**${prOk}/${prCount}** as expected.
+| fixture | file | kind | amount (base units) | expires | decoded facts | invented | expected | verdict | flags | s |
+|---|---|---|---|---|---|---|---|---|---|---|
+${reqRows.join('\n')}
 
 ## Summary (call 2), per fixture
 Call 2 receives only validated fields and code-written flag messages, never the document.
@@ -231,10 +317,10 @@ Reproduce by hand while an analysis runs: \`ss -tnp state established | grep -E 
 `;
   writeFileSync(resolve(import.meta.dirname, process.env.EVAL_OUT ?? 'RESULTS.md'), md);
   console.log(
-    `\nverdicts ${verdictsOk}/${n} · median ${median(totals).toFixed(1)} s · outbound: ${connections.size ? [...connections].join('; ') : 'none'} → evals/RESULTS.md`,
+    `\nverdicts ${verdictsOk}/${n} · payment requests ${prOk}/${prCount} · invented fields ${inventedTotal} · median ${median(totals).toFixed(1)} s · outbound: ${connections.size ? [...connections].join('; ') : 'none'} → evals/RESULTS.md`,
   );
   await shared?.unload?.();
-  process.exit(verdictsOk === n ? 0 : 1);
+  process.exit(verdictsOk === n && prOk === prCount ? 0 : 1);
 }
 
 await main();

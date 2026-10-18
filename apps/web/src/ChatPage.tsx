@@ -9,14 +9,15 @@ import {
   fiscalFilename,
   fiscalFromToolCall,
   type NeedsConfirmation,
-  receiveFromToolCall,
   type ToolCall,
   toolChipText,
   toolLink,
 } from './lib/ledger.js';
+import { receiveIdOf } from './lib/receive.js';
 import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type VoiceRecording } from './lib/voice.js';
 import { Markdown } from './Markdown.js';
-import { CopyButton, ErrorBox, errorText, useToast } from './ui.js';
+import { ReceiveCard } from './ReceiveCard.js';
+import { ErrorBox, errorText, useToast } from './ui.js';
 
 const bubble = (role: ChatTurn['role']) =>
   ({
@@ -238,6 +239,18 @@ function ReplyExtras({ api, reply, restored }: { api: ApiClient; reply: ChatResp
           ))}
         </div>
       )}
+      {/* Payment requests made in this reply: read from the server by ID (live status, still there after a reload). */}
+      {reply.toolCalls.flatMap((c, i) => {
+        const id = c.name === 'create_receive_invoice' && c.ok ? receiveIdOf(c.result) : undefined;
+        return id ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: tool calls have no ID and never reorder
+          <div key={`rcv-${i}`} style={{ marginTop: 8 }}>
+            <ReceiveCard api={api} receiveId={id} variant="chat" />
+          </div>
+        ) : (
+          []
+        );
+      })}
       {reply.needsConfirmation &&
         (restored ? (
           <p style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)', margin: '6px 0 0' }}>
@@ -255,7 +268,6 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
   const fiscal = fiscalFromToolCall(call);
   const url = fiscal ? api.fiscalUrl(fiscal) : null;
   const link = toolLink(call);
-  const request = receiveFromToolCall(call);
   return (
     <span
       title={`Tool: ${call.name}${call.error ? `. ${call.error}` : ''}`}
@@ -268,12 +280,6 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
       }}
     >
       {toolChipText(call)}
-      {request && (
-        <>
-          {' '}
-          <CopyButton value={request} what="Payment request" />
-        </>
-      )}
       {link && (
         <>
           {' '}

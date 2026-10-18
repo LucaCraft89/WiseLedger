@@ -22,10 +22,14 @@ import {
   isWalletError,
   type LightningStatusResponse,
   type LlmInfo,
+  type ReceiveRequestDto,
+  ReceivesListQuery,
   type ReceivesListResponse,
   RejectRequest,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  SetAmountRequest,
+  type SetAmountResponse,
   type TranscribeResponse,
   type TransferDetailResponse,
   type TransferDto,
@@ -336,6 +340,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     streamInvoiceEvents(store, id, req, reply);
   });
 
+  // Open-amount payment request: the user types the amount; the server checks it and prepares the plan to confirm.
+  route(
+    app,
+    API_ROUTES.setInvoiceAmount,
+    async (req): Promise<SetAmountResponse> =>
+      orchestrator.setAmount(idParam(req), SetAmountRequest.parse(req.body ?? {}).amount),
+  );
+
   route(app, API_ROUTES.confirmInvoice, async (req) =>
     orchestrator.confirm(idParam(req), ConfirmRequest.parse(req.body ?? {})),
   );
@@ -406,14 +418,51 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(body.amount ? { amount: body.amount } : {}),
     });
     // Remembered so the app can tell when it is paid (matched after each wallet sync).
-    deps.receives.add(inv, body.note);
+    const stored = deps.receives.add(inv, body.note);
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
       ...(inv.assetId ? { assetId: inv.assetId } : {}),
       ...(inv.amount ? { amount: inv.amount } : {}),
+      receiveId: stored.receiveId,
     };
   });
+
+  // Payment requests handed out, newest first, one page at a time (main list or "Older requests").
+  route(app, API_ROUTES.walletReceives, async (req): Promise<ReceivesListResponse> => {
+    const q = ReceivesListQuery.parse(req.query ?? {});
+    deps.receives.reconcile(await wallet.listTransfers());
+    return deps.receives.page({
+      older: q.archived === '1',
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.limit ? { limit: q.limit } : {}),
+      ...(q.before ? { before: q.before } : {}),
+    });
+  });
+
+  // One request with its live status (chat card, Get paid detail).
+  route(app, API_ROUTES.walletReceiveGet, async (req): Promise<ReceiveRequestDto> => {
+    const id = (req.params as { receiveId: string }).receiveId;
+    const before = deps.receives.get(id);
+    if (!before) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this payment request.');
+    if (before.status === 'waiting' || before.status === 'incoming' || before.status === 'cancelled') {
+      deps.receives.reconcile(await wallet.listTransfers());
+    }
+    return deps.receives.get(id) as ReceiveRequestDto;
+  });
+
+  route(app, API_ROUTES.walletReceiveCancel, async (req): Promise<ReceiveRequestDto> => {
+    const id = (req.params as { receiveId: string }).receiveId;
+    // Look at the wallet first: a payment already on its way must refuse the cancel.
+    if (deps.receives.get(id)?.status === 'waiting') deps.receives.reconcile(await wallet.listTransfers());
+    return deps.receives.cancel(id);
+  });
+
+  route(
+    app,
+    API_ROUTES.walletReceiveArchive,
+    async (req): Promise<ReceiveRequestDto> => deps.receives.archive((req.params as { receiveId: string }).receiveId),
+  );
 
   // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
   // Voice: raw audio (audio/wav from the browser) → text for the chat box. Never executes anything by itself.
@@ -431,11 +480,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       );
     }
     return deps.transcriber.transcribe(req.body, req.headers['content-type']);
-  });
-
-  route(app, API_ROUTES.walletReceives, async (): Promise<ReceivesListResponse> => {
-    deps.receives.reconcile(await wallet.listTransfers());
-    return { receives: deps.receives.list() };
   });
 
   // Lightning node and channels (Wallet page panel); off when the backend has no Lightning rail.

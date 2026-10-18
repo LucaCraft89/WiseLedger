@@ -495,7 +495,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         ...(req.amount ? { amount: req.amount } : {}),
         expirySec: (req.expiryMinutes ?? 60) * 60,
       });
-      const at = new Date().toISOString();
+      // Strictly increasing, so the `before` cursor never skips two requests made in the same millisecond.
+      const last = receiveList[0] ? Date.parse(receiveList[0].createdAt) : 0;
+      const at = new Date(Math.max(Date.now(), last + 1)).toISOString();
       receiveList.unshift({
         receiveId: `rcv_fake_${receiveList.length + 1}`,
         rgbInvoice: inv.rgbInvoice,
@@ -513,10 +515,63 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
+        receiveId: receiveList[0]?.receiveId,
       };
     },
-    async receives() {
-      return { receives: receiveList.map((r) => ({ ...r })) };
+    async receives(q = {}) {
+      // Same rules as the server: expired after expiresAt; "older" = archived or closed for a day.
+      const now = Date.now();
+      for (const r of receiveList) {
+        if (r.status === 'waiting' && Date.parse(r.expiresAt) < now)
+          Object.assign(r, { status: 'expired', updatedAt: new Date(now).toISOString() });
+      }
+      const older = (r: ReceiveRequestDto) =>
+        !!r.archivedAt ||
+        (['expired', 'cancelled', 'failed'].includes(r.status) && now - Date.parse(r.updatedAt) > 86_400_000);
+      const groups: Record<string, string[]> = {
+        open: ['waiting', 'incoming'],
+        paid: ['received'],
+        closed: ['expired', 'cancelled', 'failed'],
+      };
+      const rows = receiveList
+        .filter((r) => older(r) === (q.archived === '1'))
+        .filter((r) => !q.status || q.status === 'all' || (groups[q.status] ?? []).includes(r.status))
+        .filter((r) => !q.before || r.createdAt < q.before);
+      const limit = q.limit ?? 20;
+      const page = rows.slice(0, limit).map((r) => ({ ...r, older: older(r) }));
+      const last = page.at(-1);
+      return { receives: page, ...(rows.length > limit && last ? { nextBefore: last.createdAt } : {}) };
+    },
+    async receiveGet(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      return { ...r };
+    },
+    async receiveCancel(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      if (r.status === 'incoming')
+        throw new ApiCallError('PAYMENT_ON_ITS_WAY', 'Someone is already paying this request. Wait for it to arrive.');
+      if (r.status !== 'waiting')
+        throw new ApiCallError('NOT_OPEN', `This request is already ${r.status}: there is nothing to cancel.`);
+      const at = new Date().toISOString();
+      Object.assign(r, { status: 'cancelled', cancelledAt: at, updatedAt: at });
+      return { ...r };
+    },
+    async receiveArchive(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      if (r.status === 'waiting' || r.status === 'incoming') {
+        throw new ApiCallError(
+          'STILL_OPEN',
+          'This request can still be paid. Cancel it first, or wait until it is paid or expires.',
+        );
+      }
+      r.archivedAt ??= new Date().toISOString();
+      return { ...r };
+    },
+    async setAmount() {
+      throw new ApiCallError('NOT_AVAILABLE', 'Demo mode has no payment-request-only invoices.');
     },
     async lightning() {
       // Only what the mock wallet itself reports; a wallet without Lightning means off.

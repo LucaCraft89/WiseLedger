@@ -1,0 +1,1 @@
+rgb:~/~/aaCVD/sb:utxob:OiCN9BJP-csFGkap-UrN1YGG-r4tsf22-wu2BlM0-j_aOyfu-ETU0w?assignment_name=assetOwner&expiry=1792566489&endpoints=rpcs://proxy.kaleidoswap.com/json-rpc

@@ -45,6 +45,7 @@ export interface AppOptions {
     | 'onSynced'
     | 'syncBusy'
     | 'onReceiveCreated'
+    | 'checkPaymentRequest'
     | 'labels'
     | 'jobs'
     | 'fiscalFor'
@@ -75,8 +76,16 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       guardStore,
       onSynced: () => settle(),
       syncBusy: () => receives.waitingRecently(),
-      onReceiveCreated: (inv) => {
-        receives.add(inv, 'Made in chat');
+      // The chat card is rendered from this stored request (by receiveId), so it survives a reload.
+      onReceiveCreated: (inv) => ({ receiveId: receives.add(inv, 'Made in chat').receiveId }),
+      // "pay this: rgb:…" in the chat opens the same check as an upload; nothing is paid from the chat.
+      checkPaymentRequest: async (text) => {
+        const created = await orchestrator.createInvoice({
+          filename: 'payment-request.txt',
+          mimeType: 'text/plain',
+          data: Buffer.from(text, 'utf8'),
+        });
+        return { invoiceId: created.id };
       },
       labels,
       jobs,
@@ -113,6 +122,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     treasurer,
     wallet,
     uploadDir: config.uploadDir,
+    paymentCap: config.paymentCap,
     schedule: (input) => (scheduler as Scheduler).schedule(input),
   });
   scheduler = new Scheduler({

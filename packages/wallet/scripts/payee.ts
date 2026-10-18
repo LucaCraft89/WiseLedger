@@ -1,7 +1,9 @@
 // Payee wallet (own mnemonic and data dir). Usage:
 //   pnpm -F wallet payee status            BTC + assets
 //   pnpm -F wallet payee address           funding address
-//   pnpm -F wallet payee invoice <amount>  blind RGB invoice (base units, no assetId: the payer names the asset)
+//   pnpm -F wallet payee invoice [amount|any] [hours]
+//                                          blind RGB invoice (base units, no assetId: the payer names the asset;
+//                                          `any` = open amount, the payer types it), valid 1 h by default
 //   pnpm -F wallet payee refresh           refresh transfers once
 //   pnpm -F wallet payee watch             refresh every 10 s (the supplier side during a demo: accepts consignments)
 //   pnpm -F wallet payee pay <rgbInvoice> [amount]
@@ -17,7 +19,10 @@ switch (cmd) {
     break;
   case 'invoice': {
     await w.createUtxosIfNeeded();
-    const inv = await w.createReceiveInvoice({ ...(arg ? { amount: arg } : {}), expirySec: 3600 });
+    const hours = arg2 ? Number(arg2) : 1;
+    if (!(hours > 0 && hours <= 24 * 30)) throw new Error('hours must be a number between 0 and 720');
+    const amount = arg && arg !== 'any' ? arg : undefined;
+    const inv = await w.createReceiveInvoice({ ...(amount ? { amount } : {}), expirySec: Math.round(hours * 3600) });
     log('payee', `invoice expires ${inv.expiresAt}`);
     console.log(inv.rgbInvoice);
     break;

@@ -118,11 +118,23 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
 }
 
 /** Button that copies `value` and confirms with a toast. */
-export function CopyButton({ value, label = 'Copy', what = 'Text' }: { value: string; label?: string; what?: string }) {
+export function CopyButton({
+  value,
+  label = 'Copy',
+  what = 'Text',
+  large = false,
+}: {
+  value: string;
+  label?: string;
+  what?: string;
+  /** The screen's main action: a full-size primary button (44 px) instead of a quiet text button. */
+  large?: boolean;
+}) {
   const toast = useToast();
   return (
     <button
-      className="wl-quiet"
+      className={large ? undefined : 'wl-quiet'}
+      style={large ? { minHeight: 44, padding: '8px 20px', fontSize: '1.05em' } : undefined}
       type="button"
       onClick={() => {
         if (!navigator.clipboard) {

@@ -73,8 +73,10 @@ export interface ProviderOptions {
   guardStore: GuardStore;
   /** Called after every successful wallet sync (the orchestrator settles EXECUTING invoices). */
   onSynced?: () => void;
-  /** A payment request made in the Treasurer chat (the server lists it under "Get paid"). */
-  onReceiveCreated?: (inv: ReceiveInvoice) => void;
+  /** A payment request made in the Treasurer chat (the server lists it under "Get paid"); returns the stored ID. */
+  onReceiveCreated?: (inv: ReceiveInvoice) => { receiveId: string } | undefined;
+  /** A payment request pasted in the chat: opened as an invoice to check (never paid from the chat). */
+  checkPaymentRequest?: (text: string) => Promise<{ invoiceId: string }>;
   /** Extra "keep syncing fast" signal from the server (open receive requests); pending transfers are checked here. */
   syncBusy?: () => boolean;
   /** Persistent stores from the server (in-memory ones when absent, e.g. in provider unit tests). */
@@ -330,6 +332,7 @@ function realAi(
       fiscal: stores.fiscal,
       ...(opts.chatInvoices ? { invoices: opts.chatInvoices } : {}),
       ...(opts.onReceiveCreated ? { onReceiveCreated: opts.onReceiveCreated } : {}),
+      ...(opts.checkPaymentRequest ? { checkPaymentRequest: opts.checkPaymentRequest } : {}),
     }),
     llmStatus: () => {
       return runtime.status();

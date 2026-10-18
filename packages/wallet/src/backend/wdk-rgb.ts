@@ -31,6 +31,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { toDecodedInvoice } from '../decode.js';
 import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { type ReadRetryOptions, withReadRetry } from '../retry.js';
@@ -446,16 +447,7 @@ export class WdkRgbWallet implements WalletPort {
     } catch {
       throw new InvalidInvoice();
     }
-    const amount = assignmentAmount(d.assignment);
-    return {
-      rgbInvoice,
-      recipientId: d.recipientId,
-      ...(d.assetId ? { assetId: d.assetId } : {}),
-      ...(amount ? { amount } : {}),
-      network: String(d.network),
-      ...(d.expirationTimestamp ? { expiresAt: iso(d.expirationTimestamp) } : {}),
-      transportEndpoints: d.transportEndpoints ?? [],
-    };
+    return toDecodedInvoice(rgbInvoice, d);
   }
 
   async quotePay(req: PaymentRequest): Promise<QuoteResult> {
@@ -620,8 +612,3 @@ export class WdkRgbWallet implements WalletPort {
 }
 
 /** rgb-lib Assignment: { Fungible: n } (or { type, value } in some bindings); returns base units or undefined. */
-function assignmentAmount(a: Record<string, unknown> | undefined): string | undefined {
-  if (!a) return undefined;
-  const v = a.Fungible ?? a.fungible ?? (a.type === 'Fungible' ? a.value : undefined);
-  return typeof v === 'number' && v > 0 ? String(v) : undefined;
-}
