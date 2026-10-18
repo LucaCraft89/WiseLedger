@@ -1,6 +1,6 @@
 // Analyst call 2: a plain-language summary from the VALIDATED fields and the rule flags only.
 // It never receives the original document text, so instructions hidden in the invoice cannot reach it.
-import type { InvoiceExtraction, LlmProvider, RiskFlag, Verdict } from 'core';
+import type { InvoiceExtraction, LlmProvider, RgbCheckLine, RiskFlag, Verdict } from 'core';
 import { z } from 'zod';
 
 export const SUMMARY_SYSTEM = [
@@ -29,7 +29,12 @@ const VERDICT_WORDS: Record<Verdict, string> = {
 };
 
 /** The only invoice data call 2 sees: short validated fields, code-written flag messages, no evidence quotes. */
-export function summaryFacts(extraction: InvoiceExtraction, flags: RiskFlag[], verdict: Verdict): string {
+export function summaryFacts(
+  extraction: InvoiceExtraction,
+  flags: RiskFlag[],
+  verdict: Verdict,
+  rgbCheck?: readonly RgbCheckLine[],
+): string {
   const cut = (s: string | undefined, n = 60) => (s ? s.replace(/\s+/g, ' ').slice(0, n) : 'unknown');
   const lines = extraction.lineItems
     .slice(0, 5)
@@ -45,6 +50,10 @@ export function summaryFacts(extraction: InvoiceExtraction, flags: RiskFlag[], v
     `Verdict (decided by rules): ${VERDICT_WORDS[verdict]}`,
     'Rule results:',
     ...(flags.length ? flags.map((f) => `- [${f.severity}] ${f.message}`) : ['- no problems found']),
+    // Pass/fail list only (check name + result), never the payment request string itself.
+    ...(rgbCheck?.length
+      ? ['RGB payment request check:', ...rgbCheck.map((c) => `- ${c.check.replace(/_/g, ' ')}: ${c.result}`)]
+      : []),
   ].join('\n');
 }
 
@@ -61,13 +70,13 @@ export async function summarize(
   flags: RiskFlag[],
   verdict: Verdict,
   llm: LlmProvider,
-  opts: { signal?: AbortSignal; onToken?: (t: string) => void } = {},
+  opts: { signal?: AbortSignal; onToken?: (t: string) => void; rgbCheck?: readonly RgbCheckLine[] } = {},
 ): Promise<SummaryResult> {
   const started = Date.now();
   const req = {
     messages: [
       { role: 'system' as const, content: SUMMARY_SYSTEM },
-      { role: 'user' as const, content: summaryFacts(extraction, flags, verdict) },
+      { role: 'user' as const, content: summaryFacts(extraction, flags, verdict, opts.rgbCheck) },
     ],
     temperature: 0.2,
     maxTokens: 300,
