@@ -82,6 +82,17 @@ export const ConfirmRequest = z.object({
 });
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
 
+// POST /api/invoices/:id/amount — open-amount payment request: the user types the amount before confirming.
+// Validated by the server (> 0, ≤ payment cap, ≤ spendable); returns the plan and sentence to confirm.
+export const SetAmountRequest = z.object({ amount: BaseUnits });
+export type SetAmountRequest = z.infer<typeof SetAmountRequest>;
+export const SetAmountResponse = z.object({
+  invoiceId: z.string(),
+  plan: PaymentPlanDto,
+  confirmationSentence: z.string(),
+});
+export type SetAmountResponse = z.infer<typeof SetAmountResponse>;
+
 export const ConfirmResponse = z.object({
   invoiceId: z.string(),
   state: InvoiceStateDto,
@@ -167,6 +178,18 @@ export const WalletReceiveRequest = z.object({
     .optional(),
   /** Who should pay or what for ("Acme, refund October"); shown in the payment request list (M4). */
   note: z.string().trim().max(120).optional(),
+  /** Who pays you ("Acme Srl"); `note` is then filled as "payer · purpose" for older readers. */
+  payer: z.string().trim().max(80).optional(),
+  /** What it is for ("October hosting"). */
+  purpose: z.string().trim().max(120).optional(),
+  /** How long the request stays valid, in seconds (1 h … 30 days; outside → 400). Wins over expiryMinutes. */
+  expirySec: z.number().int().positive().optional(),
+  /** Valid until this ISO time (1 h … 30 days from now; outside → 400). Use either this or expirySec. */
+  validUntil: IsoDateTime.optional(),
+  /** Where the request is made (default form; the web's invoice PDF says invoice_pdf). */
+  madeIn: z.enum(['form', 'invoice_pdf']).optional(),
+  /** `lightning` = instant, over the channel (needs assetId + amount, within the channel's room); default on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -175,6 +198,9 @@ export const WalletReceiveResponse = z.object({
   expiresAt: IsoDateTime,
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
+  /** The stored request (open it again under Wallet › Get paid, #/wallet/get-paid/<receiveId>). */
+  receiveId: z.string().optional(),
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type WalletReceiveResponse = z.infer<typeof WalletReceiveResponse>;
 
@@ -199,6 +225,44 @@ export type TransferDto = z.infer<typeof TransferDto>;
 
 export const TransfersResponse = z.object({ transfers: z.array(TransferDto) });
 export type TransfersResponse = z.infer<typeof TransfersResponse>;
+
+// GET /api/transfers/:id — one transfer with everything the "How this was settled" card shows, in one call.
+export const TransferDetailResponse = z.object({
+  transfer: TransferDto.extend({
+    /** wallet.ts TransferInfo.direction (the DTO's in/out folds issuance into in). */
+    kind: z.enum(['outgoing', 'incoming', 'issuance']),
+    rail: z.enum(['onchain', 'lightning']),
+    sealType: z.enum(['blinded', 'witness']).optional(),
+    recipientId: z.string().optional(),
+    transportEndpoints: z.array(z.string()).optional(),
+    expiresAt: IsoDateTime.optional(),
+    settledAt: IsoDateTime.optional(),
+  }),
+  asset: z
+    .object({
+      assetId: z.string(),
+      ticker: z.string(),
+      name: z.string(),
+      precision: z.number().int(),
+      schema: z.literal('NIA'),
+    })
+    .optional(),
+  /** When each status was first seen (server events; WaitingCounterparty = created, Settled = rgb-lib settle time). */
+  statusTimes: z.partialRecord(TransferStatusSchema, IsoDateTime),
+  invoice: z
+    .object({
+      invoiceId: z.string(),
+      filename: z.string(),
+      issuerName: z.string().optional(),
+      invoiceNumber: z.string().optional(),
+    })
+    .optional(),
+  /** Lightning only: the channel the payment used (from the node's channels for this asset). */
+  lightning: z
+    .object({ paymentHash: z.string(), channelId: z.string().optional(), peer: z.string().optional() })
+    .optional(),
+});
+export type TransferDetailResponse = z.infer<typeof TransferDetailResponse>;
 
 // POST /api/agent/chat
 export const ChatRequest = z.object({
@@ -333,9 +397,15 @@ export const FiscalQuery = z.object({
 });
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
+/** The product's one character: the owl. Every screen and prompt takes the name from here. */
+export const OWL_NAME = 'Wise';
+/** What the owl is doing, shown as a status chip next to the existing owl image (never a new drawing). */
+export const OwlMood = z.enum(['reading', 'thinking', 'all_good', 'stopped', 'waiting_bitcoin', 'paid']);
+export type OwlMood = z.infer<typeof OwlMood>;
+
 /** Route table, for clients and docs. */
 // GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
-export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed']);
+export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed', 'cancelled']);
 export type ReceiveStatus = z.infer<typeof ReceiveStatus>;
 export const ReceiveRequestDto = z.object({
   receiveId: z.string(),
@@ -351,9 +421,41 @@ export const ReceiveRequestDto = z.object({
   createdAt: z.string(),
   expiresAt: z.string(),
   updatedAt: z.string(),
+  /** Set when the user cancelled it; with status `received` the money arrived after the cancel. */
+  cancelledAt: z.string().optional(),
+  /** Set when the user archived it (it then lists under "Older requests"). */
+  archivedAt: z.string().optional(),
+  /** True when it lists under "Older requests" (archived, closed > 24 h ago, or received > 7 days ago). */
+  older: z.boolean().optional(),
+  /** Who pays (Get paid form "Who pays you?"). */
+  payer: z.string().optional(),
+  /** What it is for. */
+  purpose: z.string().optional(),
+  /** Where it was made: the Get paid form, the chat, or an invoice PDF. Absent on requests made before M5. */
+  madeIn: z.enum(['form', 'chat', 'invoice_pdf']).optional(),
+  /** `lightning` for an RGB Lightning request (rgbInvoice is then an lntbs… invoice); absent = on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
-export const ReceivesListResponse = z.object({ receives: z.array(ReceiveRequestDto) });
+
+/** Filter groups for GET /api/wallet/receives?status=: open = waiting + incoming, paid = received, closed = the rest. */
+export const ReceiveFilter = z.enum(['open', 'paid', 'closed', 'all']);
+export type ReceiveFilter = z.infer<typeof ReceiveFilter>;
+// GET /api/wallet/receives?status=&archived=&limit=&before= — newest first, cursor = createdAt of the last row.
+export const ReceivesListQuery = z.object({
+  status: ReceiveFilter.optional(),
+  /** "1" = only "Older requests", "0" (default) = the main list. */
+  archived: z.enum(['0', '1']).optional(),
+  /** Default 20, max 100. */
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  before: z.string().optional(),
+});
+export type ReceivesListQuery = z.infer<typeof ReceivesListQuery>;
+export const ReceivesListResponse = z.object({
+  receives: z.array(ReceiveRequestDto),
+  /** Present when there are more rows: pass it as `before` for the next page. */
+  nextBefore: z.string().optional(),
+});
 export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
 
 // POST /api/agent/transcribe: body = raw audio bytes (Content-Type audio/wav, 16 kHz mono preferred), max 2 MB / 30 s.
@@ -382,19 +484,194 @@ export const LightningStatusResponse = z.object({
 });
 export type LightningStatusResponse = z.infer<typeof LightningStatusResponse>;
 
+// GET /api/desk — the Money Desk home in one call. Built by code from local state only (store, payment requests,
+// scheduled jobs, the wallet's last synced state, /api/health problems): no model call, no wallet sync awaited.
+export const DeskNeedsKind = z.enum([
+  'awaiting_confirmation',
+  'review_verdict',
+  'due_soon',
+  'scheduled_today',
+  'request_expiring',
+  'low_fee_balance',
+  'health_problem',
+  /** No Bitcoin for fees at all (below the cost of one RGB send): listed first. */
+  'no_fee_money',
+]);
+export type DeskNeedsKind = z.infer<typeof DeskNeedsKind>;
+export const DeskLatelyKind = z.enum(['paid', 'received', 'blocked', 'scheduled', 'checked']);
+export type DeskLatelyKind = z.infer<typeof DeskLatelyKind>;
+/** The one next step for an item: a button label and the app page it opens ("#/invoice/<id>"). */
+export const DeskAction = z.object({ label: z.string(), href: z.string() });
+export type DeskAction = z.infer<typeof DeskAction>;
+export const DeskNeedsItem = z.object({
+  kind: DeskNeedsKind,
+  /** Stable per item (invoice, receive or job id; "health-<n>", "fee-balance"). */
+  id: z.string(),
+  /** Plain text built by code; supplier names are cleaned and instruction-like names hidden. */
+  title: z.string(),
+  /** When it is due, expires or runs. */
+  dueAt: IsoDateTime.optional(),
+  action: DeskAction,
+  /** Base units the item is about (invoice amount, request amount). */
+  amount: BaseUnits.optional(),
+  assetId: z.string().optional(),
+  /** ok = nothing wrong, review = read the warnings, block = something stops you. */
+  tone: z.enum(['ok', 'review', 'block']).optional(),
+  /** Same as action.label (kept separate for the card button). */
+  actionLabel: z.string().optional(),
+});
+export type DeskNeedsItem = z.infer<typeof DeskNeedsItem>;
+export const DeskLatelyItem = z.object({
+  kind: DeskLatelyKind,
+  id: z.string(),
+  title: z.string(),
+  amount: BaseUnits.optional(),
+  assetId: z.string().optional(),
+  at: IsoDateTime,
+  /** Money in, out, or none (a stopped or checked invoice moved nothing). */
+  direction: z.enum(['in', 'out', 'none']).optional(),
+  stamp: z.enum(['PAID', 'STOPPED', 'CHECKED', 'SCHEDULED', 'RECEIVED']).optional(),
+});
+export type DeskLatelyItem = z.infer<typeof DeskLatelyItem>;
+export const DeskResponse = z.object({
+  greetingCounts: z.object({
+    /** All items that need the user (needsYou shows at most 5). */
+    needsYou: z.number().int().nonnegative(),
+    /** Unpaid invoices due in the next 7 days (or overdue). */
+    dueThisWeek: z.number().int().nonnegative(),
+    /** Scheduled payments still to run. */
+    scheduled: z.number().int().nonnegative(),
+    /** Open payment requests (waiting or incoming). */
+    waitingToBePaid: z.number().int().nonnegative(),
+  }),
+  balances: z.array(
+    z.object({ assetId: z.string(), ticker: z.string(), spendable: BaseUnits, precision: z.number().int().min(0) }),
+  ),
+  /** Spendable test sats for network fees; absent when the wallet does not expose them (mock, not ready). */
+  feeSats: BaseUnits.optional(),
+  /** Max 5, most urgent first. */
+  needsYou: z.array(DeskNeedsItem).max(5),
+  /** Max 5, newest first. */
+  lately: z.array(DeskLatelyItem).max(5),
+  /** The wallet state is the last background sync, not a live read: "Updated 12 s ago". */
+  updated: z.object({
+    at: IsoDateTime.optional(),
+    secondsAgo: z.number().int().nonnegative().optional(),
+    text: z.string(),
+  }),
+  /** busy = an analysis or payment is running now; attention = needsYou is not empty; quiet = nothing to do. */
+  mood: z.enum(['busy', 'attention', 'quiet']).optional(),
+  /** This calendar month (server local time). Invoices sent twice count once. */
+  month: z
+    .object({
+      invoicesRead: z.number().int().nonnegative(),
+      invoicesStopped: z.number().int().nonnegative(),
+      /** Sum of the amounts of the stopped invoices, per asset (base units). */
+      protectedAmount: z.array(z.object({ assetId: z.string(), amount: BaseUnits })),
+      paymentsMade: z.number().int().nonnegative(),
+      received: z.number().int().nonnegative(),
+    })
+    .optional(),
+  /** Last successful wallet sync (same as updated.at); absent before the first sync. */
+  syncedAt: IsoDateTime.optional(),
+  /** True once the user went through "I saved my recovery words" in onboarding. */
+  recoveryWordsSaved: z.boolean().optional(),
+});
+export type DeskResponse = z.infer<typeof DeskResponse>;
+
+// GET /api/books?assetId=&limit=&before= — the asset's ledger with a running balance, newest first.
+export const BooksQuery = z.object({
+  /** Default: the one payment asset (first NIA asset held). */
+  assetId: z.string().optional(),
+  /** Default 20, max 100. */
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  /** `nextBefore` of the previous page. */
+  before: z.string().optional(),
+});
+export type BooksQuery = z.infer<typeof BooksQuery>;
+export const BookStamp = z.enum(['PAID', 'RECEIVED', 'ISSUED', 'PENDING', 'FAILED']);
+export type BookStamp = z.infer<typeof BookStamp>;
+export const BookRow = z.object({
+  /** Settle time for settled rows, else the creation time. */
+  at: IsoDateTime,
+  kind: z.enum(['payment', 'receipt', 'issuance']),
+  /** Plain text built by code ("Paid Acme Srl", "Received from Beta Spa · October hosting"). */
+  title: z.string(),
+  counterparty: z.string().optional(),
+  in: BaseUnits.optional(),
+  out: BaseUnits.optional(),
+  /** Network fee in sats, when known. */
+  fee: z.string().optional(),
+  /** Settled balance after this row; null while pending or for a failed transfer. */
+  balanceAfter: BaseUnits.nullable(),
+  pending: z.boolean().optional(),
+  transferId: z.string().optional(),
+  invoiceId: z.string().optional(),
+  receiveId: z.string().optional(),
+  stamp: BookStamp,
+  labels: z.array(z.string()),
+});
+export type BookRow = z.infer<typeof BookRow>;
+export const BooksResponse = z.object({
+  assetId: z.string().optional(),
+  ticker: z.string().optional(),
+  precision: z.number().int().min(0).optional(),
+  /** On-chain settled + our side of the Lightning channels; equals the newest settled row's balanceAfter. */
+  settledBalance: BaseUnits,
+  /** The Lightning part of settledBalance (absent when Lightning is off). */
+  lightningBalance: BaseUnits.optional(),
+  rows: z.array(BookRow),
+  nextBefore: z.string().optional(),
+});
+export type BooksResponse = z.infer<typeof BooksResponse>;
+
+// GET /api/receipts/:transferId — a settled payment (in or out) as a receipt; 404 for anything else.
+export const ReceiptResponse = z.object({
+  transferId: z.string(),
+  direction: z.enum(['in', 'out']),
+  payerName: z.string(),
+  payeeName: z.string(),
+  invoiceNumber: z.string().optional(),
+  amount: BaseUnits,
+  asset: z.object({ assetId: z.string(), ticker: z.string(), precision: z.number().int().min(0) }),
+  rail: z.enum(['onchain', 'lightning']),
+  txid: z.string().optional(),
+  paymentHash: z.string().optional(),
+  settledAt: IsoDateTime,
+  planId: z.string().optional(),
+  verdict: z.enum(['ok', 'review', 'block']).optional(),
+  invoiceId: z.string().optional(),
+  receiveId: z.string().optional(),
+  labels: z.array(z.string()),
+});
+export type ReceiptResponse = z.infer<typeof ReceiptResponse>;
+
+// GET /api/payees?q= — "Who pays you?" suggestions: payee book + earlier payers, max 8.
+export const PayeesResponse = z.object({ names: z.array(z.string()).max(8) });
+export type PayeesResponse = z.infer<typeof PayeesResponse>;
+
 export const API_ROUTES = {
+  desk: 'GET /api/desk',
+  books: 'GET /api/books',
+  receipt: 'GET /api/receipts/:transferId',
+  payees: 'GET /api/payees',
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
   getInvoice: 'GET /api/invoices/:id',
   invoiceEvents: 'GET /api/invoices/:id/events',
   confirmInvoice: 'POST /api/invoices/:id/confirm',
   rejectInvoice: 'POST /api/invoices/:id/reject',
+  setInvoiceAmount: 'POST /api/invoices/:id/amount',
   wallet: 'GET /api/wallet',
   walletReceive: 'POST /api/wallet/receive',
   walletReceives: 'GET /api/wallet/receives',
+  walletReceiveGet: 'GET /api/wallet/receives/:receiveId',
+  walletReceiveCancel: 'POST /api/wallet/receives/:receiveId/cancel',
+  walletReceiveArchive: 'POST /api/wallet/receives/:receiveId/archive',
   walletLightning: 'GET /api/wallet/lightning',
   walletBtc: 'GET /api/wallet/btc',
   transfers: 'GET /api/transfers',
+  transferDetail: 'GET /api/transfers/:id',
   agentChat: 'POST /api/agent/chat',
   /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */
   agentChatStream: 'POST /api/agent/chat/stream',

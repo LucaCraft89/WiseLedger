@@ -81,6 +81,7 @@ export const FLAG_CODES = {
   R8_CURRENCY: 'R8_CURRENCY',
   R9_MISSING_FIELDS: 'R9_MISSING_FIELDS',
   R10_DATES: 'R10_DATES',
+  R11_RGB_REQUEST: 'R11_RGB_REQUEST',
   AI_UNAVAILABLE: 'AI_UNAVAILABLE',
 } as const;
 export type FlagCode = (typeof FLAG_CODES)[keyof typeof FLAG_CODES];
@@ -117,6 +118,51 @@ export const ProposedPayment = z.object({
 });
 export type ProposedPayment = z.infer<typeof ProposedPayment>;
 
+/** One line of the "Payment request check": every check on the RGB payment request, passed ones included. */
+export const RgbCheckName = z.enum([
+  'decodes',
+  'rail',
+  'network',
+  'not_expired',
+  'not_used',
+  'asset_approved',
+  'asset_matches',
+  'amount_matches',
+  'transport_known',
+]);
+export type RgbCheckName = z.infer<typeof RgbCheckName>;
+
+export const RgbCheckLine = z.object({
+  check: RgbCheckName,
+  result: Verdict,
+  /** One plain sentence, written by code. */
+  text: z.string().min(1),
+  /** The flag that already explains this failure (the UI links to it instead of repeating it). */
+  flagCode: z.string().optional(),
+});
+export type RgbCheckLine = z.infer<typeof RgbCheckLine>;
+
+/** `payment_request`: the document is only an RGB payment request (no invoice around it). */
+export const DocumentKind = z.enum(['invoice', 'payment_request']);
+export type DocumentKind = z.infer<typeof DocumentKind>;
+
+/** What a payment-request-only document says, read by the wallet's decoder (never by the model). */
+export const PaymentRequestFacts = z.object({
+  rail: z.enum(['onchain', 'lightning']),
+  network: z.string(),
+  /** Token the request asks for; absent = the payer chooses (we pay with `payAssetId`). */
+  assetId: z.string().optional(),
+  /** The approved token this wallet would pay with. */
+  payAssetId: z.string().optional(),
+  /** Base units; absent = open amount, typed by the user before paying (POST /api/invoices/:id/amount). */
+  amount: BaseUnits.optional(),
+  expiresAt: IsoDateTime.optional(),
+});
+export type PaymentRequestFacts = z.infer<typeof PaymentRequestFacts>;
+
+/** Payee name in the plan and sentence of a payment-request-only document (it names nobody). */
+export const PAYMENT_REQUEST_PAYEE = 'whoever sent this payment request';
+
 export const LlmProviderName = z.enum(['qvac', 'openai', 'mock']);
 export type LlmProviderName = z.infer<typeof LlmProviderName>;
 
@@ -126,6 +172,12 @@ export const AnalysisReport = z.object({
   flags: z.array(RiskFlag),
   verdict: Verdict,
   proposedPayment: ProposedPayment.optional(),
+  /** Absent = invoice. */
+  kind: DocumentKind.optional(),
+  /** Only for kind `payment_request`: the decoded request. */
+  paymentRequest: PaymentRequestFacts.optional(),
+  /** The RGB payment request check, built by code from the decoded request (absent when the AI could not read it). */
+  rgbCheck: z.array(RgbCheckLine).optional(),
   /** Plain-language summary (≤ 120 words), written by call 2 from fields + flags only. */
   summary: z.string(),
   questionsForUser: z.array(z.string()),
@@ -172,6 +224,8 @@ export interface HistoryQuery {
 export interface HistoryMatch {
   invoiceId: string;
   matchedOn: 'issuer+number' | 'sha256' | 'rgbInvoice';
+  /** True when that earlier copy was stopped or closed without paying (BLOCKED, REJECTED): nothing paid or pending. */
+  stopped?: boolean;
 }
 
 /** Previously seen invoices (R4) and the payee book (R5). Implemented by A's store. */

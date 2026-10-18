@@ -40,11 +40,33 @@ export const TransferInfoSchema = z.object({
   /** How it moved; absent = onchain. Lightning payments have a paymentHash and no txid. */
   rail: z.enum(['onchain', 'lightning']).optional(),
   paymentHash: z.string().optional(),
+  /**
+   * RGB seal the asset moved to (on-chain only): `blinded` = the receiving UTXO is hidden behind a blinded ID,
+   * `witness` = a new output of the payment transaction. From rgb-lib's kind (ReceiveBlind / ReceiveWitness) or,
+   * for a send, the recipient ID (`utxob:` / `wvout:`).
+   */
+  sealType: z.enum(['blinded', 'witness']).optional(),
+  /** RGB proxy endpoints the consignment travels through (rgb-lib transport_endpoints, the used ones first). */
+  transportEndpoints: z.array(z.string()).optional(),
+  /** ISO; rgb-lib `expiration`: after it a transfer still waiting for the counterparty fails. */
+  expiresAt: z.string().optional(),
+  /** ISO; when the transfer reached Settled (rgb-lib keeps no separate field: updatedAt at Settled). */
+  settledAt: z.string().optional(),
+  /** Asset schema (only NIA here). */
+  schema: z.literal('NIA').optional(),
   /** ISO timestamps */
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type TransferInfo = z.infer<typeof TransferInfoSchema>;
+
+/** `sb:utxob:…` → blinded, `sb:wvout:…` → witness (rgb-lib recipient ID formats). */
+export function sealTypeOfRecipient(recipientId: string | undefined): 'blinded' | 'witness' | undefined {
+  if (!recipientId) return undefined;
+  if (/(^|:)utxob:/.test(recipientId)) return 'blinded';
+  if (/(^|:)wvout:/.test(recipientId)) return 'witness';
+  return undefined;
+}
 
 export const DecodedInvoiceSchema = z.object({
   rgbInvoice: z.string(),
@@ -62,6 +84,11 @@ export const DecodedInvoiceSchema = z.object({
    */
   rail: z.enum(['onchain', 'lightning']).optional(),
   paymentHash: z.string().optional(),
+  /**
+   * True when the request's RGB proxy already holds a payment for its recipient ID (someone paid it: a request is
+   * paid once); false when the proxy has none; absent when not checked (Lightning, mock, proxy not answering).
+   */
+  alreadyPaid: z.boolean().optional(),
 });
 export type DecodedInvoice = z.infer<typeof DecodedInvoiceSchema>;
 
@@ -78,6 +105,8 @@ export const CreateReceiveRequestSchema = z.object({
   assetId: z.string().optional(),
   amount: AmountSchema.optional(),
   expirySec: z.number().int().positive(),
+  /** `lightning`: an RGB Lightning invoice paid over a channel (needs assetId + amount); absent = on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type CreateReceiveRequest = z.infer<typeof CreateReceiveRequestSchema>;
 
@@ -87,6 +116,9 @@ export const ReceiveInvoiceSchema = z.object({
   assetId: z.string().optional(),
   amount: AmountSchema.optional(),
   expiresAt: z.string(),
+  /** Absent = on-chain. A Lightning request's recipientId is its payment hash. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
+  paymentHash: z.string().optional(),
 });
 export type ReceiveInvoice = z.infer<typeof ReceiveInvoiceSchema>;
 
@@ -198,7 +230,9 @@ export class WalletError extends Error {
   }
 }
 export class InsufficientFunds extends WalletError {
-  constructor(message = 'Not enough spendable balance for this payment.') {
+  constructor(
+    message = 'Not enough spendable balance for this payment. Receive more, or wait for pending payments to settle.',
+  ) {
     super('InsufficientFunds', message);
   }
 }
@@ -208,22 +242,28 @@ export class InvoiceExpired extends WalletError {
   }
 }
 export class NoUtxo extends WalletError {
-  constructor(message = 'The wallet has no free UTXO to receive or send RGB assets.') {
+  constructor(message = 'The wallet has no free coins for RGB right now. Wait for the next block and try again.') {
     super('NoUtxo', message);
   }
 }
 export class UnknownAsset extends WalletError {
   constructor(assetId: string) {
-    super('UnknownAsset', `The wallet does not hold asset ${assetId}.`);
+    super(
+      'UnknownAsset',
+      `The wallet does not hold asset ${assetId}. Ask for a payment request in a token your wallet holds.`,
+    );
   }
 }
 export class InvalidInvoice extends WalletError {
-  constructor(message = 'This is not a valid RGB invoice.') {
+  constructor(message = 'This is not a valid RGB invoice. Ask the supplier to send the payment request again.') {
     super('InvalidInvoice', message);
   }
 }
 export class TransferFailed extends WalletError {
-  constructor(message = 'The transfer failed.', options?: { cause?: unknown }) {
+  constructor(
+    message = 'The transfer failed. Check the transfers list before trying again.',
+    options?: { cause?: unknown },
+  ) {
     super('TransferFailed', message, options);
   }
 }
