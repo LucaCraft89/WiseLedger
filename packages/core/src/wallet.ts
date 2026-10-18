@@ -225,7 +225,9 @@ export class WalletError extends Error {
   }
 }
 export class InsufficientFunds extends WalletError {
-  constructor(message = 'Not enough spendable balance for this payment.') {
+  constructor(
+    message = 'Not enough spendable balance for this payment. Receive more, or wait for pending payments to settle.',
+  ) {
     super('InsufficientFunds', message);
   }
 }
@@ -235,22 +237,28 @@ export class InvoiceExpired extends WalletError {
   }
 }
 export class NoUtxo extends WalletError {
-  constructor(message = 'The wallet has no free UTXO to receive or send RGB assets.') {
+  constructor(message = 'The wallet has no free coins for RGB right now. Wait for the next block and try again.') {
     super('NoUtxo', message);
   }
 }
 export class UnknownAsset extends WalletError {
   constructor(assetId: string) {
-    super('UnknownAsset', `The wallet does not hold asset ${assetId}.`);
+    super(
+      'UnknownAsset',
+      `The wallet does not hold asset ${assetId}. Ask for a payment request in a token your wallet holds.`,
+    );
   }
 }
 export class InvalidInvoice extends WalletError {
-  constructor(message = 'This is not a valid RGB invoice.') {
+  constructor(message = 'This is not a valid RGB invoice. Ask the supplier to send the payment request again.') {
     super('InvalidInvoice', message);
   }
 }
 export class TransferFailed extends WalletError {
-  constructor(message = 'The transfer failed.', options?: { cause?: unknown }) {
+  constructor(
+    message = 'The transfer failed. Check the transfers list before trying again.',
+    options?: { cause?: unknown },
+  ) {
     super('TransferFailed', message, options);
   }
 }

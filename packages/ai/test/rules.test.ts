@@ -100,6 +100,9 @@ describe('rules R1–R10', () => {
   });
   it('R2: asset outside the allowlist or contradicting the hint', () => {
     expect(r2Asset({ ...base, decoded: { ...decoded, assetId: 'rgb:evil' } })[0]?.severity).toBe('block');
+    expect(r2Asset({ ...base, decoded: { ...decoded, assetId: 'rgb:evil' } })[0]?.message).toMatch(
+      /contract rgb:evil.*You pay with .*contract .*same name from another contract is a different token/,
+    );
     const hint = { ...extraction, payment: { ...extraction.payment, assetIdHint: 'rgb:other' } };
     expect(r2Asset({ ...base, extraction: hint })[0]?.message).toMatch(/different/);
     expect(r2Asset({ ...base, decoded: { ...decoded, assetId: undefined } })).toEqual([]); // payer chooses → default asset
@@ -137,6 +140,18 @@ describe('rules R1–R10', () => {
     expect(r4Duplicate({ ...base, history: [{ invoiceId: 'inv_1', matchedOn: 'issuer+number' }] })[0]?.severity).toBe(
       'block',
     );
+  });
+  it('R4: a copy that was only stopped warns, without "pay twice"; a live copy still blocks', () => {
+    const stopped = { invoiceId: 'inv_1', matchedOn: 'rgbInvoice' as const, stopped: true };
+    const [flag] = r4Duplicate({ ...base, kind: 'payment_request', history: [stopped] });
+    expect(flag?.severity).toBe('warn');
+    expect(flag?.message).toMatch(/not paid/);
+    expect(flag?.message).not.toMatch(/twice/);
+    const live = { invoiceId: 'inv_2', matchedOn: 'rgbInvoice' as const };
+    expect(r4Duplicate({ ...base, history: [stopped, live] })[0]).toMatchObject({
+      severity: 'block',
+      evidence: 'inv_2',
+    });
   });
   it('R7: injection patterns in the text or in fields', () => {
     for (const t of [

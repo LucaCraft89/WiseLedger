@@ -49,7 +49,7 @@ describe('only a payment request, through the server', () => {
     expect((await amount('0')).json().error.code).toBe('AMOUNT_ZERO');
     expect((await amount('200000000')).json().error).toMatchObject({
       code: 'OVER_CAP',
-      message: 'This is above your payment limit of 100.00 TUSDT.',
+      message: 'This is above your payment limit of 100.00 TUSDT. Type a smaller amount.',
     });
     const set = (await amount('5000000')).json();
     expect(set.confirmationSentence).toBe(

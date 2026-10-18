@@ -132,7 +132,12 @@ export class SqliteReceiveStore {
 
   private mustGet(receiveId: string): ReceiveRequest {
     const r = this.get(receiveId);
-    if (!r) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this payment request.');
+    if (!r)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this payment request. Open Wallet › Get paid to see your requests.',
+      );
     return r;
   }
 
@@ -201,7 +206,11 @@ export class SqliteReceiveStore {
       throw new ApiFailure(409, 'PAYMENT_ON_ITS_WAY', 'Someone is already paying this request. Wait for it to arrive.');
     }
     if (r.status !== 'waiting') {
-      throw new ApiFailure(409, 'NOT_OPEN', `This request is already ${r.status}: there is nothing to cancel.`);
+      throw new ApiFailure(
+        409,
+        'NOT_OPEN',
+        `This request is already ${r.status}: there is nothing to cancel. You can archive it to tidy the list.`,
+      );
     }
     const at = this.now().toISOString();
     this.store.db
