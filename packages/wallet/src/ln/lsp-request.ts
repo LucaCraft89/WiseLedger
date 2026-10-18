@@ -14,6 +14,9 @@ export interface LspRequestOptions {
   /** Tries while the LSP is preparing (default 10, one per minute). */
   tries?: number;
   retryMs?: number;
+  /** While the LSP does not answer yet (`pnpm dev` starts it next to the server): tries and pause (default 60 × 5 s). */
+  reachTries?: number;
+  reachMs?: number;
 }
 
 /** Resolves with the LSP's answer status ('open', 'opening', 'exists', …) or throws a plain error. */
@@ -22,9 +25,24 @@ export async function requestLspChannel(node: LnNode, o: LspRequestOptions): Pro
     const res = await fetch(`${o.url.replace(/\/$/, '')}${p}`, { ...init, signal: AbortSignal.timeout(60_000) });
     return { status: res.status, body: (await res.json()) as T };
   };
-  const info = (await get<LspInfo>('/info')).body;
-  if ((await node.channels()).some((c) => c.peer_pubkey === info.pubkey)) return 'exists';
+  let info: LspInfo | undefined;
+  for (let i = 0; !info; i++) {
+    try {
+      info = (await get<LspInfo>('/info')).body;
+    } catch (err) {
+      if (i + 1 >= (o.reachTries ?? 60))
+        throw new Error(`The LSP at ${o.url} does not answer. Start it with pnpm dev.`);
+      if (i === 0) o.log?.(`Lightning: waiting for the LSP at ${o.url} (${err instanceof Error ? err.message : err}).`);
+      await new Promise((res) => setTimeout(res, o.reachMs ?? 5_000));
+    }
+  }
   const peer = `${info.pubkey}@${info.host}:${info.peerPort}`;
+  if ((await node.channels()).some((c) => c.peer_pubkey === info.pubkey)) {
+    // After a restart the channel is only usable once the peers are connected again.
+    await node.call('connectPeer', peer).catch(() => undefined);
+    o.log?.('Lightning: reconnected to the LSP; the existing channel will be usable in a few seconds.');
+    return 'exists';
+  }
   for (let i = 0; i < (o.tries ?? 10); i++) {
     await node.call('connectPeer', peer).catch(() => undefined);
     const r = await get<{ status?: string; error?: { code: string; message: string } }>('/channel-request', {

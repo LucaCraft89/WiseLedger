@@ -21,6 +21,7 @@ import {
   type QuoteResult,
   type ReceiveInvoice,
   SubmitTimeout,
+  sealTypeOfRecipient,
   TransferFailed,
   type TransferInfo,
   type TransferStatus,
@@ -30,6 +31,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { requestAlreadyPaid, toDecodedInvoice } from '../decode.js';
 import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { type ReadRetryOptions, withReadRetry } from '../retry.js';
@@ -96,9 +98,13 @@ interface SdkAsset {
 /** rgb-sdk's internal client: the rgb-lib binding and the transport endpoint it was built with. */
 interface RgbLibClient {
   transportEndpoint: string;
+  /** rgb-sdk: the cached rgb-lib Online handle (goes online once, then reuses it). */
+  getOnline?(): object;
   wallet: {
     /** rgb-lib: `online` may be null when `skipSync` is true (a local read of the last synced state). */
     getBtcBalance?(online: null, skipSync: boolean): { vanilla: SdkBalance; colored: SdkBalance };
+    /** Unlike getBtcBalance, `online` must be the Online object; skipSync true reads the last synced state. */
+    listTransactions?(online: object, skipSync: boolean): SdkTransaction[];
     blindReceive(
       assetId: string | null,
       assignment: string,
@@ -124,6 +130,20 @@ export interface SdkTransfer {
   recipientId?: string | null;
   invoiceString?: string | null;
   expiration?: number | null;
+  /** rgb-lib 0.3.0-beta.8: [{ endpoint: 'https://proxy…/json-rpc', transportType: 'JsonRpc', used: true }]. */
+  transportEndpoints?: { endpoint: string; transportType?: unknown; used?: boolean }[];
+}
+
+/** ReceiveBlind / ReceiveWitness from the kind; a send's seal from the recipient ID it paid. */
+function sealType(t: SdkTransfer): TransferInfo['sealType'] {
+  const k = typeof t.kind === 'number' ? t.kind : t.kind.toLowerCase();
+  if (k === 1 || k === 'receiveblind') return 'blinded';
+  if (k === 2 || k === 'receivewitness') return 'witness';
+  return toDirection(t.kind) === 'outgoing' ? sealTypeOfRecipient(t.recipientId ?? undefined) : undefined;
+}
+
+function endpoints(t: SdkTransfer): string[] {
+  return [...(t.transportEndpoints ?? [])].sort((a, b) => Number(!!b.used) - Number(!!a.used)).map((e) => e.endpoint);
 }
 
 /** Sent: the requested amount (assignments are our change). Issued/received: what was assigned to us. */
@@ -193,6 +213,9 @@ function str(n: number | undefined): string {
 }
 
 /** Maps rgb-lib / WDK error text to our typed errors (messages stay plain for the UI). */
+export const ALREADY_PAID =
+  'This payment request was already paid (a payment request can be paid only once). Nothing left your wallet: ask whoever sent it for a new one.';
+
 export function mapWalletError(e: unknown): WalletError {
   if (e instanceof WalletError) return e;
   const denied = policyDenied(e);
@@ -206,6 +229,7 @@ export function mapWalletError(e: unknown): WalletError {
   if (/InvoiceExpired|expired/i.test(msg)) return new InvoiceExpired();
   if (/InvalidInvoice|InvalidRecipient|invalid.*invoice/i.test(msg)) return new InvalidInvoice();
   if (/timed? ?out|ETIMEDOUT|ECONNRESET|socket hang up/i.test(msg)) return new SubmitTimeout();
+  if (/RecipientIDAlreadyUsed/i.test(msg)) return new TransferFailed(ALREADY_PAID, { cause: e });
   return new TransferFailed(msg, { cause: e });
 }
 
@@ -322,8 +346,21 @@ export class WdkRgbWallet implements WalletPort {
     return this.rgb.getBtcBalance();
   }
 
-  /** On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). */
+  /**
+   * On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). rgb-sdk's
+   * listTransactions() also syncs on every call (~8 s on Mutinynet, blocking the server): read the last synced
+   * state like btcBalance(), falling back to the syncing call only if the rgb-lib client is not reachable.
+   */
   btcTransactions(): SdkTransaction[] {
+    const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
+    const lib = client?.wallet;
+    if (lib?.listTransactions && client?.getOnline) {
+      try {
+        return lib.listTransactions(client.getOnline(), true);
+      } catch {
+        // fall through to the syncing call
+      }
+    }
     return this.rgb.listTransactions();
   }
 
@@ -431,16 +468,9 @@ export class WdkRgbWallet implements WalletPort {
     } catch {
       throw new InvalidInvoice();
     }
-    const amount = assignmentAmount(d.assignment);
-    return {
-      rgbInvoice,
-      recipientId: d.recipientId,
-      ...(d.assetId ? { assetId: d.assetId } : {}),
-      ...(amount ? { amount } : {}),
-      network: String(d.network),
-      ...(d.expirationTimestamp ? { expiresAt: iso(d.expirationTimestamp) } : {}),
-      transportEndpoints: d.transportEndpoints ?? [],
-    };
+    const decoded = toDecodedInvoice(rgbInvoice, d);
+    const paid = await requestAlreadyPaid(decoded.recipientId, decoded.transportEndpoints);
+    return paid === undefined ? decoded : { ...decoded, alreadyPaid: paid };
   }
 
   async quotePay(req: PaymentRequest): Promise<QuoteResult> {
@@ -508,15 +538,23 @@ export class WdkRgbWallet implements WalletPort {
     const out: TransferInfo[] = [];
     for (const id of assetIds) {
       for (const t of this.rgb.listTransfers(id)) {
+        const status = toStatus(t.status);
+        const seal = sealType(t);
+        const ends = endpoints(t);
         out.push({
           transferId: String(t.batchTransferIdx),
           assetId: id,
           amount: transferAmount(t),
           direction: toDirection(t.kind),
-          status: toStatus(t.status),
+          status,
           ...(t.txid ? { txid: t.txid } : {}),
           ...(t.invoiceString ? { rgbInvoice: t.invoiceString } : {}),
           ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+          ...(seal ? { sealType: seal } : {}),
+          ...(ends.length ? { transportEndpoints: ends } : {}),
+          ...(t.expiration ? { expiresAt: iso(t.expiration) } : {}),
+          ...(status === 'Settled' ? { settledAt: iso(t.updatedAt) } : {}),
+          schema: 'NIA',
           createdAt: iso(t.createdAt),
           updatedAt: iso(t.updatedAt),
         });
@@ -582,6 +620,8 @@ export class WdkRgbWallet implements WalletPort {
   private async precheck(req: PaymentRequest): Promise<void> {
     const inv = await this.decodeInvoice(req.rgbInvoice);
     if (inv.expiresAt && Date.parse(inv.expiresAt) <= Date.now()) throw new InvoiceExpired();
+    // Someone already paid it (its proxy holds a payment): stop before signing anything.
+    if (inv.alreadyPaid) throw new TransferFailed(ALREADY_PAID);
     if (inv.assetId && inv.assetId !== req.assetId)
       throw new TransferFailed(`The invoice asks for asset ${inv.assetId}, not ${req.assetId}.`);
     if (inv.amount && inv.amount !== req.amount)
@@ -597,8 +637,3 @@ export class WdkRgbWallet implements WalletPort {
 }
 
 /** rgb-lib Assignment: { Fungible: n } (or { type, value } in some bindings); returns base units or undefined. */
-function assignmentAmount(a: Record<string, unknown> | undefined): string | undefined {
-  if (!a) return undefined;
-  const v = a.Fungible ?? a.fungible ?? (a.type === 'Fungible' ? a.value : undefined);
-  return typeof v === 'number' && v > 0 ? String(v) : undefined;
-}

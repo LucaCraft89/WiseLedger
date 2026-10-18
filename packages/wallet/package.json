@@ -16,11 +16,13 @@
     "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run",
     "demo:prepare": "tsx scripts/demo-prepare.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
+    "dev": "tsx scripts/lsp.ts dev || echo \"[lsp] the LSP stopped: Lightning payments will not go through until pnpm dev is restarted\"",
     "lsp": "tsx scripts/lsp.ts",
     "lsp-client": "tsx scripts/lsp-client.ts"
   },
   "dependencies": {
     "@tetherto/wdk": "1.0.0-beta.19",
+    "@utexo/rgb-lib": "0.3.0-beta.8",
     "@utexo/wdk-wallet-rgb": "2.0.3",
     "core": "workspace:*",
     "zod": "^4.6.7"
