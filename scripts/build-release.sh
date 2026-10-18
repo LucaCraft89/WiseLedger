@@ -23,7 +23,8 @@ exec "$(dirname "$0")/../node/bin/node" "$(dirname "$0")/../pnpm/bin/pnpm.mjs" "
 EOF
 chmod +x "$STAGE/.runtime/bin/pnpm"
 echo "[build] lightning modules $LN"
-cp -a "$LN" "$STAGE/.runtime/ln_modules"
+mkdir -p "$STAGE/.runtime/ln"
+cp -a "$LN" "$STAGE/.runtime/ln/node_modules" # named node_modules so its packages resolve each other
 echo "$VER" > "$STAGE/.runtime/VERSION"
 
 cat > "$OUT/launcher.sh" <<'EOF'
@@ -53,7 +54,7 @@ if [ ! -f .env ]; then
   echo "Created $APP/.env (QVAC, RGB wallet on Mutinynet, Lightning on). Edit it there." >&2
 fi
 export PATH="$APP/.runtime/bin:$APP/.runtime/node/bin:$PATH"
-export LN_MODULES="${LN_MODULES:-$APP/.runtime/ln_modules}"
+export LN_MODULES="${LN_MODULES:-$APP/.runtime/ln/node_modules}"
 
 say() { printf '\n\033[1m[wiseledger] %s\033[0m\n' "$*"; }
 lightning_on() { grep -Eq '^LN_ENABLED=(1|true|yes)' .env; }
@@ -64,11 +65,12 @@ if [ $# -gt 0 ] && [ "$1" != start ]; then exec pnpm "$@"; fi
 mkdir -p .data
 if [ ! -f .data/tusdt.json ]; then
   say "Step 1/2: wallets (payer = you, payee = a supplier) on Mutinynet"
-  pnpm wallet:smoke || true
+  pnpm wallet:smoke 2>&1 | tee .data/setup.log || true
   say "Step 2/2: issuing your test token TUSDT (RGB NIA, precision 6, no value)"
-  if ! pnpm -F wallet issue-asset; then
+  if ! pnpm -F wallet issue-asset > .data/issue.log 2>&1; then
     say "Your wallet needs test sats first."
-    echo "  1. Open https://faucet.mutinynet.com and send 200000 sats to the payer funding address printed above."
+    grep -m1 "payer funding address" .data/setup.log || true
+    echo "  1. Open https://faucet.mutinynet.com and send 200000 sats to that payer funding address."
     echo "  2. Wait about one minute (a Mutinynet block is ~30 s), then run this file again."
     exit 1
   fi
