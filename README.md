@@ -118,6 +118,8 @@ pnpm -F wallet issue-asset   # issues TUSDT (NIA, precision 6) and prints its as
 ```
 Put the asset ID in `.env` as `ASSET_ALLOWLIST=rgb:…` (the payment limits `PAYMENT_CAP` / `DAILY_CAP` are in base units).
 
+**Several computers: issue TUSDT once.** An RGB token is its contract ID, not its ticker: every `issue-asset` run creates a new contract, and a "TUSDT" from another contract is a different token (the app stops it as "Unexpected token"). Issue on one computer only. On the others, make a payment request for that asset ID (Wallet → Get paid), pay it from the first computer, and set the same `ASSET_ALLOWLIST=rgb:…` everywhere.
+
 Optional: `pnpm wallet:smoke -- --pay` makes one real 5 TUSDT transfer payer → supplier and waits until it settles.
 
 ### 7. Run
