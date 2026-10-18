@@ -1,6 +1,7 @@
 // The Analyst (no tools): extract (call 1) → rules (code) → verdict (code) → summary (call 2, fields + flags only).
 import {
   type AnalysisReport,
+  type AnalysisStep,
   type AnalyzeContext,
   type DecodedInvoice,
   type EmitFn,
@@ -57,11 +58,19 @@ export class Analyst implements InvoiceAnalyzer {
       this.deps.streamTokens === false
         ? undefined
         : (text: string) => emit({ type: 'token', invoiceId, at: at(), agent: 'analyst', text });
+    // Stable step key per stage for the owl's live line; `checking` moves from checking_request to checking_rules.
+    const steps: Partial<Record<Stage, AnalysisStep>> = {
+      reading: 'reading_text',
+      extracting: 'reading_amount',
+      checking: 'checking_request',
+      summarizing: 'writing_summary',
+    };
+    const step = (s: Stage) => (steps[s] ? { step: steps[s] } : {});
     const stage = async <T>(s: Stage, fn: () => Promise<T>): Promise<T> => {
-      emit({ type: 'stage', invoiceId, at: at(), stage: s, status: 'start' });
+      emit({ type: 'stage', invoiceId, at: at(), stage: s, status: 'start', ...step(s) });
       try {
         const out = await fn();
-        emit({ type: 'stage', invoiceId, at: at(), stage: s, status: 'end' });
+        emit({ type: 'stage', invoiceId, at: at(), stage: s, status: 'end', ...step(s) });
         return out;
       } catch (err) {
         emit({
@@ -71,6 +80,7 @@ export class Analyst implements InvoiceAnalyzer {
           stage: s,
           status: 'error',
           message: err instanceof Error ? err.message : String(err),
+          ...step(s),
         });
         throw err;
       }
@@ -108,6 +118,8 @@ export class Analyst implements InvoiceAnalyzer {
           .decodeInvoice(rgbInvoice)
           .catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
       }
+      steps.checking = 'checking_rules';
+      emit({ type: 'stage', invoiceId, at: at(), stage: 'checking', status: 'start', step: 'checking_rules' });
       const partial: RuleInput = {
         kind: onlyRequest ? 'payment_request' : 'invoice',
         extraction,

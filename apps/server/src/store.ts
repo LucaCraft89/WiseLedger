@@ -139,6 +139,12 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE receives ADD COLUMN archived_at TEXT;
   CREATE INDEX receives_created ON receives(created_at);
   `,
+  // 6: who pays and what for (Get paid form), and where the request was made (additive; note stays filled).
+  `
+  ALTER TABLE receives ADD COLUMN payer TEXT;
+  ALTER TABLE receives ADD COLUMN purpose TEXT;
+  ALTER TABLE receives ADD COLUMN made_in TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

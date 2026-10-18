@@ -16,6 +16,16 @@ export const Stage = z.enum([
 ]);
 export type Stage = z.infer<typeof Stage>;
 
+/** Stable key per Analyst step, for the owl's live line (additive to `stage`). */
+export const AnalysisStep = z.enum([
+  'reading_text',
+  'reading_amount',
+  'checking_request',
+  'checking_rules',
+  'writing_summary',
+]);
+export type AnalysisStep = z.infer<typeof AnalysisStep>;
+
 export const AgentName = z.enum(['analyst', 'treasurer']);
 export type AgentName = z.infer<typeof AgentName>;
 
@@ -27,6 +37,8 @@ export const StageEvent = z.object({
   stage: Stage,
   status: z.enum(['start', 'end', 'error']),
   message: z.string().optional(),
+  /** Analyst stages only. `checking` carries checking_request (payment request decode) then checking_rules. */
+  step: AnalysisStep.optional(),
 });
 export const TokenEvent = z.object({ type: z.literal('token'), ...base, agent: AgentName, text: z.string() });
 export const ToolCallEvent = z.object({
