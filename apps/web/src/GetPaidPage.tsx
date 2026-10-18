@@ -154,6 +154,7 @@ function RequestForm({
   const [assetId, setAssetId] = useState(assets[0]?.assetId ?? '');
   const [amount, setAmount] = useState('');
   const [anyAmount, setAnyAmount] = useState(false);
+  const [lightning, setLightning] = useState(false);
   const [payer, setPayer] = useState('');
   const [purpose, setPurpose] = useState('');
   const [choice, setChoice] = useState<ValidChoice>('1d');
@@ -210,6 +211,11 @@ function RequestForm({
       : ln?.enabled
         ? 'Lightning has no room to receive yet'
         : 'Lightning is not set up on this computer';
+  // Lightning needs a fixed amount within the channel's room; otherwise the request goes on-chain.
+  const lnReady = !!(ln?.enabled && lnRoom && lnRoom.receive > 0n);
+  const lnFits =
+    lnReady && !anyAmount && !!parsed?.ok && !!parsed.value && BigInt(parsed.value) <= (lnRoom?.receive ?? 0n);
+  const useLightning = lightning && lnFits;
 
   async function submit() {
     setFormError(null);
@@ -228,6 +234,7 @@ function RequestForm({
         ...(payer.trim() ? { payer: payer.trim() } : {}),
         ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
         madeIn: 'form',
+        ...(useLightning ? { rail: 'lightning' as const } : {}),
       });
       onCreated(res);
     } catch (err) {
@@ -355,21 +362,32 @@ function RequestForm({
         <fieldset className="wl-field">
           <legend>How should they pay?</legend>
           <div className="wl-choices">
-            <button type="button" aria-pressed="true">
+            <button
+              type="button"
+              className={useLightning ? 'wl-secondary' : undefined}
+              aria-pressed={!useLightning}
+              onClick={() => setLightning(false)}
+            >
               On-chain (about a minute)
             </button>
             <button
               type="button"
-              className="wl-secondary"
-              aria-disabled="true"
-              aria-pressed="false"
-              onClick={() => undefined}
+              className={useLightning ? undefined : 'wl-secondary'}
+              aria-disabled={!lnReady}
+              aria-pressed={useLightning}
+              onClick={() => lnReady && setLightning(true)}
             >
               Lightning (instant)
             </button>
           </div>
           <p className="wl-hint">
-            {lnReason}. {LIGHTNING_OFF_LINE}
+            {!lnReady
+              ? `${lnReason}. ${LIGHTNING_OFF_LINE}`
+              : lightning && !lnFits
+                ? `${lnReason}: type a fixed amount within that, or this one goes on-chain.`
+                : useLightning
+                  ? `${lnReason}. They pay from an RGB Lightning wallet and it arrives in seconds.`
+                  : `${lnReason}.`}
           </p>
         </fieldset>
 

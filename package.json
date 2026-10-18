@@ -13,7 +13,7 @@
     "format": "biome check --write .",
     "test": "pnpm -r --if-present run test && bash scripts/secret-scan.test.sh",
     "secret-scan": "bash scripts/secret-scan.sh",
-    "dev": "pnpm --parallel -F server -F web --if-present run dev",
+    "dev": "pnpm --parallel -F server -F web -F wallet --if-present run dev",
     "demo:mock": "pnpm -F server --if-present run demo:mock",
     "wallet:smoke": "pnpm -F wallet --if-present run smoke",
     "demo:prepare": "pnpm -F wallet --if-present run demo:prepare",

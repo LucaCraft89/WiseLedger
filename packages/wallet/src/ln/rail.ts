@@ -4,6 +4,7 @@
 // lightningStatus() shows the node and its channels. Same `rgbInvoice` string everywhere, so plan and guard are
 // unchanged. A Lightning payment is never retried by us either: on a timeout its status is read back by hash.
 import {
+  type CreateReceiveRequest,
   type DecodedInvoice,
   InsufficientFunds,
   InvalidInvoice,
@@ -11,6 +12,7 @@ import {
   type LightningStatus,
   type PaymentRequest,
   type PayResult,
+  type ReceiveInvoice,
   TransferFailed,
   type TransferInfo,
   type TransferStatus,
@@ -19,6 +21,8 @@ import {
 import { isInbound, type LnNode, type LnPayment } from './node.js';
 
 export const LN_TRANSFER_PREFIX = 'ln:';
+/** Bitcoin carried by an RGB Lightning payment (rln needs an HTLC above dust; same as the M4 runs). */
+export const LN_RECEIVE_MSAT = 3_000_000;
 
 /** BOLT11 on our networks (signet = Mutinynet `lntbs`, regtest `lnbcrt`), optionally with a `lightning:` scheme. */
 export function looksLightning(invoice: string): boolean {
@@ -87,6 +91,8 @@ export function withLightning(onchain: WalletPort, node: LnNode, opts: Lightning
       ...(p.asset_id ? { assetId: p.asset_id } : {}),
       amount: String(p.asset_amount ?? 0),
       direction: isInbound(p) ? 'incoming' : 'outgoing',
+      // Our Lightning requests use the payment hash as recipient ID, so received ones match their request.
+      ...(isInbound(p) ? { recipientId: p.payment_hash } : {}),
       status: lnStatus(p.status),
       rail: 'lightning',
       paymentHash: p.payment_hash,
@@ -135,6 +141,42 @@ export function withLightning(onchain: WalletPort, node: LnNode, opts: Lightning
     return { transferId: `${LN_TRANSFER_PREFIX}${sent.payment_hash}`, paymentHash: sent.payment_hash };
   };
 
+  // An RGB Lightning invoice from this node: the payer's node routes it through the LSP into our channel.
+  const receiveLn = async (r: CreateReceiveRequest): Promise<ReceiveInvoice> => {
+    if (!r.assetId || !r.amount) throw new InvalidInvoice('A Lightning request needs a token and an amount.');
+    const room = (await node.channels())
+      .filter((c) => c.is_usable && c.asset_id === r.assetId)
+      .reduce((s, c) => s + BigInt(c.asset_remote_amount ?? 0), 0n);
+    if (room < BigInt(r.amount)) {
+      throw new InsufficientFunds(
+        room > 0n
+          ? `Lightning can receive at most ${room} base units right now. Ask for less, or make an on-chain request.`
+          : 'Lightning has no room to receive right now. Make an on-chain request instead.',
+      );
+    }
+    let made: { invoice: string };
+    try {
+      made = await node.call<{ invoice: string }>('createInvoice', {
+        amt_msat: LN_RECEIVE_MSAT,
+        expiry_sec: r.expirySec,
+        asset_id: r.assetId,
+        asset_amount: Number(r.amount),
+      });
+    } catch (e) {
+      throw new TransferFailed(`The Lightning node could not make the request: ${e instanceof Error ? e.message : e}`);
+    }
+    const d = await decodeLn(made.invoice);
+    return {
+      rgbInvoice: made.invoice,
+      recipientId: d.recipientId,
+      assetId: r.assetId,
+      amount: r.amount,
+      expiresAt: d.expiresAt ?? new Date(Date.now() + r.expirySec * 1000).toISOString(),
+      rail: 'lightning',
+      ...(d.paymentHash ? { paymentHash: d.paymentHash } : {}),
+    };
+  };
+
   return {
     ...onchain,
     init: () => onchain.init(),
@@ -144,7 +186,7 @@ export function withLightning(onchain: WalletPort, node: LnNode, opts: Lightning
     assetBalance: (id) => onchain.assetBalance(id),
     createUtxosIfNeeded: () => onchain.createUtxosIfNeeded(),
     issueAssetNia: (r) => onchain.issueAssetNia(r),
-    createReceiveInvoice: (r) => onchain.createReceiveInvoice(r),
+    createReceiveInvoice: (r) => (r.rail === 'lightning' ? receiveLn(r) : onchain.createReceiveInvoice(r)),
     quotePay: (r) => (looksLightning(r.rgbInvoice) ? Promise.resolve({ fee: '0', feeRate: 0 }) : onchain.quotePay(r)),
     decodeInvoice: (inv) => (looksLightning(inv) ? decodeLn(inv) : onchain.decodeInvoice(inv)),
     pay: (r) => (looksLightning(r.rgbInvoice) ? payLn(r) : onchain.pay(r)),

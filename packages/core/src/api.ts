@@ -188,6 +188,8 @@ export const WalletReceiveRequest = z.object({
   validUntil: IsoDateTime.optional(),
   /** Where the request is made (default form; the web's invoice PDF says invoice_pdf). */
   madeIn: z.enum(['form', 'invoice_pdf']).optional(),
+  /** `lightning` = instant, over the channel (needs assetId + amount, within the channel's room); default on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -198,6 +200,7 @@ export const WalletReceiveResponse = z.object({
   amount: BaseUnits.optional(),
   /** The stored request (open it again under Wallet › Get paid, #/wallet/get-paid/<receiveId>). */
   receiveId: z.string().optional(),
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type WalletReceiveResponse = z.infer<typeof WalletReceiveResponse>;
 
@@ -430,6 +433,8 @@ export const ReceiveRequestDto = z.object({
   purpose: z.string().optional(),
   /** Where it was made: the Get paid form, the chat, or an invoice PDF. Absent on requests made before M5. */
   madeIn: z.enum(['form', 'chat', 'invoice_pdf']).optional(),
+  /** `lightning` for an RGB Lightning request (rgbInvoice is then an lntbs… invoice); absent = on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
 
@@ -611,8 +616,10 @@ export const BooksResponse = z.object({
   assetId: z.string().optional(),
   ticker: z.string().optional(),
   precision: z.number().int().min(0).optional(),
-  /** wallet.assetBalance().settled; equals the newest settled row's balanceAfter. */
+  /** On-chain settled + our side of the Lightning channels; equals the newest settled row's balanceAfter. */
   settledBalance: BaseUnits,
+  /** The Lightning part of settledBalance (absent when Lightning is off). */
+  lightningBalance: BaseUnits.optional(),
   rows: z.array(BookRow),
   nextBefore: z.string().optional(),
 });

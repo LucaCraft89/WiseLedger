@@ -3,7 +3,13 @@
 // reported in plain states: waiting → incoming → received (or expired / failed / cancelled). The global SSE stream
 // already carries the transfer. A request can be cancelled while nobody pays it, and archived once it is closed.
 import { randomUUID } from 'node:crypto';
-import type { ReceiveFilter, ReceiveInvoice, ReceiveStatus, TransferInfo } from 'core';
+import {
+  isLightningInvoice,
+  type ReceiveFilter,
+  type ReceiveInvoice,
+  type ReceiveStatus,
+  type TransferInfo,
+} from 'core';
 import { ApiFailure } from './orchestrator.js';
 import type { InvoiceStore } from './store.js';
 
@@ -33,6 +39,7 @@ export interface ReceiveRequest {
   payer?: string;
   purpose?: string;
   madeIn?: ReceiveMadeIn;
+  rail?: 'lightning';
 }
 
 export type ReceiveMadeIn = 'form' | 'chat' | 'invoice_pdf';
@@ -115,6 +122,7 @@ export class SqliteReceiveStore {
       ...(r.payer ? { payer: r.payer } : {}),
       ...(r.purpose ? { purpose: r.purpose } : {}),
       ...(r.made_in ? { madeIn: r.made_in as ReceiveMadeIn } : {}),
+      ...(isLightningInvoice(r.rgb_invoice) ? { rail: 'lightning' as const } : {}),
     };
   }
 

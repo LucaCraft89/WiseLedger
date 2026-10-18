@@ -6,6 +6,8 @@
 //   pnpm -F wallet lsp-client status             C's channels and payments
 //   pnpm -F wallet lsp-client b-receive [tusdt]  node B (a Lightning supplier) prints an RGB LN invoice and waits
 //                                                until it is paid (e.g. by the app, whose node is C)
+//   pnpm -F wallet lsp-client b-pay <invoice>    node B pays an RGB LN invoice (e.g. the app's Get paid request),
+//                                                routed B → A (LSP) → C; C is not opened, so the server can hold it
 //
 // LSP_URL (default http://127.0.0.1:8790), LN_C_PEER_PORT (9737), LN_B_PEER_PORT (9736). B is the a-003 spike node
 // (.data/ln/b, channel with A). Each node folder is opened by one process only; the LSP runs in its own process.
@@ -50,7 +52,7 @@ async function show(n: Node): Promise<void> {
 
 const opened: Node[] = [];
 const C =
-  cmd === 'b-receive'
+  cmd === 'b-receive' || cmd === 'b-pay'
     ? (undefined as unknown as Node)
     : await LnNode.open({
         name: 'C',
@@ -154,6 +156,31 @@ try {
         `B: ${st} · C: ${got?.status ?? 'not seen'} · ${((Date.now() - t0) / 1000).toFixed(1)} s · hash ${sent.payment_hash}`,
       );
       await show(C);
+      break;
+    }
+    case 'b-pay': {
+      if (!arg) throw new Error('Usage: pnpm -F wallet lsp-client b-pay <lntbs… invoice>');
+      const info = await lsp<LspInfo>('/info');
+      const B = await LnNode.open({
+        name: 'B',
+        dataDir: path.join(repoRoot, '.data/ln/b'),
+        peerPort: Number(process.env.LN_B_PEER_PORT ?? 9736),
+      });
+      opened.push(B);
+      await B.call('connectPeer', `${info.pubkey}@${info.host}:${info.peerPort}`).catch(() => undefined);
+      for (let i = 0; i < 30 && !(await B.channels()).some((c) => c.is_usable); i++) await sleep(2_000);
+      for (const c of await B.channels())
+        log('ln-B', `channel usable=${c.is_usable} TUSDT ${tokens(String(c.asset_local_amount ?? 0))} on B's side`);
+      const t0 = Date.now();
+      const sent = await B.call<{ payment_hash: string }>('sendPayment', { invoice: arg.replace(/^lightning:/i, '') });
+      for (let i = 0; i < 60; i++) {
+        const p = (await B.payments()).find((x) => x.payment_hash === sent.payment_hash);
+        if (p && /succeeded|failed/i.test(p.status)) {
+          log('ln-B', `payment ${p.status} in ${((Date.now() - t0) / 1000).toFixed(1)} s · hash ${sent.payment_hash}`);
+          break;
+        }
+        await sleep(1_000);
+      }
       break;
     }
     case 'b-receive': {

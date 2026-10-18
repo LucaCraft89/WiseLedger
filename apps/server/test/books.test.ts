@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BooksResponse, PayeesResponse, ReceiptResponse, ReceiveRequestDto, type TransferInfo } from 'core';
-import { MOCK_ASSET_ID, mockInvoice } from 'core/mocks';
+import { MOCK_ASSET_ID, MockWallet, mockInvoice } from 'core/mocks';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bookRows, booksPage, finalBalance } from '../src/books.js';
 import { SqliteLabelStore } from '../src/labels.js';
@@ -86,7 +86,13 @@ describe('books running balance', () => {
   });
 
   it('GET /api/books: the newest balanceAfter equals the wallet settled balance', async () => {
-    const b = await app();
+    // The mock's Lightning channel holds 50 TUSDT that no transfer brought in: books are checked on-chain here.
+    const wallet = Object.assign(new MockWallet({ stepMs: 0 }), { lightningStatus: undefined });
+    built = await createApp(
+      { uploadDir: dir, dbPath: ':memory:', mockStepMs: 0 },
+      { schedulerMs: 3_600_000, providers: { wallet } },
+    );
+    const b = built;
     await pay(b, '25000000');
     await pay(b, '1500000');
     const res = await b.app.inject({ method: 'GET', url: '/api/books' });

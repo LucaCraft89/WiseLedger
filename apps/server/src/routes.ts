@@ -58,7 +58,7 @@ import {
   M3_ROUTES,
   ScheduleListQuery,
 } from './api-local.js';
-import { bookRows, booksPage, buildReceipt, defaultAsset, finalBalance } from './books.js';
+import { bookRows, booksPage, buildReceipt, defaultAsset, finalBalance, lightningBalance } from './books.js';
 import { buildDesk } from './desk.js';
 import type { WalletFiscalService } from './fiscal.js';
 import { StoreHistory } from './history.js';
@@ -388,15 +388,20 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         );
       return { settledBalance: '0', rows: [] };
     }
-    const [transfers, balance] = await Promise.all([wallet.listTransfers(), wallet.assetBalance(asset.assetId)]);
+    const [transfers, balance, ln] = await Promise.all([
+      wallet.listTransfers(),
+      wallet.assetBalance(asset.assetId),
+      lightningBalance(wallet, asset.assetId),
+    ]);
+    const settled = (BigInt(balance.settled) + (ln ?? 0n)).toString();
     const fees = new Map(btcTransactions(wallet).map((b) => [b.txid, b.feeSats]));
     const rows = await bookRows(transfers, asset.assetId, deps, (txid) => {
       const f = fees.get(txid);
       return f && f !== '0' ? f : undefined;
     });
-    if (finalBalance(rows) !== balance.settled) {
+    if (finalBalance(rows) !== settled) {
       app.log.warn(
-        { assetId: asset.assetId, books: finalBalance(rows), settled: balance.settled },
+        { assetId: asset.assetId, books: finalBalance(rows), settled, lightning: ln?.toString() },
         'Books do not add up to the wallet balance',
       );
     }
@@ -404,7 +409,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       assetId: asset.assetId,
       ticker: asset.ticker,
       precision: asset.precision,
-      settledBalance: balance.settled,
+      settledBalance: settled,
+      ...(ln !== undefined ? { lightningBalance: ln.toString() } : {}),
       ...booksPage(rows, { ...(q.limit ? { limit: q.limit } : {}), ...(q.before ? { before: q.before } : {}) }),
     };
   });
@@ -575,7 +581,22 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
+    if (body.rail === 'lightning' && (!body.amount || !body.assetId)) {
+      throw new ApiFailure(
+        400,
+        'LIGHTNING_NEEDS_AMOUNT',
+        'A Lightning request needs a token and an amount. Type how much, or make an on-chain request.',
+      );
+    }
+    if (body.rail === 'lightning' && !wallet.lightningStatus) {
+      throw new ApiFailure(
+        409,
+        'LIGHTNING_OFF',
+        'Lightning is not set up on this computer. Make an on-chain request instead.',
+      );
+    }
     const inv = await wallet.createReceiveInvoice({
+      ...(body.rail === 'lightning' ? { rail: 'lightning' as const } : {}),
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
       expirySec: receiveExpirySec(body),
       ...(body.assetId ? { assetId: body.assetId } : {}),
@@ -594,6 +615,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       ...(inv.assetId ? { assetId: inv.assetId } : {}),
       ...(inv.amount ? { amount: inv.amount } : {}),
       receiveId: stored.receiveId,
+      ...(inv.rail === 'lightning' ? { rail: 'lightning' as const } : {}),
     };
   });
 

@@ -105,6 +105,8 @@ export const CreateReceiveRequestSchema = z.object({
   assetId: z.string().optional(),
   amount: AmountSchema.optional(),
   expirySec: z.number().int().positive(),
+  /** `lightning`: an RGB Lightning invoice paid over a channel (needs assetId + amount); absent = on-chain. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
 });
 export type CreateReceiveRequest = z.infer<typeof CreateReceiveRequestSchema>;
 
@@ -114,6 +116,9 @@ export const ReceiveInvoiceSchema = z.object({
   assetId: z.string().optional(),
   amount: AmountSchema.optional(),
   expiresAt: z.string(),
+  /** Absent = on-chain. A Lightning request's recipientId is its payment hash. */
+  rail: z.enum(['onchain', 'lightning']).optional(),
+  paymentHash: z.string().optional(),
 });
 export type ReceiveInvoice = z.infer<typeof ReceiveInvoiceSchema>;
 

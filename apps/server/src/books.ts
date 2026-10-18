@@ -125,6 +125,14 @@ export async function bookRows(
   });
 }
 
+/** Our side of the Lightning channels for one asset (undefined when the wallet has no Lightning rail). */
+export async function lightningBalance(wallet: WalletPort, assetId: string): Promise<bigint | undefined> {
+  if (!wallet.lightningStatus) return undefined;
+  const ln = await wallet.lightningStatus().catch(() => undefined);
+  if (!ln?.enabled) return undefined;
+  return ln.channels.filter((c) => c.assetId === assetId).reduce((s, c) => s + BigInt(c.localAsset), 0n);
+}
+
 /** The last running balance (0 when nothing settled). */
 export function finalBalance(rows: readonly BookRow[]): string {
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -158,9 +166,12 @@ export async function booksMismatches(wallet: WalletPort, src: BooksSources): Pr
   for (const a of assets) {
     const rows = await bookRows(transfers, a.assetId, src);
     const books = finalBalance(rows);
-    const settled = (await wallet.assetBalance(a.assetId)).settled;
+    const ln = (await lightningBalance(wallet, a.assetId)) ?? 0n;
+    const settled = (BigInt((await wallet.assetBalance(a.assetId)).settled) + ln).toString();
     if (books !== settled) {
-      out.push(`Books for ${a.ticker} (${a.assetId}) add up to ${books} base units, the wallet says ${settled}.`);
+      out.push(
+        `Books for ${a.ticker} (${a.assetId}) add up to ${books} base units, the wallet says ${settled} (on-chain + Lightning).`,
+      );
     }
   }
   return out;
