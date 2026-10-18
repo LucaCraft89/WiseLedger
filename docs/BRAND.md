@@ -59,19 +59,19 @@ Calm, clear, a little clever: a careful friend who reads the fine print. Plain w
 | Principle | Do | Don't |
 |---|---|---|
 | Clear over clever | "Your payment was sent." | "Bazinga! Invoice paid!" |
-| Be the careful friend | "This invoice asks you to pay a different account than last time. We stopped it so you can check." | "ALERT: anomaly detected." |
+| Be the careful friend | "This invoice asks you to pay a different account than last time. I stopped it so you can check." | "ALERT: anomaly detected." |
 | Say what to do next | "Ask the supplier by phone, then upload the invoice again." | "Verification failed." |
-| Calm under risk | "We did not pay. Nothing left your wallet." | "FRAUD!!! DO NOT PAY!!!" |
+| Calm under risk | "I did not pay. Nothing left your money." | "FRAUD!!! DO NOT PAY!!!" |
 | No jargon | "Waiting for Bitcoin to confirm (about a minute)." | "Awaiting 1 confirmation on signet." |
 Microcopy (use as is):
 | Moment | Text |
 |---|---|
 | Invoice uploaded | "Got it. Reading your invoice…" |
-| Safe verdict | "Looks fine. We found nothing suspicious." |
+| Safe verdict | "Looks fine. I found nothing suspicious." |
 | Review verdict | "Check before paying. Some details look unusual. Read the warnings below." |
-| Blocked verdict | "Do not pay. This invoice looks dangerous. We will not pay it." |
+| Blocked verdict | "Do not pay. This invoice looks dangerous. I will not pay it." |
 | Payment confirmed | "Payment sent. You can follow it under My invoices." |
-| Payment scheduled | "Scheduled. We will pay on {date} and tell you when it is done." |
+| Payment scheduled | "Scheduled. I will pay on {date} and tell you when it is done." |
 | No network | "No internet right now. Your invoice and your wallet stay on this device. Try again when you are back online." |
 
 ## 5. UI rules (ease of use over aesthetics)

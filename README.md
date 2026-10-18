@@ -8,6 +8,50 @@
 
 > A local AI that reads your invoices, catches the fraudulent ones, and pays the good ones with RGB assets on Bitcoin, from your own self-custodial wallet. Nothing leaves your device.
 
+## For the judges
+Two ways to run it. Both use the same commands; the binary only saves you installing Node and pnpm.
+
+**Machine:** Linux x64 with glibc ≥ 2.38 (Ubuntu 24.04, Debian 13, Fedora 40+; on Windows use WSL2 Ubuntu 24.04), ~4 GB free RAM, ~6 GB disk, internet (Mutinynet test network and a one-time ~2.6 GB model download). Check: `ldd --version | head -1`.
+
+### A. The release binary (one file)
+Download `wiseledger-linux-x64.run` from [Releases](https://github.com/LucaCraft89/WiseLedger/releases/latest). It is a self-extracting archive: Node 22, pnpm, the source code of this repository and its installed dependencies. Nothing is compiled from our code: the app runs from the TypeScript sources it unpacks, so you can read them in `~/WiseLedger-app/`.
+```bash
+chmod +x wiseledger-linux-x64.run
+./wiseledger-linux-x64.run demo:mock          # first run unpacks to ~/WiseLedger-app (~1 min), then the whole flow on mocks
+./wiseledger-linux-x64.run wallet:smoke       # creates the payer and supplier wallets, prints the payer's funding address
+```
+Every argument is passed to `pnpm` inside `~/WiseLedger-app`, so `./wiseledger-linux-x64.run <x>` is exactly `pnpm <x>` from source. Your settings are in `~/WiseLedger-app/.env` (created from `.env.example` on first run) and your wallets in `~/WiseLedger-app/.data/` (keep it: it holds your test seeds).
+
+### B. From source (if the binary does not start)
+Follow [Quick start](#quick-start-copy-paste-checked-from-a-fresh-clone-on-18-oct-2026) below: `git clone`, Node 22, `pnpm install`, then the same commands as above with `pnpm` instead of `./wiseledger-linux-x64.run`.
+
+### Get test sats and TUSDT (both paths, ~5 minutes, once)
+Replace `W` with `./wiseledger-linux-x64.run` (binary) or `pnpm` (source).
+1. `W wallet:smoke`: prints the **payer address** (`tb1…`).
+2. **Sats:** paste that address into <https://faucet.mutinynet.com> and ask for 100 000 sats. Mutinynet makes a block every ~30 s.
+3. Fund the supplier wallet from yours: `W wallet:smoke -- --fund-payee 30000`.
+4. `W wallet:smoke` again: creates the UTXOs RGB needs and shows the balances.
+5. **TUSDT:** `W -F wallet issue-asset` issues your own `TUSDT` (RGB NIA, precision 6, 1000 tokens, no value) and prints its asset ID `rgb:…`. Our own TUSDT cannot be sent from a faucet: an RGB token is its contract, so each judge issues one, exactly as we did.
+6. Put that ID in `~/WiseLedger-app/.env` (binary) or `.env` (source): `ASSET_ALLOWLIST=rgb:…`.
+
+### Run the demo
+```bash
+W demo:prepare                # fresh RGB invoices from the supplier wallet + 4 invoice PDFs in .data/demo/
+W dev                         # terminal 1: open http://localhost:5173 (first start downloads the QVAC model, ~2.6 GB)
+W -F wallet payee watch       # terminal 2: the supplier's wallet, so payments to it settle
+```
+Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sentence, watch the RGB transfer settle. Then upload the scam, duplicate and injection invoices: each one is stopped with a plain reason. Ask the Treasurer "how much do I have?", "create an invoice for 5 TUSDT", "pay the Acme invoice tomorrow at 9". `http://localhost:8787/api/health` says in plain words anything still missing (sats, asset, model). Small-RAM machine: `QVAC_MODEL=QWEN3_5_0_8B_MULTIMODAL_Q4_K_M` in `.env`. UI only, no chain and no AI: `LLM_PROVIDER=mock` and `WALLET_BACKEND=mock`.
+
+### RGB over Lightning, with our own LSP (optional)
+The binary also carries the Lightning modules (`@utexo/rgb-lightning-node-nodejs` built from source + patched `@utexo/wdk-rgb-lightning`, see Stack declared) and sets `LN_MODULES` for you. From source you build them yourself (`infra/RUNBOOK-chain.md`) and set `LN_MODULES=/path/to/node_modules`.
+```bash
+W -F wallet lsp fund 50000    # sats from your payer wallet to the LSP node A (.data/ln/a) + colorable UTXOs
+W -F wallet lsp status        # node A's sats, TUSDT and channels; says in plain words what a channel still needs
+# in .env: LN_ENABLED=true  LN_LSP_URL=http://127.0.0.1:8790
+W dev                         # now also starts the LSP; the app's node gets a TUSDT channel from it
+```
+Then Wallet → Get paid → "Lightning" makes an RGB LN invoice, and `W -F wallet lsp-client b-receive 1` prints a supplier's Lightning invoice you can put on an invoice and pay "via Lightning (instant)".
+
 ## The idea
 Invoice fraud (changed bank details, fake suppliers, duplicate invoices, instructions hidden inside a document) is a real loss for freelancers, small firms and accountants, and paying in digital dollars makes a wrong payment irreversible. WiseLedger puts a private, on-device checkpoint between an invoice and the money:
 
@@ -45,6 +89,28 @@ The product is written from scratch during the hackathon, and its test asset is 
 
 ## How to run
 Everything runs on your own machine: the AI model, the wallet and the app. Only the Bitcoin test network (Mutinynet) is reached over the internet.
+
+### Quick start (copy-paste, checked from a fresh clone on 18 Oct 2026)
+```bash
+# 0. Check the machine first: must print linux x64 / linux arm64 / darwin arm64, glibc 2.38+ and Node v22
+node -e "console.log(process.platform, process.arch, process.version)"; ldd --version 2>/dev/null | head -1
+
+# 1. Get the code and the tools (Node 22 + pnpm 12.11.2, pinned in package.json)
+git clone https://github.com/LucaCraft89/WiseLedger && cd WiseLedger
+nvm install 22 && nvm use 22
+corepack enable || npm install -g pnpm@12.11.2
+pnpm install                  # ~10 s with a warm cache; RUN IT AGAIN AFTER EVERY git pull
+pnpm check                    # must end with "secret-scan: ok"
+pnpm demo:mock                # must end with "All three paths behaved"
+
+# 2. Real app (terminal 1): QVAC + RGB wallet on Mutinynet
+cp .env.example .env          # then set ASSET_ALLOWLIST (step 6 below)
+pnpm dev                      # server :8787 + web http://localhost:5173
+
+# 3. The supplier's wallet (terminal 2), so payments to it settle
+pnpm -F wallet payee watch
+```
+UI only, no chain and no AI (any machine, also Intel Mac / plain Windows): set `LLM_PROVIDER=mock` and `WALLET_BACKEND=mock` in `.env`, then `pnpm dev`.
 
 ### 1. Prerequisites
 | Need | Why |
@@ -96,14 +162,17 @@ pnpm -F wallet issue-asset   # issues TUSDT (NIA, precision 6) and prints its as
 ```
 Put the asset ID in `.env` as `ASSET_ALLOWLIST=rgb:…` (the payment limits `PAYMENT_CAP` / `DAILY_CAP` are in base units).
 
+**Several computers: issue TUSDT once.** An RGB token is its contract ID, not its ticker: every `issue-asset` run creates a new contract, and a "TUSDT" from another contract is a different token (the app stops it as "Unexpected token"). Issue on one computer only. On the others, make a payment request for that asset ID (Wallet → Get paid), pay it from the first computer, and set the same `ASSET_ALLOWLIST=rgb:…` everywhere.
+
 Optional: `pnpm wallet:smoke -- --pay` makes one real 5 TUSDT transfer payer → supplier and waits until it settles.
 
 ### 7. Run
 ```bash
 pnpm demo:prepare            # fresh RGB invoices from the supplier wallet + 4 demo invoice PDFs in .data/demo/
-pnpm -F wallet payee watch & pnpm dev    # supplier side + server (:8787) and web → http://localhost:5173
+pnpm dev                     # terminal 1: server (:8787) and web → http://localhost:5173
+pnpm -F wallet payee watch    # terminal 2: the supplier side (accepts payments)
 ```
-The first start downloads the QVAC model (~2.6 GB, once) and the speech model on the first voice note. `http://localhost:8787/api/health` lists anything still missing (test sats, asset, indexer, proxy, model) in plain words; the app shows the same at the top of the page. One Ctrl+C stops both.
+The first start downloads the QVAC model (~2.6 GB, once) and the speech model on the first voice note. `http://localhost:8787/api/health` lists anything still missing (test sats, asset, indexer, proxy, model) in plain words; the app shows the same at the top of the page. Ctrl+C in each terminal stops it.
 
 ### 8. First demo
 Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sentence, watch the RGB transfer settle (explorer link). Then upload the scam, duplicate and injection invoices: each is blocked with a plain reason. Ask the Treasurer things like "how much do I have?", "create an invoice for 5 TUSDT" or "pay the Acme invoice tomorrow at 9".
@@ -115,6 +184,13 @@ Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sent
 ### Troubleshooting
 | Symptom | Fix |
 |---|---|
+| `Cannot find module` / type errors right after `git pull` (e.g. `@fontsource-variable/…`) | a teammate added a dependency: `pnpm install` |
+| `Unsupported platform-arch` and the process exits | rgb-lib has no build for this machine (Intel Mac, Windows outside WSL): use WSL2 Ubuntu 24.04, or the mock wallet (`WALLET_BACKEND=mock`) for the UI |
+| `GLIBC_2.38 not found` | the OS is too old (Ubuntu 22.04 has 2.35): use Ubuntu 24.04 / Debian 13 / Fedora 40+, or WSL2 Ubuntu 24.04 |
+| `engine node … incompatible` or rgb-lib crashes on start | Node 24+ or < 22.17: `nvm install 22 && nvm use 22`, then `pnpm install` |
+| pnpm warns "Ignored build scripts" and rgb-lib is missing | `pnpm rebuild` (the allowed builds are listed in `pnpm-workspace.yaml`) |
+| WSL2 very slow or file watching broken | clone inside the Linux home (`cd ~`), not under `/mnt/c`; open http://localhost:5173 in the Windows browser |
+| `corepack enable` fails (permissions) | `npm install -g pnpm@12.11.2` |
 | `EADDRINUSE` on 8787 or 5173 | an old server is still running: `pkill -f "tsx.*src/main.ts"; pkill -f vite` |
 | "wallet is in use" / `WalletInUse` | another process holds the wallet folder (e.g. `payee watch` while running `payee pay`): stop it |
 | rgb-lib fails to load / `Cannot find module …rgb-lib-linux-x64` | wrong Node (use 22.x) or glibc < 2.38; rerun `pnpm install` after `nvm use` |
@@ -149,6 +225,8 @@ Chain details, troubleshooting and the offline regtest: [`infra/RUNBOOK-chain.md
 - Receive side: invoices to get paid, matched to incoming transfers. Scheduled payments, labels and a fiscal report over the wallet's transfers.
 - Treasurer chat: answers stream word by word, keeps the conversation when you switch pages (New chat clears it), knows the wallet and the platform, creates payment requests and links to what it made; replies about money are built by code from the tool results.
 - Web app polish for first-time users: wallet tabs (Overview, Get paid, Details) with the active spending rules and what was spent in 24 h, dark mode, drag-and-drop upload, plain-language errors, a clear message when the server is not reachable (no silent demo data), faster loading (background sync slows down when idle).
+- **Payment requests you can manage:** a request made in the chat shows as a card (copy, QR, live status, still there after a reload); under Wallet › Get paid every request can be opened again, copied, cancelled while nobody pays it (a payment that still arrives is shown, never hidden), archived, filtered and paged.
+- **No invented data:** every field the Analyst extracts is kept only if it is printed in the document (text, PDF text layer, OCR); a document that is only an RGB payment request is read by the wallet's decoder with no model call, and says so plainly ("This is a payment request, not an invoice"). Evals: 15/15 verdicts, 0 invented fields.
 - RGB over Lightning: our own LSP for TUSDT on Mutinynet, and the app pays RGB Lightning invoices from its own node ([channel funding](https://mutinynet.com/tx/642bba27cd0552bc6687fff584f12e1dc2869bb03a1ddadcc7b9917e323c8cd7); a Lightning invoice paid through the app in under 25 s from confirmation).
 
 ## Mocked, simulated or hard-coded

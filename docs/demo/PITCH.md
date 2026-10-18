@@ -8,7 +8,7 @@ Never say "real money": it is a test network and a test asset.
 - Small firms, freelancers and accountants pay suppliers from invoices. A fake invoice, a look-alike supplier or "our bank details have changed" is enough to lose the money.
 - Invoices are private documents: sending them to a cloud AI is a privacy problem.
 - Stablecoin payments on Bitcoin are fast, but nothing checks the invoice before the money moves.
-- One line: **"WiseLedger is a local AI payment firewall: invoice in, fraud checked, RGB payment out."**
+- Opening line: **"WiseLedger is not a bank account and not just a wallet. It's a money desk: your books like an account, your money in your own hands like a wallet, and a careful owl who reads every invoice before you pay."** Then: invoice in, fraud checked, RGB payment out.
 
 ## 0:30–2:30 · Live flow (slides 3–4, then the app)
 1. Upload the good invoice (PDF from `pnpm demo:prepare`). The **Analyst** (QVAC, Qwen 3.5 2B, on this laptop) reads it and fills a fixed form. It has **no tools**. The live box shows the model reading.
