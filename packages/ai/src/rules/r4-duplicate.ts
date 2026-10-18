@@ -8,14 +8,17 @@ const WHY = {
   rgbInvoice: 'the same payment request',
 } as const;
 
-export const r4Duplicate: Rule = ({ history }) => {
+export const r4Duplicate: Rule = ({ kind, history }) => {
   const first = history[0];
   if (!first) return [];
   return [
     {
       code: FLAG_CODES.R4_DUPLICATE,
       severity: 'block',
-      message: `You already received this invoice (${WHY[first.matchedOn]}). Paying it again would pay twice.`,
+      message:
+        kind === 'payment_request'
+          ? 'You already received this payment request. Paying it again would pay twice.'
+          : `You already received this invoice (${WHY[first.matchedOn]}). Paying it again would pay twice.`,
       evidence: first.invoiceId,
     },
   ];

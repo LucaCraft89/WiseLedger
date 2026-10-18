@@ -8,7 +8,10 @@ const EXPECTED = JSON.parse(readFileSync(resolve(DIR, 'expected.json'), 'utf8'))
   fixtures: { id: string; rgbInvoice: string; decoded: Record<string, unknown> }[];
 };
 
-describe('decodeRgbInvoiceOffline (rgb-lib Invoice, no wallet, no network)', () => {
+// rgb-lib ships native builds for these only (its loader exits the process elsewhere, e.g. Intel macOS, Windows).
+const NATIVE = ['linux-x64', 'linux-arm64', 'darwin-arm64'].includes(`${process.platform}-${process.arch}`);
+
+describe.skipIf(!NATIVE)('decodeRgbInvoiceOffline (rgb-lib Invoice, no wallet, no network)', () => {
   for (const f of EXPECTED.fixtures) {
     it(`${f.id}: the real Mutinynet request decodes to expected.json`, () => {
       expect(decodeRgbInvoiceOffline(f.rgbInvoice)).toEqual({ rgbInvoice: f.rgbInvoice, ...f.decoded });
