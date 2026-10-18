@@ -8,6 +8,10 @@ const norm = (n: string) => {
   return NETWORK_ALIASES[k] ?? k;
 };
 
+/** The decoded network is one the config accepts (Mutinynet reports `signet`). */
+export const networkAccepted = (networks: string[], network: string): boolean =>
+  networks.map(norm).includes(norm(network));
+
 export const r1RgbInvoice: Rule = ({ extraction, decoded, config, now }) => {
   const flag = (message: string, evidence?: string): RiskFlag => ({
     code: FLAG_CODES.R1_RGB_INVOICE,
@@ -33,11 +37,15 @@ export const r1RgbInvoice: Rule = ({ extraction, decoded, config, now }) => {
   if ((railOf(decoded) === 'lightning') !== printedLn) {
     return [flag(`The wallet read this ${what} as a different kind of payment. Ask the supplier for a new one.`, inv)];
   }
-  if (!config.networks.map(norm).includes(norm(decoded.network))) {
+  if (!networkAccepted(config.networks, decoded.network)) {
     return [flag(`The ${what} is for another network (${decoded.network}).`, inv)];
   }
   if (decoded.expiresAt && Date.parse(decoded.expiresAt) <= now.getTime()) {
     return [flag(`The ${what} has expired. Ask the supplier for a new one.`, decoded.expiresAt)];
+  }
+  // Its RGB proxy already holds a payment for it: someone paid it, and a request is paid once.
+  if (decoded.alreadyPaid) {
+    return [flag(`This ${what} was already paid by someone. A request can be paid only once: ask for a new one.`)];
   }
   return [];
 };

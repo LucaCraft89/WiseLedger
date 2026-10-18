@@ -289,7 +289,7 @@ describe('Treasurer chat (MockLlm)', () => {
       },
     );
     expect(r.text).toBe(
-      'Done: a payment request for 500.00 TUSDT, valid until 11:02 (62 minutes). Copy it below and send it to whoever pays you; it is also listed under Wallet → Get paid. A payment request needs no Bitcoin address: whoever pays uses this request.',
+      'Done: a payment request for 500.00 TUSDT, valid until 11:02 (62 minutes). Copy it from the card below and send it to whoever pays you; it is also listed under Wallet → Get paid. A payment request needs no Bitcoin address: whoever pays uses this request.',
     );
     expect(tokens.join('')).toBe(r.text);
     expect(llm.calls).toHaveLength(1); // no second model call to phrase it

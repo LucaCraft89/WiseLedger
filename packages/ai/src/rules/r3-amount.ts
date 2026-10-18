@@ -1,7 +1,7 @@
 // R3 · amount > 0, ≤ spendable, ≤ cap, printed total = payment amount, total = Σ lines, amount in words = digits.
 // A total in another currency than the payment is R8's job.
 import { FLAG_CODES, type RiskFlag } from 'core';
-import { paymentAmount, paymentAsset, type Rule, toBaseUnits } from './types.js';
+import { isDecoded, OPEN_AMOUNT_MESSAGE, paymentAmount, paymentAsset, type Rule, toBaseUnits } from './types.js';
 
 const cents = (d: string) => Math.round(Number(d) * 100);
 
@@ -14,6 +14,20 @@ export const r3Amount: Rule = (input) => {
   const amount = paymentAmount(input);
   const asset = paymentAsset(input);
   const info = asset ? config.assets[asset] : undefined;
+
+  // A bare payment request has no printed total, lines or words to compare: only its own amount counts.
+  if (input.kind === 'payment_request') {
+    if (amount === undefined) {
+      if (isDecoded(input.decoded) && !input.decoded.amount) f('warn', OPEN_AMOUNT_MESSAGE);
+      else f('block', 'We could not work out how much to pay.');
+    } else {
+      const a = BigInt(amount);
+      if (a <= 0n) f('block', 'The amount to pay is zero.');
+      if (balance && a > BigInt(balance.spendable)) f('block', 'You do not have enough funds to pay this request.');
+      if (a > BigInt(config.paymentCap)) f('block', 'The amount is above your payment limit.');
+    }
+    return flags;
+  }
 
   if (amount === undefined) {
     f('block', 'We could not work out how much to pay.');

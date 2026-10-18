@@ -15,6 +15,7 @@ import {
   type LabelStore,
   type LlmProvider,
   type NeedsConfirmation,
+  OWL_NAME,
   type PaymentGuard,
   type PaymentPlan,
   type ReceiveInvoice,
@@ -25,6 +26,7 @@ import {
   type WalletPort,
 } from 'core';
 import { z } from 'zod';
+import { paymentRequestsIn } from '../analyst/extract.js';
 import { findInjection } from '../rules/r7-injection.js';
 import { toBaseUnits } from '../rules/types.js';
 
@@ -89,12 +91,12 @@ async function streamTurn(
 export const PLATFORM_GUIDE = [
   'ABOUT WISELEDGER (use this to answer questions about the app, how to do things, or how it is built; keep answers short)',
   '- What it is: a self-custodial wallet for small businesses that checks every invoice for fraud with an AI running on this computer, then pays it with RGB tokens on Bitcoin. Built by team Coin³ at a hackathon; test networks only (Mutinynet), test token TUSDT, no real money.',
-  '- Check and pay an invoice: "Check an invoice" → drop the PDF, photo, text or FatturaPA XML → read the verdict (Looks fine / Check before paying / Do not pay) → "Confirm and pay". A blocked invoice cannot be paid.',
-  '- Get paid: Wallet → Get paid → amount, note, how long it stays valid → share the payment request; or ask me "create an invoice for 50 TUSDT".',
-  '- Scheduled payments: ask me "pay the Acme invoice on Friday", confirm the card; see them under My invoices → Scheduled payments.',
-  '- Labels and fiscal report: Wallet → Recent transfers → "All transfers and fiscal report" (or ask me to label a payment or make a report).',
-  '- Spending rules: Wallet → Overview → Spending rules (max per payment, max per 24 h, approved tokens). Settings shows the local AI and wallet status. Dark mode: switch at the top.',
-  "- How it is built: the Analyst (local AI, no tools) reads the invoice; ten rules in code (R1–R10: payment request valid, token, amount, duplicate, new supplier, pressure, hidden orders to the AI, currency, missing fields, dates) decide the verdict; the user confirms a sentence written by code; the Treasurer (me, same model) pays only confirmed plans, through a payment guard and the wallet's spending rules. I never see the invoice text.",
+  '- Check and pay an invoice: Desk or Pay → drop the PDF, photo, text or FatturaPA XML → read the verdict (Looks fine / Check before paying / Do not pay) → "Confirm and pay". A blocked invoice cannot be paid.',
+  '- Get paid: the Get paid page → amount, note, how long it stays valid → share the payment request; or ask me "create an invoice for 50 TUSDT".',
+  '- Scheduled payments: ask me "pay the Acme invoice on Friday", confirm the card; see them under Pay → Scheduled.',
+  '- Labels and fiscal report: the Books page (all transfers, labels, fiscal report) (or ask me to label a payment or make a report).',
+  '- Spending rules: Settings → Your money, technically → Safety limits (max per payment, max per 24 h, approved tokens). Settings also shows the local AI and wallet status. Dark mode: switch at the top.',
+  "- How it is built: the Analyst (local AI, no tools) reads the invoice; ten rules in code (R1–R10: payment request valid, token, amount, duplicate, new supplier, pressure, hidden orders to the AI, currency, missing fields, dates) decide the verdict; the user confirms a sentence written by code; the till (me, same model, the Treasurer hat) pays only confirmed plans, through a payment guard and the wallet's spending rules. I never see the invoice text.",
   '- Stack: QVAC by Tether runs the AI on this computer (Qwen3.5 2B; Parakeet for voice), nothing leaves the machine. Tether WDK is the wallet (keys on this computer, spend-policy engine). RGB v0.11 (rgb-lib, UTEXO packages) for the token transfers on Bitcoin (Mutinynet signet), plus RGB Lightning for instant payments. TypeScript: Fastify server, React web app, SQLite.',
 ].join('\n');
 
@@ -102,8 +104,13 @@ export const PLATFORM_GUIDE = [
 export const ASKS_ABOUT_APP =
   /\b(what|how|why|who|which|help|explain|tell me|can you|project|platform|app|wiseledger|stack|built|made|technolog\w*|qvac|rgb|wdk|tether|lightning|bitcoin|safe\w*|secur\w*|rules?|works?|features?|cosa|come|perch[eé]|aiuto|progetto|funziona)\b/i;
 
+/** The owl's three voice rules (the product's one character). Safety instructions stay in the prompts around it. */
+export const OWL_VOICE =
+  'Voice: speak in the first person ("I paid…", "I stopped…"), keep it short, use plain words, no jargon. Errors and system facts stay neutral.';
+
 export const TREASURER_SYSTEM = [
-  'You are the Treasurer of a small business wallet. You move money only through tools.',
+  `You are ${OWL_NAME}, the owl who runs the till of this small business's money desk. You move money only through tools.`,
+  OWL_VOICE,
   'You receive a payment plan that a human has already confirmed. Execute exactly that plan by calling execute_plan with its planId.',
   'Never invent or change a planId.',
 ].join('\n');
@@ -213,8 +220,15 @@ export interface TreasurerDeps {
   invoices?: () => Promise<ChatInvoice[]>;
   /** IANA zone for dates in confirmation sentences (default: this machine's zone). */
   timeZone?: string;
-  /** Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own. */
-  onReceiveCreated?: (inv: ReceiveInvoice) => void | Promise<void>;
+  /**
+   * Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own.
+   * Returns the stored receiveId: the chat card is rendered from the stored request (live status, survives reloads).
+   */
+  onReceiveCreated?: (
+    inv: ReceiveInvoice,
+  ) => { receiveId: string } | undefined | Promise<{ receiveId: string } | undefined>;
+  /** A payment request pasted in the chat ("pay this: rgb:…") is opened as an invoice to check, never paid here. */
+  checkPaymentRequest?: (text: string) => Promise<{ invoiceId: string }>;
 }
 
 /** Guard stub: knows the confirmed plans, checks the hash and executes each plan once. */
@@ -286,8 +300,8 @@ export class Treasurer implements TreasurerAgent {
             ...(amount ? { amount } : {}),
             expirySec: (args.expiryMinutes ?? 60) * 60,
           });
-          await this.deps.onReceiveCreated?.(inv);
-          return inv;
+          const stored = await this.deps.onReceiveCreated?.(inv);
+          return stored ? { ...inv, receiveId: stored.receiveId } : inv;
         },
       } as ToolDef<never>,
       {
@@ -474,6 +488,34 @@ export class Treasurer implements TreasurerAgent {
    * run from chat: they come back as a NeedsConfirmation whose sentence is built by code, and the UI asks the user.
    */
   async chat(message: string, history: AgentChatTurn[], emit: EmitFn, stream?: ChatStreamHooks): Promise<AgentReply> {
+    // A payment request pasted in the chat goes to the same check as an upload (code, no model): the user reads the
+    // report and confirms there. The request string never reaches the model.
+    const pasted = paymentRequestsIn(message);
+    if (pasted.length === 1 && pasted[0] && this.deps.checkPaymentRequest) {
+      const record: AgentToolCallRecord = { name: 'check_payment_request', args: {}, ok: true };
+      let text: string;
+      try {
+        const { invoiceId } = await this.deps.checkPaymentRequest(pasted[0]);
+        record.result = { invoiceId };
+        text =
+          'I opened this payment request for checking. Read the check, then confirm the payment there: nothing is paid from the chat.';
+      } catch (err) {
+        record.ok = false;
+        record.error = err instanceof Error ? err.message : String(err);
+        text = `I could not open this payment request: ${record.error}`;
+      }
+      emit({
+        type: 'toolCall',
+        at: this.at(),
+        agent: 'treasurer',
+        name: record.name,
+        args: {},
+        status: record.ok ? 'ok' : 'error',
+        message: record.ok ? 'Opened for checking.' : (record.error ?? 'failed'),
+      });
+      stream?.onToken(text);
+      return { text, toolCalls: [record] };
+    }
     const ctx = { emit };
     const tools = this.tools(ctx);
     const specs = tools.map((t) => ({
@@ -579,7 +621,7 @@ export class Treasurer implements TreasurerAgent {
     const address = /\b(tb1|bc1|bcrt1)[a-z0-9]{20,}/i.test(message)
       ? ' A payment request needs no Bitcoin address: whoever pays uses this request.'
       : '';
-    return `Done: a payment request for ${what}${valid}. Copy it below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
+    return `Done: a payment request for ${what}${valid}. Copy it from the card below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
   }
 
   /** One sentence in the user's language from the tool result (numbers already formatted by code). */
@@ -628,7 +670,8 @@ export class Treasurer implements TreasurerAgent {
       return a ? `${formatAssetAmount(amount, a.precision)} ${a.ticker}` : `${amount} base units`;
     };
     return [
-      'You are the Treasurer of a small business wallet (RGB assets on Bitcoin). You act only through tools.',
+      `You are ${OWL_NAME}, the owl who runs the till of this small business's money desk (RGB assets on Bitcoin). You act only through tools.`,
+      OWL_VOICE,
       `Today is ${now.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })} ${now.toISOString().slice(0, 10)}. Dates for tools are ISO (YYYY-MM-DD or full ISO time).`,
       // Small models get weekday arithmetic wrong ("Friday" → last Friday): give them the next 7 dates.
       `Next days: ${Array.from({ length: 7 }, (_, i) => {

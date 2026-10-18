@@ -9,6 +9,7 @@ import { r7Injection } from './r7-injection.js';
 import { r8Currency } from './r8-currency.js';
 import { r9MissingFields } from './r9-missing-fields.js';
 import { r10Dates } from './r10-dates.js';
+import { r11RgbRequest } from './r11-rgb-request.js';
 import type { Rule, RuleInput } from './types.js';
 
 export * from './r1-rgb-invoice.js';
@@ -21,6 +22,8 @@ export * from './r7-injection.js';
 export * from './r8-currency.js';
 export * from './r9-missing-fields.js';
 export * from './r10-dates.js';
+export * from './r11-rgb-request.js';
+export * from './rgb-check.js';
 export * from './types.js';
 
 export const RULES: Rule[] = [
@@ -34,6 +37,7 @@ export const RULES: Rule[] = [
   r8Currency,
   r9MissingFields,
   r10Dates,
+  r11RgbRequest,
 ];
 
 /** Runs every rule; the verdict comes from the flags only (any block → block, any warn → review). */
