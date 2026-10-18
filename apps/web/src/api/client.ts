@@ -30,6 +30,7 @@ import {
   type ScheduleListResponse,
   SSE_EVENT_NAME,
   type TranscribeResponse,
+  type TransferDetailResponse,
   type TransfersResponse,
   type WalletReceiveRequest,
   type WalletReceiveResponse,
@@ -62,6 +63,8 @@ export interface ApiClient {
   btcTransactions(): Promise<BtcTransactionsResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
+  /** One transfer with asset, status times and linked invoice ("How this was settled"). */
+  transfer(transferId: string): Promise<TransferDetailResponse>;
   /** Replace the labels of one transfer. */
   setLabels(transferId: string, req: LabelsPutRequest): Promise<LabelsPutResponse>;
   /** Talk to the Treasurer (local AI with wallet tools). */
@@ -209,6 +212,7 @@ export function createHttpClient(base = ''): ApiClient {
     },
     btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
+    transfer: (transferId) => call(`${base}/api/transfers/${encodeURIComponent(transferId)}`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
     chat: (req) => call(`${base}/api/agent/chat`, json(req)),

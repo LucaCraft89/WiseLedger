@@ -2,6 +2,7 @@ import type { AnalysisReport } from './api/contracts.js';
 import { FlagList } from './FlagCard.js';
 import { VERDICT_ACCENT, VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_ICON, VERDICT_LABELS } from './lib/format.js';
 import { splitFlags } from './lib/payment.js';
+import { RgbCheckCard } from './RgbCheckCard.js';
 
 /** The Analyst's report: verdict banner, flags by severity, plain-language summary, questions. */
 export function ReportView({ report }: { report: AnalysisReport }) {
@@ -24,6 +25,8 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         </strong>
         <div>{VERDICT_EXPLAIN[report.verdict]}</div>
       </div>
+
+      {report.rgbCheck && report.rgbCheck.length > 0 && <RgbCheckCard lines={report.rgbCheck} />}
 
       <h4>In short</h4>
       <p>{report.summary}</p>

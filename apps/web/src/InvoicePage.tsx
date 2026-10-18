@@ -23,6 +23,7 @@ import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/for
 import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallParts } from './lib/live.js';
 import { FailureCard, ResultCard } from './PaymentCards.js';
 import { ReportView } from './ReportView.js';
+import { SettlementCard } from './SettlementCard.js';
 import { errorText, useToast } from './ui.js';
 
 const STEP_ICON = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
@@ -199,6 +200,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       {showsProgress(invoice.state, events) && <PaymentProgressView progress={progress} />}
 
       <FinalStatus
+        api={api}
         detail={detail}
         progress={progress}
         assets={assets}
@@ -279,11 +281,13 @@ function sentenceFor(plan: PaymentPlan, assets: AssetMeta[], serverSentence: str
 }
 
 function FinalStatus({
+  api,
   detail,
   progress,
   assets,
   onRetry,
 }: {
+  api: ApiClient;
   detail: InvoiceDetailResponse;
   progress: PaymentProgress;
   assets: AssetMeta[];
@@ -299,7 +303,18 @@ function FinalStatus({
         txid={progress.txid}
         {...(progress.paymentHash ? { paymentHash: progress.paymentHash } : {})}
         lightning={isLightningInvoice(plan?.rgbInvoice)}
-      />
+      >
+        {progress.transferId && (
+          <details style={{ marginTop: 12 }} data-testid="how-settled">
+            <summary>How this was settled</summary>
+            <SettlementCard
+              api={api}
+              transferId={progress.transferId}
+              refreshKey={progress.txid ?? progress.paymentHash}
+            />
+          </details>
+        )}
+      </ResultCard>
     );
   }
   if (progress.failed) {

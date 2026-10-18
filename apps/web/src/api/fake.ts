@@ -561,6 +561,35 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     async transfers() {
       return { transfers: await transferList() };
     },
+    async transfer(transferId) {
+      const dto = (await transferList()).find((x) => x.transferId === transferId);
+      const t = await wallet.getTransfer(transferId);
+      if (!dto || !t) throw new ApiCallError('NOT_FOUND', 'We could not find this payment in your wallet.');
+      const a = t.assetId ? (await wallet.listAssets()).find((x) => x.assetId === t.assetId) : undefined;
+      const invoiceId = transferInvoice.get(transferId);
+      const inv = invoiceId ? recs.get(invoiceId) : undefined;
+      return {
+        transfer: {
+          ...dto,
+          kind: t.direction,
+          rail: t.rail ?? 'onchain',
+          ...(t.sealType ? { sealType: t.sealType } : {}),
+          ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+          ...(t.transportEndpoints ? { transportEndpoints: t.transportEndpoints } : {}),
+          ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+          ...(t.settledAt ? { settledAt: t.settledAt } : {}),
+        },
+        ...(a
+          ? { asset: { assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, schema: a.schema } }
+          : {}),
+        statusTimes: {
+          WaitingCounterparty: t.createdAt,
+          ...(t.status !== 'WaitingCounterparty' ? { [t.status]: t.updatedAt } : {}),
+        },
+        ...(inv && invoiceId ? { invoice: { invoiceId, filename: inv.summary.filename } } : {}),
+        ...(t.paymentHash ? { lightning: { paymentHash: t.paymentHash } } : {}),
+      };
+    },
     async setLabels(transferId, req) {
       const parsed = LabelsPutRequest.safeParse(req);
       if (!parsed.success) {

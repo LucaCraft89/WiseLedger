@@ -164,6 +164,11 @@ textarea {
   color: var(--wl-block-text);
   border: 2px solid var(--wl-block);
 }
+.wl-badge[data-tone="info"] {
+  background: var(--wl-info-bg);
+  color: var(--wl-ink);
+  border: 2px solid var(--wl-c-info);
+}
 
 @media (prefers-reduced-motion: reduce) {
   * {
