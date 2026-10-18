@@ -13,7 +13,7 @@ describe('desk words', () => {
     expect(greeting(2, at)).toBe('Good morning. 2 things need you.');
     const balances = [{ assetId: 'a', ticker: 'TUSDT', precision: 6, spendable: '975000000' }];
     expect(balanceSentence({ balances, feeSats: '1000000' })).toBe(
-      '975.00 TUSDT ready to spend · 0.01 test BTC for fees',
+      '975.00 TUSDT ready to spend · 1,000,000 sats for fees',
     );
   });
   it('links each Lately line to its invoice, request or the books', () => {

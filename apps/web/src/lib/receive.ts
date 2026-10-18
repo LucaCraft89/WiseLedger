@@ -28,7 +28,7 @@ export function whyNotUsable(r: Pick<ReceiveRequestDto, 'status' | 'cancelledAt'
       return 'Someone is paying it right now: wait for the payment to arrive.';
     case 'received':
       return r.cancelledAt
-        ? 'It was paid: the money arrived after you cancelled it, and it is in your wallet.'
+        ? 'It was paid: the money arrived after you cancelled it, and it is in your money.'
         : 'It was paid: a payment request is used once.';
     case 'expired':
       return 'It expired before anyone paid it. Make a new one to get paid.';

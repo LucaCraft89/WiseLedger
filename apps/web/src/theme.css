@@ -39,35 +39,35 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --wl-c-surface: #1f2022;
-  --wl-c-muted: #b4b8bf;
+  --wl-c-surface: #10283f;
+  --wl-c-muted: #b4c0ce;
   --wl-c-error: #ff8a80;
   --wl-c-error-bg: #4a1f22;
-  --wl-c-line: #3b3f46;
-  --wl-c-ok-bg: #1f3a28;
+  --wl-c-line: #22405e;
+  --wl-c-ok-bg: #173a2e;
   --wl-c-review-bg: #3d3215;
   --wl-c-block-bg: #45201e;
-  --wl-c-neutral-bg: #2d3036;
-  --wl-c-faint: #8b9099;
-  --wl-c-strong: #e4e6ea;
-  --wl-c-bubble: #25282d;
-  --wl-c-info-bg: #262a30;
-  --wl-c-bubble-user: #1d3352;
-  --wl-c-good-bg: #1f3a28;
+  --wl-c-neutral-bg: #1c3d5f;
+  --wl-c-faint: #8fa3b8;
+  --wl-c-strong: #e6e9ee;
+  --wl-c-bubble: #163350;
+  --wl-c-info-bg: #163350;
+  --wl-c-bubble-user: #1d3f66;
+  --wl-c-good-bg: #173a2e;
   --wl-c-block: #ff8a80;
   --wl-c-review: #e8b44a;
   --wl-c-ok-text: #8fd6a5;
   --wl-c-pending-bg: #3d3215;
-  --wl-c-subtle-bg: #1f2226;
-  --wl-c-note-bg: #18263a;
+  --wl-c-subtle-bg: #0d2338;
+  --wl-c-note-bg: #12304d;
   --wl-c-warn-line: #d9963a;
-  --wl-c-line-soft: #2c2f35;
+  --wl-c-line-soft: #1a3652;
   --wl-c-sched-bg: #173339;
   --wl-c-running-bg: #1b3150;
   --wl-c-danger: #ff6b6b;
-  --wl-c-note-line: #2f4d75;
+  --wl-c-note-line: #2f5a86;
   --wl-c-warn-text: #e0c08a;
-  --wl-c-info: #a3adb8;
+  --wl-c-info: #a9b8c8;
   --wl-c-ok-line: #43b866;
   --wl-c-ok: #6fcf8f;
 
@@ -75,12 +75,12 @@
   --wl-blue: #a4c9ff;
   --wl-navy: #d4e3ff;
   --wl-rust: #ffb693;
-  --wl-white: #1f2022;
-  --wl-ink: #e4e2dd;
-  --wl-muted: #b4b8bf;
-  --wl-page: #131416;
-  --wl-line: #3b3f46;
-  --wl-ok-bg: #1f3a28;
+  --wl-white: #10283f;
+  --wl-ink: #e8e6e0;
+  --wl-muted: #b4c0ce;
+  --wl-page: #0a1e33;
+  --wl-line: #22405e;
+  --wl-ok-bg: #173a2e;
   --wl-ok-text: #b7ebc6;
   --wl-ok: #6fcf8f;
   --wl-review-bg: #3d3215;
@@ -89,7 +89,7 @@
   --wl-block-bg: #45201e;
   --wl-block-text: #ffb4ab;
   --wl-block: #ff8a80;
-  --wl-info-bg: #262a30;
+  --wl-info-bg: #163350;
 
   /* Material 3 roles (material.css) */
   --md-primary: #a4c9ff;
@@ -107,17 +107,17 @@
   --md-error: #f2b8b5;
   --md-error-container: #8c1d18;
   --md-on-error-container: #f9dedc;
-  --md-surface: #131416;
-  --md-surface-dim: #131416;
-  --md-surface-container-lowest: #0e0f11;
-  --md-surface-container-low: #1b1c1e;
-  --md-surface-container: #1f2022;
-  --md-surface-container-high: #2a2a2d;
-  --md-surface-container-highest: #343538;
-  --md-on-surface: #e4e2dd;
-  --md-on-surface-variant: #c5c6cf;
-  --md-outline: #8f9099;
-  --md-outline-variant: #45474e;
+  --md-surface: #0a1e33;
+  --md-surface-dim: #0a1e33;
+  --md-surface-container-lowest: #071626;
+  --md-surface-container-low: #0d2338;
+  --md-surface-container: #10283f;
+  --md-surface-container-high: #163350;
+  --md-surface-container-highest: #1c3d5f;
+  --md-on-surface: #e8e6e0;
+  --md-on-surface-variant: #b4c0ce;
+  --md-outline: #8199b2;
+  --md-outline-variant: #22405e;
 }
 
 /* QR codes stay dark on white so phones can scan them in both themes. */

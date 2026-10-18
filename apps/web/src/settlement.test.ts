@@ -58,7 +58,7 @@ describe('How this was settled', () => {
     expect(inc.validated).toBe('You checked the full history of these tokens before accepting them.');
     const failed = settlementView(detail({ status: 'Failed' }, { Settled: undefined, Failed: '2026-10-17T15:00:00Z' }));
     expect(failed.ladder.at(-1)).toMatchObject({ state: 'failed' });
-    expect(failed.failedNext).toMatch(/Nothing left your wallet/);
+    expect(failed.failedNext).toMatch(/Nothing was sent/);
   });
 
   it('Lightning: rail, payment hash and channel instead of txid and seal', () => {

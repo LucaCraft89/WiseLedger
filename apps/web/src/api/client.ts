@@ -2,6 +2,8 @@ import { fiscalUrl } from '../lib/ledger.js';
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
+  type BooksQuery,
+  type BooksResponse,
   type BtcTransactionsResponse,
   type ChatRequest,
   type ChatResponse,
@@ -25,6 +27,8 @@ import {
   type OnboardingRestoreResponse,
   type OnboardingStatusResponse,
   type OnboardingUnlockRequest,
+  type PayeesResponse,
+  type ReceiptResponse,
   type ReceiveRequestDto,
   type ReceivesListQuery,
   type ReceivesListResponse,
@@ -76,6 +80,12 @@ export interface ApiClient {
   btcTransactions(): Promise<BtcTransactionsResponse>;
   /** What needs the user today and what happened lately (GET /api/desk). */
   desk(): Promise<DeskResponse>;
+  /** The ledger with a running balance, newest first, one page (`nextBefore` when more follow). */
+  books(q?: Partial<BooksQuery>): Promise<BooksResponse>;
+  /** A settled payment as a receipt (404 NO_RECEIPT for anything else). */
+  receipt(transferId: string): Promise<ReceiptResponse>;
+  /** "Who pays you?" suggestions: earlier payers and the payee book. */
+  payees(q?: string): Promise<PayeesResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** One transfer with asset, status times and linked invoice ("How this was settled"). */
@@ -169,7 +179,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiCallError(
       'NETWORK',
-      'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+      'WiseLedger could not be reached on this computer. Check that it is running, then try again.',
     );
   }
   const body: unknown = await res.json().catch(() => undefined);
@@ -235,6 +245,14 @@ export function createHttpClient(base = ''): ApiClient {
       }
     },
     desk: () => call(`${base}/api/desk`),
+    books: (q) => {
+      const qs = new URLSearchParams(
+        Object.entries(q ?? {}).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])),
+      ).toString();
+      return call(`${base}/api/books${qs ? `?${qs}` : ''}`);
+    },
+    receipt: (transferId) => call(`${base}/api/receipts/${encodeURIComponent(transferId)}`),
+    payees: (q) => call(`${base}/api/payees${q ? `?q=${encodeURIComponent(q)}` : ''}`),
     btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
     transfer: (transferId) => call(`${base}/api/transfers/${encodeURIComponent(transferId)}`),
@@ -248,7 +266,7 @@ export function createHttpClient(base = ''): ApiClient {
       } catch {
         throw new ApiCallError(
           'NETWORK',
-          'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+          'WiseLedger could not be reached on this computer. Check that it is running, then try again.',
         );
       }
       // An older server without the stream route: the plain JSON chat still works.

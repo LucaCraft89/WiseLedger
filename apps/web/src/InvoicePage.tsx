@@ -22,11 +22,21 @@ import {
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
 import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallParts } from './lib/live.js';
-import { moodForState, owlHeadline, railWords } from './lib/owl.js';
+import { liveChip, moodForState, owlHeadline, railWords } from './lib/owl.js';
 import { FailureCard, ResultCard } from './PaymentCards.js';
+import { ReceiptCard } from './ReceiptCard.js';
 import { ReportView } from './ReportView.js';
 import { SettlementCard } from './SettlementCard.js';
+import { Stamp, useChangedTo } from './Stamp.js';
 import { errorText, OwlChip, useToast } from './ui.js';
+
+/** The stamp an invoice wears: CHECKED once I found nothing wrong, STOPPED BY WISE when I blocked it. */
+function stampFor(state: InvoiceDetailResponse['invoice']['state'], verdict?: 'ok' | 'review' | 'block') {
+  if (state === 'BLOCKED') return <Stamp kind="STOPPED" label="STOPPED BY WISE" />;
+  if (state === 'SCHEDULED') return <Stamp kind="SCHEDULED" />;
+  if (state === 'AWAITING_CONFIRMATION' && verdict === 'ok') return <Stamp kind="CHECKED" />;
+  return null;
+}
 
 const STEP_ICON = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
 const STEP_WORD = { pending: 'not started', running: 'in progress', done: 'done', error: 'failed' } as const;
@@ -180,7 +190,8 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
     <section>
       <h2>{invoice.filename}</h2>
       <p>
-        {mood && <OwlChip mood={mood} />} <StatusChip state={invoice.state} />
+        {mood && <OwlChip mood={mood} {...(liveChip(live) ? { chip: liveChip(live) } : {})} />}{' '}
+        <StatusChip state={invoice.state} /> {stampFor(invoice.state, report?.verdict)}
       </p>
       {report && <p className="wl-sayline">{owlHeadline(report.verdict, report.flags.length, invoice.state)}</p>}
 
@@ -222,10 +233,11 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       )}
 
       {invoice.state === 'BLOCKED' && (
-        <p style={{ background: 'var(--wl-c-error-bg)', padding: 12 }}>
-          We stopped this payment. You do not need to do anything. If you think this is a mistake, contact the supplier
-          using a phone number you already know, not the one on the invoice.
-        </p>
+        <div className="wl-bubble" data-tone="block" data-card="true" style={{ margin: '12px 0' }}>
+          <strong>I stopped this one.</strong> I will not pay it, and nothing left your money. You do not need to do
+          anything. If you think this is a mistake, contact the supplier using a phone number you already know, not the
+          one on the invoice.
+        </div>
       )}
 
       {showsProgress(invoice.state, events) && <PaymentProgressView progress={progress} />}
@@ -247,7 +259,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
 
       {report && (
         <details style={{ marginTop: 24 }} data-testid="how-we-checked">
-          <summary>How we checked it (steps, AI activity, status history)</summary>
+          <summary>How I checked it (steps, AI activity, status history)</summary>
           {steps}
         </details>
       )}
@@ -326,15 +338,23 @@ function FinalStatus({
 }) {
   const { state } = detail.invoice;
   const { plan } = detail;
+  const settledNow = useChangedTo(state, 'PAID');
   if (state === 'PAID') {
     return (
       <ResultCard
+        stamp={<Stamp kind="PAID" grow={settledNow} />}
         sentence={plan ? paidSentence(plan, assets) : undefined}
         transferId={progress.transferId}
         txid={progress.txid}
         {...(progress.paymentHash ? { paymentHash: progress.paymentHash } : {})}
         lightning={isLightningInvoice(plan?.rgbInvoice)}
       >
+        {progress.transferId && (
+          <details style={{ marginTop: 12 }} data-testid="receipt">
+            <summary>Receipt</summary>
+            <ReceiptCard api={api} transferId={progress.transferId} />
+          </details>
+        )}
         {progress.transferId && (
           <details style={{ marginTop: 12 }} data-testid="how-settled">
             <summary>How this was settled</summary>

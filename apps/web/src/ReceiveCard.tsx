@@ -11,7 +11,9 @@ import {
   receiveHref,
   whyNotUsable,
 } from './lib/receive.js';
+import { namesOf } from './lib/request-form.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
+import { ReceiptCard } from './ReceiptCard.js';
 import { CopyButton, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 type Assets = WalletResponse['assets'];
@@ -154,6 +156,10 @@ export function ReceiveCard({
         </p>
       )}
 
+      {variant === 'detail' && r.status === 'received' && r.transferId && (
+        <ReceiptCard api={api} transferId={r.transferId} />
+      )}
+
       {(r.status === 'expired' || r.status === 'cancelled' || r.status === 'failed') && (
         <button
           type="button"
@@ -181,7 +187,7 @@ export function ReceiveCard({
               <div role="dialog" aria-labelledby="cancel-title" className="wl-card" style={{ marginTop: 8 }}>
                 <strong id="cancel-title">Cancel this payment request?</strong>
                 <p>
-                  We will stop showing this request as open. If the payer already has it, they could still pay it until{' '}
+                  I will stop showing this request as open. If the payer already has it, they could still pay it until{' '}
                   {localTimeWithZone(r.expiresAt)}; you would still receive the money.
                 </p>
                 <button

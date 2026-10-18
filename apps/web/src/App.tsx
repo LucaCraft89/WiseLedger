@@ -125,7 +125,6 @@ export function App() {
               WiseLedger
             </a>
           </h1>
-          <ThemeSwitch />
           {screen === 'app' && (
             <nav aria-label="Main" className="wl-nav">
               {NAV.map((n) => (
@@ -135,6 +134,7 @@ export function App() {
               ))}
             </nav>
           )}
+          <ThemeSwitch />
         </header>
         {api.mode === 'fake' && (
           <p role="note" style={{ background: 'var(--wl-review-bg)', padding: '2px 8px', borderRadius: 4 }}>
@@ -151,9 +151,11 @@ export function App() {
           ) : (
             <>
               {!onboarding.seedShown && (
-                <p role="note" className="wl-card" style={{ background: 'var(--wl-review-bg)' }}>
-                  Reminder: your recovery words were not saved yet. Without them this wallet cannot be restored if this
-                  computer breaks.
+                <p role="note" className="wl-recovery">
+                  <span>Before anything else: let's save your 12 recovery words. It takes 2 minutes.</span>
+                  <a className="wl-button" href="#/settings">
+                    Save them now
+                  </a>
                 </p>
               )}
               {invoiceId ? (

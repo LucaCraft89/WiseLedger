@@ -133,7 +133,7 @@ export function TransfersTable({
 }
 
 /** Label chips; click "+ Add label" → type → Enter saves, Esc cancels. × removes a label. */
-function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
+export function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
   const toast = useToast();
   const [labels, setLabels] = useState(initial);
   const [s, dispatch] = useReducer(labelEditReducer, { mode: 'idle' });

@@ -6,6 +6,7 @@ import { App } from './App.js';
 import './brand.css';
 import './material.css';
 import './theme.css';
+import './personality.css';
 import { applyTheme, initialTheme } from './lib/theme.js';
 import { ErrorBoundary, ToastProvider } from './ui.js';
 

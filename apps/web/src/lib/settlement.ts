@@ -88,7 +88,7 @@ export function settlementView(d: TransferDetailResponse): SettlementView {
     ...(failed
       ? {
           failedNext: out
-            ? 'Nothing left your wallet: the tokens stayed with you. Ask the supplier for a new payment request and pay again.'
+            ? 'Nothing was sent: the tokens stayed with you. Ask the supplier for a new payment request and pay again.'
             : 'The payment did not arrive. Ask the payer to send it again to a new payment request.',
         }
       : {}),
@@ -122,7 +122,7 @@ export function settlementView(d: TransferDetailResponse): SettlementView {
       explain: 'Non-Inflatable Asset: a token contract with a fixed supply.',
     });
   }
-  tech.push({ label: 'Transfer ID', value: t.transferId, id: true, explain: 'Your wallet’s number for this payment.' });
+  tech.push({ label: 'Transfer ID', value: t.transferId, id: true, explain: 'The number I gave this payment.' });
   if (ln && d.lightning) {
     tech.push({
       label: 'Rail',
@@ -168,7 +168,7 @@ export function settlementView(d: TransferDetailResponse): SettlementView {
         explain: 'The relay that carried the payment proof (consignment) between the two wallets.',
       });
   }
-  tech.push({ label: 'Created', value: t.createdAt, explain: 'When your wallet started this transfer.' });
+  tech.push({ label: 'Created', value: t.createdAt, explain: 'When I started this transfer.' });
   if (t.expiresAt && t.status !== 'Settled')
     tech.push({
       label: 'Expires',

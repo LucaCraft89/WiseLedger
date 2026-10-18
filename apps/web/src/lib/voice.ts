@@ -75,7 +75,7 @@ export function micErrorText(err: unknown): string {
   if (name === 'NotReadableError') {
     return 'The microphone is busy in another app. Close it there and try again, or type your request.';
   }
-  return 'We could not record your voice. Try again, or type your request.';
+  return 'I could not record your voice. Try again, or type your request.';
 }
 
 export interface VoiceRecording {

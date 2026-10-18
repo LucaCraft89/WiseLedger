@@ -198,9 +198,9 @@ function MicButton({
       const { text } = await api.transcribe(wav);
       if (text.trim()) onText(text.trim());
       else
-        onError('We could not make out any words. Try again a little closer to the microphone, or type your request.');
+        onError('I could not make out any words. Try again a little closer to the microphone, or type your request.');
     } catch (err) {
-      onError(errorText(err, 'We could not turn your voice into text. Try again, or type your request.'));
+      onError(errorText(err, 'I could not turn your voice into text. Try again, or type your request.'));
     } finally {
       setSt({ s: 'idle' });
     }

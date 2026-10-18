@@ -104,7 +104,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
                 <th style={cell}>Supplier</th>
                 <th style={{ ...cell, textAlign: 'right' }}>Amount</th>
                 <th style={cell}>Status</th>
-                <th style={cell}>Our check</th>
+                <th style={cell}>My check</th>
                 <th style={cell}>Date</th>
               </tr>
             </thead>

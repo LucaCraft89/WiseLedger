@@ -9,7 +9,7 @@ type Asset = { assetId: string; ticker: string; precision: number };
 
 /** Plain notice for a document that is only a payment request, with what the wallet read from it. */
 export const PAYMENT_REQUEST_NOTICE =
-  'This is a payment request, not an invoice. We read the amount, token and expiry directly from it. There is no supplier name or invoice number to check, so only pay if you know who sent it.';
+  'This is a payment request, not an invoice. I read the amount, token and expiry directly from it. There is no supplier name or invoice number to check, so only pay if you know who sent it.';
 
 function PaymentRequestFacts({ report, assets }: { report: AnalysisReport; assets: readonly Asset[] }) {
   const pr = report.paymentRequest;
@@ -32,7 +32,7 @@ function PaymentRequestFacts({ report, assets }: { report: AnalysisReport; asset
           </li>
           <li>
             Token: {a?.ticker ?? 'unknown'}
-            {!pr.assetId && ' (the request lets you choose; we use your approved token)'}
+            {!pr.assetId && ' (the request lets you choose; I use your approved token)'}
             {assetId && (
               <>
                 {' '}
@@ -46,7 +46,7 @@ function PaymentRequestFacts({ report, assets }: { report: AnalysisReport; asset
           <li>{pr.expiresAt ? `Valid until ${localTimeWithZone(pr.expiresAt)}` : 'No expiry'}</li>
         </ul>
       ) : (
-        <p style={{ marginBottom: 0 }}>Your wallet could not read it, so it cannot be paid.</p>
+        <p style={{ marginBottom: 0 }}>I could not read it, so it cannot be paid.</p>
       )}
     </section>
   );
@@ -58,7 +58,7 @@ export function ReportView({ report, assets = [] }: { report: AnalysisReport; as
   const { alerts, notes } = splitFlags(report.flags);
   return (
     <div>
-      <h3>What we found</h3>
+      <h3>What I found</h3>
       <div
         style={{
           background: VERDICT_COLORS[report.verdict],

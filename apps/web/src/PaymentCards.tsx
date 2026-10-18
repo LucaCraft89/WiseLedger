@@ -15,8 +15,11 @@ export function ResultCard({
   txid,
   paymentHash,
   lightning = false,
+  stamp,
   children,
 }: {
+  /** The PAID stamp, drawn top right. */
+  stamp?: ReactNode;
   sentence?: string;
   transferId?: string;
   txid?: string;
@@ -36,7 +39,10 @@ export function ResultCard({
         marginTop: 16,
       }}
     >
-      <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
+        {stamp}
+      </div>
       {sentence && <div>You paid {sentence}.</div>}
       {transferId && (
         <div style={{ marginTop: 6 }}>
@@ -105,7 +111,7 @@ export function FailureCard({
         marginTop: 16,
       }}
     >
-      <strong style={{ fontSize: '1.2em' }}>{unsure ? 'We are not sure the payment went through' : 'Not paid'}</strong>
+      <strong style={{ fontSize: '1.2em' }}>{unsure ? 'I am not sure the payment went through' : 'Not paid'}</strong>
       <div>{errorWords(code, message)}</div>
       {message && message !== errorWords(code, message) && (
         <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>Details: {message}</div>

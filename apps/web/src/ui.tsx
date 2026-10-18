@@ -101,7 +101,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
     return (
       <div role="alert" style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
         <h2>That page did not load.</h2>
-        <p>Reload to try again. Your invoices and your wallet are safe: nothing is paid without your OK.</p>
+        <p>Reload to try again. Your invoices and your money are safe: nothing is paid without your OK.</p>
         <button type="button" onClick={() => window.location.reload()}>
           Reload
         </button>{' '}
@@ -181,9 +181,18 @@ export function Loading({ text = 'Loading…' }: { text?: string }) {
 }
 
 /** The existing owl image with a small status chip (icon + word) and, while it works, how long it takes. */
-export function OwlChip({ mood, size = 40 }: { mood: OwlMood; size?: number }) {
-  const chip = OWL_CHIPS[mood];
-  const wait = WAIT_WORDS[mood];
+export function OwlChip({
+  mood,
+  size = 40,
+  chip: custom,
+}: {
+  mood: OwlMood;
+  size?: number;
+  /** Replaces the mood's icon and word (the Desk's own three moods, the live analysis stage). */
+  chip?: { icon: string; word: string };
+}) {
+  const chip = custom ?? OWL_CHIPS[mood];
+  const wait = custom ? undefined : WAIT_WORDS[mood];
   return (
     <span className="wl-owl">
       <img src="/brand/owl-192.png" width={size} height={size} alt="" />

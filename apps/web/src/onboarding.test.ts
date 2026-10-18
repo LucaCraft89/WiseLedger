@@ -172,7 +172,7 @@ describe('fake onboarding', () => {
 describe('error copy for the new codes', () => {
   it('has plain words for the wallet and onboarding codes', () => {
     expect(errorWords('NetworkUnavailable')).toBe(
-      'We could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
+      'I could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
     );
     expect(errorWords('WalletLocked')).toBe('Your wallet is locked. Enter your passphrase to unlock it.');
     for (const code of ['WALLET_NOT_READY', 'INVALID_MNEMONIC', 'PASSPHRASE_TOO_SHORT', 'ALREADY_SET_UP']) {

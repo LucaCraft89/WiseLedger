@@ -64,7 +64,7 @@ export function gateHint(verdict: Verdict, ticked: boolean): string {
     return ticked
       ? 'You read the warnings. You can pay now.'
       : 'Tick the box above to say you read the warnings. Then you can pay.';
-  return 'We found nothing suspicious. Read the sentence above, then pay.';
+  return 'I found nothing suspicious. Read the sentence above, then pay.';
 }
 
 export type ProgressStatus = 'pending' | 'running' | 'done';

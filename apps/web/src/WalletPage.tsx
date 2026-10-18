@@ -48,7 +48,7 @@ export function MoneyPage({ api }: { api: ApiClient }) {
       </section>
     );
   }
-  if (!w) return <Loading text="Opening your wallet… (a few seconds)" />;
+  if (!w) return <Loading text="Opening… (a few seconds)" />;
 
   return (
     <section>
