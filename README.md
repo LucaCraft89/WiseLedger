@@ -13,19 +13,21 @@ Two ways to run it. Both use the same commands; the binary only saves you instal
 
 **Machine:** Linux x64 with glibc ≥ 2.38 (Ubuntu 24.04, Debian 13, Fedora 40+; on Windows use WSL2 Ubuntu 24.04), ~4 GB free RAM, ~6 GB disk, internet (Mutinynet test network and a one-time ~2.6 GB model download). Check: `ldd --version | head -1`.
 
-### A. The release binary (one file)
-Download `wiseledger-linux-x64.run` from [Releases](https://github.com/LucaCraft89/WiseLedger/releases/latest). It is a self-extracting archive: Node 22, pnpm, the source code of this repository and its installed dependencies. Nothing is compiled from our code: the app runs from the TypeScript sources it unpacks, so you can read them in `~/WiseLedger-app/`.
+### A. The release binary (one file): the real app
+Download `wiseledger-linux-x64.run` from [Releases](https://github.com/LucaCraft89/WiseLedger/releases/latest). It is a self-extracting archive: Node 22, pnpm, the source code of this repository with its installed dependencies, and the RGB Lightning modules. Nothing of ours is compiled: the app runs from the TypeScript sources it unpacks, so you can read them in `~/WiseLedger-app/`. It runs the **real** product: QVAC on your machine, a self-custodial RGB wallet on Mutinynet, RGB over Lightning with our own LSP.
 ```bash
 chmod +x wiseledger-linux-x64.run
-./wiseledger-linux-x64.run demo:mock          # first run unpacks to ~/WiseLedger-app (~1 min), then the whole flow on mocks
-./wiseledger-linux-x64.run wallet:smoke       # creates the payer and supplier wallets, prints the payer's funding address
+./wiseledger-linux-x64.run      # 1st run: unpacks, creates your wallets, prints the address for test sats
+# send 200000 sats from https://faucet.mutinynet.com to that address, wait ~1 minute, then:
+./wiseledger-linux-x64.run      # issues your TUSDT, funds the supplier wallet and our LSP, makes demo invoices,
+                                # starts the supplier's wallet and the app: open http://localhost:5173
 ```
-Every argument is passed to `pnpm` inside `~/WiseLedger-app`, so `./wiseledger-linux-x64.run <x>` is exactly `pnpm <x>` from source. Your settings are in `~/WiseLedger-app/.env` (created from `.env.example` on first run) and your wallets in `~/WiseLedger-app/.data/` (keep it: it holds your test seeds).
+From then on `./wiseledger-linux-x64.run` just starts the app. Any other argument is passed to `pnpm` in `~/WiseLedger-app` (`./wiseledger-linux-x64.run -F wallet lsp status` = `pnpm -F wallet lsp status` from source). Settings: `~/WiseLedger-app/.env` (Lightning is on). Wallets and seeds: `~/WiseLedger-app/.data/` (keep it). The supplier wallet's log: `.data/payee-watch.log`.
 
 ### B. From source (if the binary does not start)
 Follow [Quick start](#quick-start-copy-paste-checked-from-a-fresh-clone-on-18-oct-2026) below: `git clone`, Node 22, `pnpm install`, then the same commands as above with `pnpm` instead of `./wiseledger-linux-x64.run`.
 
-### Get test sats and TUSDT (both paths, ~5 minutes, once)
+### Get test sats and TUSDT by hand (from source; the binary does this for you)
 Replace `W` with `./wiseledger-linux-x64.run` (binary) or `pnpm` (source).
 1. `W wallet:smoke`: prints the **payer address** (`tb1…`).
 2. **Sats:** paste that address into <https://faucet.mutinynet.com> and ask for 100 000 sats. Mutinynet makes a block every ~30 s.
