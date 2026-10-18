@@ -53,3 +53,46 @@ export function decodeRgbInvoiceOffline(rgbInvoice: string): DecodedInvoice {
     inv.drop();
   }
 }
+
+/** rpcs://host/path → https://host/path (rgb-lib's JSON-RPC proxy scheme). */
+export function proxyUrl(endpoint: string): string | undefined {
+  const m = /^(rpcs?):\/\/(.+)$/i.exec(endpoint.trim());
+  if (!m) return /^https?:\/\//i.test(endpoint) ? endpoint : undefined;
+  return `${m[1]?.toLowerCase() === 'rpcs' ? 'https' : 'http'}://${m[2]}`;
+}
+
+/**
+ * Asks the request's RGB proxy whether a payment (consignment) was already posted for this recipient ID: a payment
+ * request can be paid once, and paying it again fails at send time with RecipientIDAlreadyUsed. true / false when a
+ * proxy answered, undefined when none did (never blocks a payment on a network hiccup).
+ */
+export async function requestAlreadyPaid(
+  recipientId: string,
+  endpoints: readonly string[],
+  opts: { fetch?: typeof fetch; timeoutMs?: number } = {},
+): Promise<boolean | undefined> {
+  const f = opts.fetch ?? fetch;
+  for (const e of endpoints) {
+    const url = proxyUrl(e);
+    if (!url) continue;
+    try {
+      const res = await f(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: '1',
+          method: 'consignment.get',
+          params: { recipient_id: recipientId },
+        }),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 5000),
+      });
+      const body = (await res.json()) as { result?: { consignment?: unknown } | null; error?: unknown };
+      if (body.result && typeof body.result.consignment === 'string' && body.result.consignment) return true;
+      if (body.error || body.result === null || body.result) return false;
+    } catch {
+      // try the next endpoint
+    }
+  }
+  return undefined;
+}

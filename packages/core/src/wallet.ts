@@ -84,6 +84,11 @@ export const DecodedInvoiceSchema = z.object({
    */
   rail: z.enum(['onchain', 'lightning']).optional(),
   paymentHash: z.string().optional(),
+  /**
+   * True when the request's RGB proxy already holds a payment for its recipient ID (someone paid it: a request is
+   * paid once); false when the proxy has none; absent when not checked (Lightning, mock, proxy not answering).
+   */
+  alreadyPaid: z.boolean().optional(),
 });
 export type DecodedInvoice = z.infer<typeof DecodedInvoiceSchema>;
 

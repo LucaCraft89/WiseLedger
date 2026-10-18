@@ -124,6 +124,7 @@ export const RgbCheckName = z.enum([
   'rail',
   'network',
   'not_expired',
+  'not_used',
   'asset_approved',
   'asset_matches',
   'amount_matches',

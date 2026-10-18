@@ -65,6 +65,14 @@ export function rgbRequestCheck(input: RuleInput): RgbCheckLine[] | undefined {
           : line('not_expired', 'ok', `It is still valid (for ${duration(left)} when we checked).`),
   );
 
+  if (decoded.alreadyPaid !== undefined && !ln) {
+    out.push(
+      decoded.alreadyPaid
+        ? line('not_used', 'block', 'Someone already paid it: a payment request can be paid only once.', R1)
+        : line('not_used', 'ok', 'Nobody has paid it yet (its delivery server holds no payment for it).'),
+    );
+  }
+
   const asset = paymentAsset(input);
   const info = asset ? config.assets[asset] : undefined;
   const name = info?.ticker ?? 'the token';

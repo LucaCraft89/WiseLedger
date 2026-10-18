@@ -83,6 +83,15 @@ describe('R11 · payment request transport and expiry', () => {
     expect(r11(withDecoded({ expiresAt: '2027-10-17T10:00:00Z' }))).toEqual([]);
   });
 
+  it('already paid by someone (its proxy holds a payment) → R1 block and a failing check line', () => {
+    const i = withDecoded({ alreadyPaid: true });
+    expect(runRules(i).flags.find((f) => f.code === 'R1_RGB_INVOICE')?.message).toMatch(/already paid by someone/);
+    expect(runRules(i).verdict).toBe('block');
+    expect(lineOf(i, 'not_used')).toMatchObject({ result: 'block', flagCode: 'R1_RGB_INVOICE' });
+    expect(lineOf(withDecoded({ alreadyPaid: false }), 'not_used')?.result).toBe('ok');
+    expect(lineOf(base, 'not_used')).toBeUndefined(); // not checked (mock, proxy silent)
+  });
+
   it('open-amount request → info line on the check, not a flag', () => {
     const i = withDecoded({ amount: undefined });
     expect(r11(i)).toEqual([]);
