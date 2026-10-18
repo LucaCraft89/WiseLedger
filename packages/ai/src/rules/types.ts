@@ -9,6 +9,26 @@ export interface RuleConfig {
   networks: string[];
   /** Ticker and precision of known assets, for comparing the printed total with the payment amount. */
   assets: Record<string, { ticker: string; precision: number }>;
+  /**
+   * RGB proxy servers we trust to carry the payment (RGB_TRANSPORT_ALLOWLIST, default RGB_TRANSPORT_ENDPOINT).
+   * Absent = not checked.
+   */
+  transportAllowlist?: string[];
+}
+
+/** rpcs://host/path ≡ https://host/path (rgb-lib reports the proxy as https), lower-case host, no trailing slash. */
+export function normalizeEndpoint(e: string): string {
+  const m = /^([a-z]+):\/\/([^/]+)(.*)$/i.exec(e.trim());
+  if (!m) return e.trim();
+  const scheme = ({ rpcs: 'https', rpc: 'http' } as Record<string, string>)[(m[1] ?? '').toLowerCase()];
+  return `${scheme ?? (m[1] ?? '').toLowerCase()}://${(m[2] ?? '').toLowerCase()}${(m[3] ?? '').replace(/\/+$/, '')}`;
+}
+
+/** Endpoints of the decoded request that are not on the allowlist ([] when all are known or nothing to check). */
+export function unknownEndpoints(d: DecodedInvoice, allowlist: string[] | undefined): string[] {
+  if (!allowlist || (d.rail ?? 'onchain') === 'lightning') return [];
+  const ok = new Set(allowlist.map(normalizeEndpoint));
+  return d.transportEndpoints.filter((e) => !ok.has(normalizeEndpoint(e)));
 }
 
 /** Everything a rule may look at. Built by code before the rules run; rules are pure functions of it. */

@@ -290,6 +290,9 @@ article {
 .wl-badge[data-tone="block"] {
   border: 1px solid var(--wl-block);
 }
+.wl-badge[data-tone="info"] {
+  border: 1px solid var(--wl-c-info);
+}
 
 /* ---------- confirm dialog (inline-styled in ConfirmDialog.tsx) ---------- */
 [role="dialog"] {

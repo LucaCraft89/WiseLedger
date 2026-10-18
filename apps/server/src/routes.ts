@@ -27,8 +27,10 @@ import {
   type ScheduleCancelResponse,
   type ScheduleListResponse,
   type TranscribeResponse,
+  type TransferDetailResponse,
   type TransferDto,
   type TransferInfo,
+  type TransferStatus,
   type TransfersResponse,
   type TreasurerAgent,
   type WalletErrorCode,
@@ -205,6 +207,18 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
     ...(t.paymentHash ? { paymentHash: t.paymentHash } : {}),
     ...(invoiceId ? { invoiceId } : {}),
   };
+}
+
+/** First time each status was seen: created → WaitingCounterparty, server events in between, rgb-lib settle time. */
+export function statusTimes(
+  t: TransferInfo,
+  events: readonly { status: TransferStatus; at: string }[],
+): Partial<Record<TransferStatus, string>> {
+  const out: Partial<Record<TransferStatus, string>> = { WaitingCounterparty: t.createdAt };
+  for (const e of events) out[e.status] ??= e.at;
+  if (t.status === 'Settled') out.Settled = t.settledAt ?? out.Settled ?? t.updatedAt;
+  if (t.status === 'Failed') out.Failed ??= t.updatedAt;
+  return out;
 }
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
@@ -439,6 +453,64 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       transfers: transfers
         .map((t) => toTransferDto(t, store.invoiceForTransfer(t.transferId), labels.get(t.transferId) ?? []))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    };
+  });
+
+  // One transfer with asset, invoice and status times: the "How this was settled" card (one call).
+  route(app, API_ROUTES.transferDetail, async (req): Promise<TransferDetailResponse> => {
+    const id = idParam(req);
+    const t = await wallet.getTransfer(id);
+    if (!t) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this payment in your wallet.');
+    const invoiceId = store.invoiceForTransfer(id);
+    const labels = await deps.labels.effectiveLabelsMap([id]);
+    const asset = t.assetId ? (await wallet.listAssets()).find((a) => a.assetId === t.assetId) : undefined;
+    const inv = invoiceId ? store.get(invoiceId) : undefined;
+    const rail = t.rail ?? 'onchain';
+    const channel =
+      rail === 'lightning' && wallet.lightningStatus
+        ? (await wallet.lightningStatus().catch(() => undefined))?.channels.find((c) => c.assetId === t.assetId)
+        : undefined;
+    return {
+      transfer: {
+        ...toTransferDto(t, invoiceId, labels.get(id) ?? []),
+        kind: t.direction,
+        rail,
+        ...(t.sealType ? { sealType: t.sealType } : {}),
+        ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+        ...(t.transportEndpoints ? { transportEndpoints: t.transportEndpoints } : {}),
+        ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+        ...(t.settledAt ? { settledAt: t.settledAt } : {}),
+      },
+      ...(asset
+        ? {
+            asset: {
+              assetId: asset.assetId,
+              ticker: asset.ticker,
+              name: asset.name,
+              precision: asset.precision,
+              schema: asset.schema,
+            },
+          }
+        : {}),
+      statusTimes: statusTimes(t, store.transferEvents(id)),
+      ...(inv
+        ? {
+            invoice: {
+              invoiceId: inv.id,
+              filename: inv.filename,
+              ...(inv.report?.extraction.issuer.name ? { issuerName: inv.report.extraction.issuer.name } : {}),
+              ...(inv.report?.extraction.invoiceNumber ? { invoiceNumber: inv.report.extraction.invoiceNumber } : {}),
+            },
+          }
+        : {}),
+      ...(rail === 'lightning' && t.paymentHash
+        ? {
+            lightning: {
+              paymentHash: t.paymentHash,
+              ...(channel ? { channelId: channel.channelId, peer: channel.peer } : {}),
+            },
+          }
+        : {}),
     };
   });
 

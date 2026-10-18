@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TransferDetailResponse } from 'core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type App, createApp } from '../src/server.js';
 
@@ -56,7 +57,19 @@ describe('server on mocks', () => {
     expect(await waitForState(id, ['PAID', 'FAILED'])).toBe('PAID');
 
     const transfers = (await built.app.inject({ method: 'GET', url: '/api/transfers' })).json().transfers;
-    expect(transfers.some((t: { invoiceId?: string }) => t.invoiceId === id)).toBe(true);
+    const paid = transfers.find((t: { invoiceId?: string }) => t.invoiceId === id) as { transferId: string };
+    expect(paid).toBeDefined();
+
+    // How this was settled: one call with asset, invoice, seal and status times; parsed by the core contract.
+    const one = await built.app.inject({ method: 'GET', url: `/api/transfers/${encodeURIComponent(paid.transferId)}` });
+    expect(one.statusCode).toBe(200);
+    const d = TransferDetailResponse.parse(one.json());
+    expect(d.transfer).toMatchObject({ kind: 'outgoing', rail: 'onchain', sealType: 'blinded', status: 'Settled' });
+    expect(d.asset).toMatchObject({ ticker: 'TUSDT', schema: 'NIA' });
+    expect(d.invoice?.invoiceId).toBe(id);
+    expect(d.statusTimes.WaitingCounterparty).toBeDefined();
+    expect(d.statusTimes.Settled).toBeDefined();
+    expect((await built.app.inject({ method: 'GET', url: '/api/transfers/nope' })).statusCode).toBe(404);
     const states = (await built.app.inject({ method: 'GET', url: `/api/invoices/${id}` }))
       .json()
       .events.filter((e: { type: string }) => e.type === 'state')

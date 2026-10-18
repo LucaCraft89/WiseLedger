@@ -107,7 +107,7 @@ export function ruleNetworks(config: Pick<ServerConfig, 'walletBackend' | 'rgbNe
 
 /** RuleConfig from env settings plus the wallet's assets. Empty allowlist + exactly one NIA asset held → that asset. */
 export function buildRuleConfig(
-  config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork' | 'assetAllowlist' | 'paymentCap'>,
+  config: Pick<ServerConfig, 'walletBackend' | 'rgbNetwork' | 'assetAllowlist' | 'paymentCap' | 'transportAllowlist'>,
   assets: readonly AssetLike[],
 ): RuleConfig {
   const nia = assets.filter((a) => a.schema === 'NIA');
@@ -117,6 +117,7 @@ export function buildRuleConfig(
     paymentCap: config.paymentCap,
     networks: ruleNetworks(config),
     assets: Object.fromEntries(assets.map((a) => [a.assetId, { ticker: a.ticker, precision: a.precision }])),
+    ...(config.transportAllowlist ? { transportAllowlist: [...config.transportAllowlist] } : {}),
   };
 }
 

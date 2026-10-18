@@ -268,6 +268,9 @@ export class MockWallet implements WalletPort {
   private view(t: MockTransfer): TransferInfo {
     const status = this.status(t);
     const stepsDone = status === 'WaitingCounterparty' ? 0 : status === 'WaitingConfirmations' ? 1 : 2;
+    const updatedAt = new Date(
+      t.direction === 'issuance' ? t.createdAt : t.createdAt + stepsDone * this.stepMs,
+    ).toISOString();
     return {
       transferId: t.transferId,
       assetId: t.assetId,
@@ -279,10 +282,17 @@ export class MockWallet implements WalletPort {
       ...(t.rgbInvoice
         ? { rgbInvoice: t.rgbInvoice, recipientId: `mock-recipient-${t.rgbInvoice.split('/').at(-1)}` }
         : {}),
+      ...(t.direction !== 'issuance' && !t.paymentHash
+        ? {
+            sealType: 'blinded' as const,
+            transportEndpoints: ['mock://transport'],
+            expiresAt: new Date(t.createdAt + 3_600_000).toISOString(),
+          }
+        : {}),
+      ...(status === 'Settled' ? { settledAt: updatedAt } : {}),
+      schema: 'NIA',
       createdAt: new Date(t.createdAt).toISOString(),
-      updatedAt: new Date(
-        t.direction === 'issuance' ? t.createdAt : t.createdAt + stepsDone * this.stepMs,
-      ).toISOString(),
+      updatedAt,
     };
   }
 

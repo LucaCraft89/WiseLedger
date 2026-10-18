@@ -21,6 +21,7 @@ import {
   type QuoteResult,
   type ReceiveInvoice,
   SubmitTimeout,
+  sealTypeOfRecipient,
   TransferFailed,
   type TransferInfo,
   type TransferStatus,
@@ -124,6 +125,20 @@ export interface SdkTransfer {
   recipientId?: string | null;
   invoiceString?: string | null;
   expiration?: number | null;
+  /** rgb-lib 0.3.0-beta.8: [{ endpoint: 'https://proxy…/json-rpc', transportType: 'JsonRpc', used: true }]. */
+  transportEndpoints?: { endpoint: string; transportType?: unknown; used?: boolean }[];
+}
+
+/** ReceiveBlind / ReceiveWitness from the kind; a send's seal from the recipient ID it paid. */
+function sealType(t: SdkTransfer): TransferInfo['sealType'] {
+  const k = typeof t.kind === 'number' ? t.kind : t.kind.toLowerCase();
+  if (k === 1 || k === 'receiveblind') return 'blinded';
+  if (k === 2 || k === 'receivewitness') return 'witness';
+  return toDirection(t.kind) === 'outgoing' ? sealTypeOfRecipient(t.recipientId ?? undefined) : undefined;
+}
+
+function endpoints(t: SdkTransfer): string[] {
+  return [...(t.transportEndpoints ?? [])].sort((a, b) => Number(!!b.used) - Number(!!a.used)).map((e) => e.endpoint);
 }
 
 /** Sent: the requested amount (assignments are our change). Issued/received: what was assigned to us. */
@@ -508,15 +523,23 @@ export class WdkRgbWallet implements WalletPort {
     const out: TransferInfo[] = [];
     for (const id of assetIds) {
       for (const t of this.rgb.listTransfers(id)) {
+        const status = toStatus(t.status);
+        const seal = sealType(t);
+        const ends = endpoints(t);
         out.push({
           transferId: String(t.batchTransferIdx),
           assetId: id,
           amount: transferAmount(t),
           direction: toDirection(t.kind),
-          status: toStatus(t.status),
+          status,
           ...(t.txid ? { txid: t.txid } : {}),
           ...(t.invoiceString ? { rgbInvoice: t.invoiceString } : {}),
           ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+          ...(seal ? { sealType: seal } : {}),
+          ...(ends.length ? { transportEndpoints: ends } : {}),
+          ...(t.expiration ? { expiresAt: iso(t.expiration) } : {}),
+          ...(status === 'Settled' ? { settledAt: iso(t.updatedAt) } : {}),
+          schema: 'NIA',
           createdAt: iso(t.createdAt),
           updatedAt: iso(t.updatedAt),
         });

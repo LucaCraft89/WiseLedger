@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { canRetry, DEFAULT_EXPLORER_URL, errorWords, explorerTxUrl, shortId } from './lib/payment.js';
 import { CopyButton, errorText } from './ui.js';
 
@@ -15,12 +15,15 @@ export function ResultCard({
   txid,
   paymentHash,
   lightning = false,
+  children,
 }: {
   sentence?: string;
   transferId?: string;
   txid?: string;
   paymentHash?: string;
   lightning?: boolean;
+  /** Folded extras under the confirmation (the "How this was settled" card). */
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -66,6 +69,7 @@ export function ResultCard({
       ) : (
         <div style={{ marginTop: 6, fontSize: '0.9em' }}>The Bitcoin transaction ID will appear here once known.</div>
       )}
+      {children}
     </div>
   );
 }

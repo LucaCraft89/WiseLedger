@@ -15,7 +15,14 @@ import {
   type WalletPort,
 } from 'core';
 import { loadInvoice } from '../extract/text.js';
-import { paymentAmount, paymentAsset, type RuleConfig, type RuleInput, runRules } from '../rules/index.js';
+import {
+  paymentAmount,
+  paymentAsset,
+  type RuleConfig,
+  type RuleInput,
+  rgbRequestCheck,
+  runRules,
+} from '../rules/index.js';
 import { extractInvoice } from './extract.js';
 import { summarize } from './summarize.js';
 
@@ -79,7 +86,7 @@ export class Analyst implements InvoiceAnalyzer {
     const { extraction, ms: extractMs } = extracted;
 
     const rulesStarted = Date.now();
-    const { flags, verdict, ruleInput } = await stage('checking', async () => {
+    const { flags, verdict, ruleInput, rgbCheck } = await stage('checking', async () => {
       const rgbInvoice = extraction.payment.rgbInvoice;
       let decoded: RuleInput['decoded'];
       if (rgbInvoice) {
@@ -109,12 +116,13 @@ export class Analyst implements InvoiceAnalyzer {
       }
       const result = runRules(partial);
       for (const flag of result.flags) emit({ type: 'flag', invoiceId, at: at(), flag });
-      return { ...result, ruleInput: partial };
+      return { ...result, ruleInput: partial, rgbCheck: rgbRequestCheck(partial) };
     });
     const rulesMs = Date.now() - rulesStarted;
 
     const summary = await stage('summarizing', () =>
       summarize(extraction, flags, verdict, llm, {
+        ...(rgbCheck ? { rgbCheck } : {}),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
         ...(onToken ? { onToken } : {}),
       }),
@@ -127,6 +135,7 @@ export class Analyst implements InvoiceAnalyzer {
       flags,
       verdict,
       ...(proposedPayment ? { proposedPayment } : {}),
+      ...(rgbCheck ? { rgbCheck } : {}),
       summary: summary.summary,
       questionsForUser: withRuleQuestions(summary.questionsForUser, flags),
       model: { name: llm.info().model, provider: llm.info().provider },

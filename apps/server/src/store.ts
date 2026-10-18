@@ -395,6 +395,16 @@ export class InvoiceStore {
     return rows.map((r) => JSON.parse(r.event_json) as AppEvent);
   }
 
+  /** Past `transfer` events of one transfer (linked to an invoice or not), oldest first. */
+  transferEvents(transferId: string): Extract<AppEvent, { type: 'transfer' }>[] {
+    const rows = this.db
+      .prepare(
+        "SELECT event_json FROM events WHERE type = 'transfer' AND json_extract(event_json, '$.transferId') = ? ORDER BY seq",
+      )
+      .all(transferId) as unknown as { event_json: string }[];
+    return rows.map((r) => JSON.parse(r.event_json) as Extract<AppEvent, { type: 'transfer' }>);
+  }
+
   /** Events without an invoice (e.g. status changes of transfers not linked to an invoice). */
   subscribeGlobal(listener: Listener): () => void {
     this.bus.on('global', listener);

@@ -200,6 +200,44 @@ export type TransferDto = z.infer<typeof TransferDto>;
 export const TransfersResponse = z.object({ transfers: z.array(TransferDto) });
 export type TransfersResponse = z.infer<typeof TransfersResponse>;
 
+// GET /api/transfers/:id — one transfer with everything the "How this was settled" card shows, in one call.
+export const TransferDetailResponse = z.object({
+  transfer: TransferDto.extend({
+    /** wallet.ts TransferInfo.direction (the DTO's in/out folds issuance into in). */
+    kind: z.enum(['outgoing', 'incoming', 'issuance']),
+    rail: z.enum(['onchain', 'lightning']),
+    sealType: z.enum(['blinded', 'witness']).optional(),
+    recipientId: z.string().optional(),
+    transportEndpoints: z.array(z.string()).optional(),
+    expiresAt: IsoDateTime.optional(),
+    settledAt: IsoDateTime.optional(),
+  }),
+  asset: z
+    .object({
+      assetId: z.string(),
+      ticker: z.string(),
+      name: z.string(),
+      precision: z.number().int(),
+      schema: z.literal('NIA'),
+    })
+    .optional(),
+  /** When each status was first seen (server events; WaitingCounterparty = created, Settled = rgb-lib settle time). */
+  statusTimes: z.partialRecord(TransferStatusSchema, IsoDateTime),
+  invoice: z
+    .object({
+      invoiceId: z.string(),
+      filename: z.string(),
+      issuerName: z.string().optional(),
+      invoiceNumber: z.string().optional(),
+    })
+    .optional(),
+  /** Lightning only: the channel the payment used (from the node's channels for this asset). */
+  lightning: z
+    .object({ paymentHash: z.string(), channelId: z.string().optional(), peer: z.string().optional() })
+    .optional(),
+});
+export type TransferDetailResponse = z.infer<typeof TransferDetailResponse>;
+
 // POST /api/agent/chat
 export const ChatRequest = z.object({
   message: z.string().min(1).max(2000),
@@ -395,6 +433,7 @@ export const API_ROUTES = {
   walletLightning: 'GET /api/wallet/lightning',
   walletBtc: 'GET /api/wallet/btc',
   transfers: 'GET /api/transfers',
+  transferDetail: 'GET /api/transfers/:id',
   agentChat: 'POST /api/agent/chat',
   /** Same body as agentChat; answers NDJSON ChatStreamLine lines (tokens as they come, then the reply). */
   agentChatStream: 'POST /api/agent/chat/stream',

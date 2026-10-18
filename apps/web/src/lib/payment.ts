@@ -13,6 +13,7 @@ export const FLAG_TITLES: Record<string, string> = {
   R8_CURRENCY: 'Different currency',
   R9_MISSING_FIELDS: 'Missing details',
   R10_DATES: 'Strange dates',
+  R11_RGB_REQUEST: 'Payment request check',
   AI_UNAVAILABLE: 'The AI could not read this invoice',
 };
 
@@ -32,6 +33,13 @@ export function splitFlags<T extends { severity: Severity }>(flags: readonly T[]
     alerts: flags.filter((f) => f.severity !== 'info'),
     notes: flags.filter((f) => f.severity === 'info'),
   };
+}
+
+const RESULT_ORDER = { block: 0, review: 1, ok: 2 } as const;
+
+/** Payment request check lines: failures first, then checks to review, then passed (stable within a group). */
+export function sortCheckLines<T extends { result: 'ok' | 'review' | 'block' }>(lines: readonly T[]): T[] {
+  return [...lines].sort((a, b) => RESULT_ORDER[a.result] - RESULT_ORDER[b.result]);
 }
 
 export const EVIDENCE_MAX = 80;
