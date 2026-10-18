@@ -1,10 +1,12 @@
 // REST + SSE routes from core API_ROUTES. Requests are validated with the core zod DTOs.
 
-import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, TranscribeError, type Transcriber } from 'ai';
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, safeName, TranscribeError, type Transcriber } from 'ai';
 import {
   API_ROUTES,
   type ApiError,
   type AppEvent,
+  BooksQuery,
+  type BooksResponse,
   type BtcTransactionDto,
   type BtcTransactionsResponse,
   ChatRequest,
@@ -13,6 +15,7 @@ import {
   ConfirmRequest,
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
+  type DeskResponse,
   type HealthResponse,
   IllegalTransition,
   type InvoiceDetailResponse,
@@ -22,13 +25,21 @@ import {
   isWalletError,
   type LightningStatusResponse,
   type LlmInfo,
+  type PayeesResponse,
+  type ReceiptResponse,
+  type ReceiveRequestDto,
+  ReceivesListQuery,
   type ReceivesListResponse,
   RejectRequest,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  SetAmountRequest,
+  type SetAmountResponse,
   type TranscribeResponse,
+  type TransferDetailResponse,
   type TransferDto,
   type TransferInfo,
+  type TransferStatus,
   type TransfersResponse,
   type TreasurerAgent,
   type WalletErrorCode,
@@ -47,10 +58,13 @@ import {
   M3_ROUTES,
   ScheduleListQuery,
 } from './api-local.js';
+import { bookRows, booksPage, buildReceipt, defaultAsset, finalBalance, lightningBalance } from './books.js';
+import { buildDesk } from './desk.js';
 import type { WalletFiscalService } from './fiscal.js';
+import { StoreHistory } from './history.js';
 import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
-import { healthHints, type WalletHolder } from './onboarding.js';
+import { healthHints, NOT_READY_MESSAGES, type WalletHolder } from './onboarding.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import type { SqliteReceiveStore } from './receives.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
@@ -76,6 +90,8 @@ export interface RouteDeps {
   problems: () => string[];
   /** Largest accepted upload in MB. */
   uploadMaxMb: number;
+  /** Below this many sats no RGB send fits (Desk no_fee_money). */
+  feeMinSats?: number;
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
   /** B's on-device speech-to-text (Parakeet); the text only fills the chat box. */
@@ -152,6 +168,40 @@ export function toBtcTransactions(raw: unknown): BtcTransactionDto[] {
   return out.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto);
 }
 
+/** A payment request stays valid 1 h … 30 days (rgb-lib needs an expiry; longer ones only clutter the proxy). */
+export const RECEIVE_MIN_SEC = 3600;
+export const RECEIVE_MAX_SEC = 30 * 86_400;
+
+/** expirySec, else validUntil, else expiryMinutes (≤ 7 days), else 24 h; plain 400 outside 1 h … 30 days. */
+export function receiveExpirySec(
+  body: Pick<WalletReceiveRequest, 'expirySec' | 'validUntil' | 'expiryMinutes'>,
+  now = Date.now(),
+): number {
+  const sec =
+    body.expirySec ??
+    (body.validUntil !== undefined
+      ? Math.round((Date.parse(body.validUntil) - now) / 1000)
+      : (body.expiryMinutes ?? 24 * 60) * 60);
+  // A minute of slack: "valid for 1 hour" picked in the form arrives a few seconds short.
+  if (!(sec >= RECEIVE_MIN_SEC - 60 && sec <= RECEIVE_MAX_SEC + 60)) {
+    throw new ApiFailure(
+      400,
+      'EXPIRY_OUT_OF_RANGE',
+      'A payment request can stay valid from 1 hour to 30 days. Pick a time in that range.',
+    );
+  }
+  return Math.min(RECEIVE_MAX_SEC, Math.max(RECEIVE_MIN_SEC, sec));
+}
+
+/** The wallet's Bitcoin transactions when the backend exposes them ([] otherwise; never fails a screen). */
+function btcTransactions(wallet: WalletPort): BtcTransactionDto[] {
+  try {
+    return toBtcTransactions((wallet as { btcTransactions?: () => unknown }).btcTransactions?.());
+  } catch {
+    return [];
+  }
+}
+
 function isTooLarge(err: unknown): boolean {
   const e = err as { statusCode?: number; code?: string };
   return e.statusCode === 413 || e.code === 'FST_REQ_FILE_TOO_LARGE' || e.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
@@ -207,6 +257,18 @@ function toTransferDto(t: TransferInfo, invoiceId: string | undefined, labels: s
   };
 }
 
+/** First time each status was seen: created → WaitingCounterparty, server events in between, rgb-lib settle time. */
+export function statusTimes(
+  t: TransferInfo,
+  events: readonly { status: TransferStatus; at: string }[],
+): Partial<Record<TransferStatus, string>> {
+  const out: Partial<Record<TransferStatus, string>> = { WaitingCounterparty: t.createdAt };
+  for (const e of events) out[e.status] ??= e.at;
+  if (t.status === 'Settled') out.Settled = t.settledAt ?? out.Settled ?? t.updatedAt;
+  if (t.status === 'Failed') out.Failed ??= t.updatedAt;
+  return out;
+}
+
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   const { store, orchestrator, wallet, treasurer } = deps;
 
@@ -225,7 +287,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
-      return reply.status(400).send(apiError('VALIDATION', `The request is not valid${where}: ${first?.message}`));
+      return reply
+        .status(400)
+        .send(
+          apiError(
+            'VALIDATION',
+            `The request is not valid${where}: ${first?.message}. Check what you typed and try again.`,
+          ),
+        );
     }
     if (isWalletError(err)) {
       app.log.warn({ err }, 'Wallet operation failed');
@@ -238,13 +307,19 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     }
     const e = err as { statusCode?: number; code?: string; message?: string };
     if (e.statusCode && e.statusCode >= 400 && e.statusCode < 500) {
-      return reply.status(e.statusCode).send(apiError(e.code ?? 'BAD_REQUEST', e.message ?? 'Bad request.'));
+      return reply
+        .status(e.statusCode)
+        .send(
+          apiError(e.code ?? 'BAD_REQUEST', e.message ?? 'The request is not valid. Reload the page and try again.'),
+        );
     }
     app.log.error(err);
     return reply.status(500).send(apiError('INTERNAL', 'Something went wrong on our side. Please try again.'));
   });
 
-  app.setNotFoundHandler((_req, reply) => reply.status(404).send(apiError('NOT_FOUND', 'This page does not exist.')));
+  app.setNotFoundHandler((_req, reply) =>
+    reply.status(404).send(apiError('NOT_FOUND', 'This address does not exist. Reload the app and try again.')),
+  );
 
   route(app, API_ROUTES.health, async (): Promise<HealthBody> => {
     const llm = deps.llmInfo();
@@ -268,6 +343,113 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     };
   });
 
+  // Money Desk home: local state only (no model call, no wallet sync), so it answers in milliseconds.
+  route(app, API_ROUTES.desk, async (): Promise<DeskResponse> => {
+    const ready = deps.holder.state === 'ready';
+    const [assets, transfers, pendingJobs, runningJobs, recoveryWordsSaved] = await Promise.all([
+      ready ? wallet.listAssets().catch(() => []) : Promise.resolve([]),
+      ready ? wallet.listTransfers().catch(() => []) : Promise.resolve([]),
+      deps.jobs.list({ status: 'pending' }),
+      deps.jobs.list({ status: 'running' }),
+      deps.holder.seedShown(),
+    ]);
+    if (ready) deps.receives.reconcile(transfers);
+    const sats = ready ? btcBalanceSats(wallet) : undefined;
+    const notReady = deps.holder.state === 'ready' ? [] : [NOT_READY_MESSAGES[deps.holder.state]];
+    return buildDesk({
+      now: new Date(),
+      invoices: store.list(),
+      receives: deps.receives.list(),
+      pendingJobs,
+      runningJobs: runningJobs.length,
+      transfers,
+      assets,
+      recoveryWordsSaved,
+      ...(deps.feeMinSats !== undefined ? { feeMinSats: deps.feeMinSats } : {}),
+      ...(sats !== undefined ? { feeSats: Number(sats) } : {}),
+      problems: [...notReady, ...deps.problems()],
+      lastSyncAt: deps.walletSync().lastSyncAt,
+    });
+  });
+
+  // Books: the asset's ledger with a running settled balance, newest first (computed on every call).
+  route(app, API_ROUTES.books, async (req): Promise<BooksResponse> => {
+    const q = BooksQuery.parse(req.query ?? {});
+    const assets = await wallet.listAssets();
+    const asset = q.assetId
+      ? assets.find((a) => a.assetId === q.assetId)
+      : defaultAsset(assets, deps.limits?.assetAllowlist);
+    if (!asset) {
+      if (q.assetId)
+        throw new ApiFailure(
+          404,
+          'UNKNOWN_ASSET',
+          'This wallet holds no such token. Open Settings › Your money, technically to see your tokens.',
+        );
+      return { settledBalance: '0', rows: [] };
+    }
+    const [transfers, balance, ln] = await Promise.all([
+      wallet.listTransfers(),
+      wallet.assetBalance(asset.assetId),
+      lightningBalance(wallet, asset.assetId),
+    ]);
+    const settled = (BigInt(balance.settled) + (ln ?? 0n)).toString();
+    const fees = new Map(btcTransactions(wallet).map((b) => [b.txid, b.feeSats]));
+    const rows = await bookRows(transfers, asset.assetId, deps, (txid) => {
+      const f = fees.get(txid);
+      return f && f !== '0' ? f : undefined;
+    });
+    if (finalBalance(rows) !== settled) {
+      app.log.warn(
+        { assetId: asset.assetId, books: finalBalance(rows), settled, lightning: ln?.toString() },
+        'Books do not add up to the wallet balance',
+      );
+    }
+    return {
+      assetId: asset.assetId,
+      ticker: asset.ticker,
+      precision: asset.precision,
+      settledBalance: settled,
+      ...(ln !== undefined ? { lightningBalance: ln.toString() } : {}),
+      ...booksPage(rows, { ...(q.limit ? { limit: q.limit } : {}), ...(q.before ? { before: q.before } : {}) }),
+    };
+  });
+
+  // A receipt for a settled payment (in or out); the web renders it and makes the PDF.
+  route(app, API_ROUTES.receipt, async (req): Promise<ReceiptResponse> => {
+    const id = (req.params as { transferId: string }).transferId;
+    const [t, assets] = await Promise.all([wallet.getTransfer(id), wallet.listAssets()]);
+    const receipt = await buildReceipt(t, assets, deps);
+    if (!receipt)
+      throw new ApiFailure(
+        404,
+        'NO_RECEIPT',
+        'There is no receipt for this payment: only settled payments have one. Wait until it shows as paid, then try again.',
+      );
+    return receipt;
+  });
+
+  // "Who pays you?" suggestions: names from the payee book and earlier payers, max 8.
+  const history = new StoreHistory(store);
+  route(app, API_ROUTES.payees, async (req): Promise<PayeesResponse> => {
+    const q = String((req.query as { q?: unknown } | undefined)?.q ?? '')
+      .trim()
+      .slice(0, 80);
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const book = (await history.payeeBook()).map((e) => e.name).reverse();
+    for (const raw of [...deps.receives.payers(q), ...book]) {
+      const name = safeName(raw); // instruction-like names never come back as suggestions
+      const key = name.toLowerCase();
+      if (names.length === 8) break;
+      if (name === '[name hidden]' || name === 'Unknown supplier' || seen.has(key) || !key.includes(q.toLowerCase()))
+        continue;
+      seen.add(key);
+      names.push(name);
+    }
+    return { names };
+  });
+
   route(app, API_ROUTES.createInvoice, async (req, reply): Promise<CreateInvoiceResponse> => {
     let created: StoredInvoice;
     if (req.isMultipart()) {
@@ -280,7 +462,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         if (isTooLarge(err)) throw tooLarge(deps.uploadMaxMb);
         throw err;
       }
-      if (data.length === 0) throw new ApiFailure(400, 'EMPTY_FILE', 'The uploaded file is empty.');
+      if (data.length === 0)
+        throw new ApiFailure(400, 'EMPTY_FILE', 'The uploaded file is empty. Export the invoice again and upload it.');
       const filename = file.filename || 'invoice';
       const kind = checkUpload(filename, data);
       created = await orchestrator.createInvoice({ filename, mimeType: file.mimetype, data, kind });
@@ -305,7 +488,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.getInvoice, async (req): Promise<InvoiceDetailResponse> => {
     const inv = store.get(idParam(req));
-    if (!inv) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this invoice.');
+    if (!inv)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this invoice. Open My invoices to see the current list.',
+      );
     return {
       invoice: toSummary(inv),
       events: store.eventsOf(inv.id),
@@ -318,9 +506,22 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.invoiceEvents, async (req, reply) => {
     const id = idParam(req);
-    if (!store.get(id)) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this invoice.');
+    if (!store.get(id))
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this invoice. Open My invoices to see the current list.',
+      );
     streamInvoiceEvents(store, id, req, reply);
   });
+
+  // Open-amount payment request: the user types the amount; the server checks it and prepares the plan to confirm.
+  route(
+    app,
+    API_ROUTES.setInvoiceAmount,
+    async (req): Promise<SetAmountResponse> =>
+      orchestrator.setAmount(idParam(req), SetAmountRequest.parse(req.body ?? {}).amount),
+  );
 
   route(app, API_ROUTES.confirmInvoice, async (req) =>
     orchestrator.confirm(idParam(req), ConfirmRequest.parse(req.body ?? {})),
@@ -372,34 +573,92 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     };
   });
 
-  route(app, API_ROUTES.walletBtc, async (): Promise<BtcTransactionsResponse> => {
-    const w = wallet as { btcTransactions?: () => unknown };
-    let raw: unknown;
-    try {
-      raw = w.btcTransactions?.();
-    } catch {
-      raw = undefined; // the Bitcoin list is a read-only extra: never fail the wallet screen over it
-    }
-    return { transactions: toBtcTransactions(raw) };
-  });
+  route(
+    app,
+    API_ROUTES.walletBtc,
+    async (): Promise<BtcTransactionsResponse> => ({ transactions: btcTransactions(wallet) }),
+  );
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
+    if (body.rail === 'lightning' && (!body.amount || !body.assetId)) {
+      throw new ApiFailure(
+        400,
+        'LIGHTNING_NEEDS_AMOUNT',
+        'A Lightning request needs a token and an amount. Type how much, or make an on-chain request.',
+      );
+    }
+    if (body.rail === 'lightning' && !wallet.lightningStatus) {
+      throw new ApiFailure(
+        409,
+        'LIGHTNING_OFF',
+        'Lightning is not set up on this computer. Make an on-chain request instead.',
+      );
+    }
     const inv = await wallet.createReceiveInvoice({
+      ...(body.rail === 'lightning' ? { rail: 'lightning' as const } : {}),
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
-      expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
+      expirySec: receiveExpirySec(body),
       ...(body.assetId ? { assetId: body.assetId } : {}),
       ...(body.amount ? { amount: body.amount } : {}),
     });
     // Remembered so the app can tell when it is paid (matched after each wallet sync).
-    deps.receives.add(inv, body.note);
+    const stored = deps.receives.add(inv, {
+      madeIn: body.madeIn ?? 'form',
+      ...(body.payer ? { payer: body.payer } : {}),
+      ...(body.purpose ? { purpose: body.purpose } : {}),
+      ...(body.note ? { note: body.note } : {}),
+    });
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,
       ...(inv.assetId ? { assetId: inv.assetId } : {}),
       ...(inv.amount ? { amount: inv.amount } : {}),
+      receiveId: stored.receiveId,
+      ...(inv.rail === 'lightning' ? { rail: 'lightning' as const } : {}),
     };
   });
+
+  // Payment requests handed out, newest first, one page at a time (main list or "Older requests").
+  route(app, API_ROUTES.walletReceives, async (req): Promise<ReceivesListResponse> => {
+    const q = ReceivesListQuery.parse(req.query ?? {});
+    deps.receives.reconcile(await wallet.listTransfers());
+    return deps.receives.page({
+      older: q.archived === '1',
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.limit ? { limit: q.limit } : {}),
+      ...(q.before ? { before: q.before } : {}),
+    });
+  });
+
+  // One request with its live status (chat card, Get paid detail).
+  route(app, API_ROUTES.walletReceiveGet, async (req): Promise<ReceiveRequestDto> => {
+    const id = (req.params as { receiveId: string }).receiveId;
+    const before = deps.receives.get(id);
+    if (!before)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this payment request. Open Wallet › Get paid to see your requests.',
+      );
+    if (before.status === 'waiting' || before.status === 'incoming' || before.status === 'cancelled') {
+      deps.receives.reconcile(await wallet.listTransfers());
+    }
+    return deps.receives.get(id) as ReceiveRequestDto;
+  });
+
+  route(app, API_ROUTES.walletReceiveCancel, async (req): Promise<ReceiveRequestDto> => {
+    const id = (req.params as { receiveId: string }).receiveId;
+    // Look at the wallet first: a payment already on its way must refuse the cancel.
+    if (deps.receives.get(id)?.status === 'waiting') deps.receives.reconcile(await wallet.listTransfers());
+    return deps.receives.cancel(id);
+  });
+
+  route(
+    app,
+    API_ROUTES.walletReceiveArchive,
+    async (req): Promise<ReceiveRequestDto> => deps.receives.archive((req.params as { receiveId: string }).receiveId),
+  );
 
   // Invoices handed out to get paid, newest first: waiting → incoming → received (or expired / failed).
   // Voice: raw audio (audio/wav from the browser) → text for the chat box. Never executes anything by itself.
@@ -408,7 +667,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   );
   route(app, API_ROUTES.agentTranscribe, async (req): Promise<TranscribeResponse> => {
     if (!deps.transcriber)
-      throw new ApiFailure(503, 'STT_UNAVAILABLE', 'Voice input is not available on this computer.');
+      throw new ApiFailure(
+        503,
+        'STT_UNAVAILABLE',
+        'Voice input is not available on this computer. Type your message instead.',
+      );
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       throw new ApiFailure(
         400,
@@ -417,11 +680,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       );
     }
     return deps.transcriber.transcribe(req.body, req.headers['content-type']);
-  });
-
-  route(app, API_ROUTES.walletReceives, async (): Promise<ReceivesListResponse> => {
-    deps.receives.reconcile(await wallet.listTransfers());
-    return { receives: deps.receives.list() };
   });
 
   // Lightning node and channels (Wallet page panel); off when the backend has no Lightning rail.
@@ -439,6 +697,69 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       transfers: transfers
         .map((t) => toTransferDto(t, store.invoiceForTransfer(t.transferId), labels.get(t.transferId) ?? []))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    };
+  });
+
+  // One transfer with asset, invoice and status times: the "How this was settled" card (one call).
+  route(app, API_ROUTES.transferDetail, async (req): Promise<TransferDetailResponse> => {
+    const id = idParam(req);
+    const t = await wallet.getTransfer(id);
+    if (!t)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this payment in your wallet. Wait for the next wallet update, then open Transfers again.',
+      );
+    const invoiceId = store.invoiceForTransfer(id);
+    const labels = await deps.labels.effectiveLabelsMap([id]);
+    const asset = t.assetId ? (await wallet.listAssets()).find((a) => a.assetId === t.assetId) : undefined;
+    const inv = invoiceId ? store.get(invoiceId) : undefined;
+    const rail = t.rail ?? 'onchain';
+    const channel =
+      rail === 'lightning' && wallet.lightningStatus
+        ? (await wallet.lightningStatus().catch(() => undefined))?.channels.find((c) => c.assetId === t.assetId)
+        : undefined;
+    return {
+      transfer: {
+        ...toTransferDto(t, invoiceId, labels.get(id) ?? []),
+        kind: t.direction,
+        rail,
+        ...(t.sealType ? { sealType: t.sealType } : {}),
+        ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+        ...(t.transportEndpoints ? { transportEndpoints: t.transportEndpoints } : {}),
+        ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+        ...(t.settledAt ? { settledAt: t.settledAt } : {}),
+      },
+      ...(asset
+        ? {
+            asset: {
+              assetId: asset.assetId,
+              ticker: asset.ticker,
+              name: asset.name,
+              precision: asset.precision,
+              schema: asset.schema,
+            },
+          }
+        : {}),
+      statusTimes: statusTimes(t, store.transferEvents(id)),
+      ...(inv
+        ? {
+            invoice: {
+              invoiceId: inv.id,
+              filename: inv.filename,
+              ...(inv.report?.extraction.issuer.name ? { issuerName: inv.report.extraction.issuer.name } : {}),
+              ...(inv.report?.extraction.invoiceNumber ? { invoiceNumber: inv.report.extraction.invoiceNumber } : {}),
+            },
+          }
+        : {}),
+      ...(rail === 'lightning' && t.paymentHash
+        ? {
+            lightning: {
+              paymentHash: t.paymentHash,
+              ...(channel ? { channelId: channel.channelId, peer: channel.peer } : {}),
+            },
+          }
+        : {}),
     };
   });
 
@@ -494,12 +815,17 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   route(app, M3_ROUTES.scheduleCancel, async (req): Promise<ScheduleCancelResponse> => {
     const { jobId } = req.params as { jobId: string };
     const job = await deps.jobs.get(jobId);
-    if (!job) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this scheduled payment.');
+    if (!job)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this scheduled payment. Open Scheduled payments to see the current list.',
+      );
     if (!(await deps.jobs.cancel(jobId))) {
       throw new ApiFailure(
         409,
         'JOB_NOT_PENDING',
-        `This scheduled payment cannot be cancelled any more (it is ${job.status}).`,
+        `This scheduled payment cannot be cancelled any more (it is ${job.status}). Open Scheduled payments to see what happened.`,
       );
     }
     if (store.get(job.invoiceId)?.state === 'SCHEDULED') orchestrator.reject(job.invoiceId, {});

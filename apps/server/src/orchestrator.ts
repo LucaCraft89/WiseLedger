@@ -16,15 +16,18 @@ import {
   type EmitFn,
   type ExecutionResult,
   FLAG_CODES,
+  formatAssetAmount,
   IllegalTransition,
   type InvoiceAnalyzer,
   type InvoiceSourceKind,
   type InvoiceState,
   type Job,
   makePlan,
+  PAYMENT_REQUEST_PAYEE,
   type PaymentPlan,
   type RejectRequest,
   type RejectResponse,
+  type SetAmountResponse,
   type TransferInfo,
   type TransferStatus,
   type TreasurerAgent,
@@ -55,6 +58,8 @@ export interface OrchestratorDeps {
   treasurer: TreasurerAgent & { executeNow?: ExecuteNowFn };
   wallet: WalletPort;
   uploadDir: string;
+  /** Max amount per payment in base units (PAYMENT_CAP), for amounts the user types (open-amount requests). */
+  paymentCap?: string;
   /** Stores the job of a scheduled payment (B's Scheduler.schedule). Without it, scheduled confirms are refused. */
   schedule?: (input: { planId: string; invoiceId: string; runAt: string }) => Promise<Job>;
   now?: () => Date;
@@ -333,7 +338,12 @@ export class Orchestrator {
 
   private async planFromReport(id: string, report: AnalysisReport, executeAt?: string): Promise<PaymentPlan> {
     const p = report.proposedPayment;
-    if (!p) throw new ApiFailure(409, 'NO_PAYMENT', 'This invoice has no payment we can make.');
+    if (!p)
+      throw new ApiFailure(
+        409,
+        'NO_PAYMENT',
+        'This invoice has no payment we can make. Check it yourself, then reject it or ask the supplier for an RGB invoice.',
+      );
     return makePlan({
       invoiceId: id,
       rgbInvoice: p.rgbInvoice,
@@ -351,11 +361,85 @@ export class Orchestrator {
     return buildConfirmationSentence(plan, asset);
   }
 
+  /**
+   * Open-amount payment request: the amount the user typed (base units) is checked here (> 0, ≤ payment cap,
+   * ≤ spendable) and becomes the proposed payment, so confirm() rebuilds and checks exactly this plan.
+   */
+  async setAmount(id: string, amount: string): Promise<SetAmountResponse> {
+    const inv = this.mustGet(id);
+    const report = inv.report;
+    const pr = report?.paymentRequest;
+    if (!report || report.kind !== 'payment_request' || !pr || pr.amount) {
+      throw new ApiFailure(
+        409,
+        'AMOUNT_FIXED',
+        'This payment already has its amount; it cannot be changed. Confirm it as it is, or reject it.',
+      );
+    }
+    if (inv.state !== 'AWAITING_CONFIRMATION' || report.verdict === 'block') {
+      throw new ApiFailure(
+        409,
+        'INVALID_TRANSITION',
+        `The amount cannot be set now (state ${inv.state}). Reload the invoice to see its current state.`,
+      );
+    }
+    const assetId = pr.assetId ?? pr.payAssetId;
+    const rgbInvoice = report.extraction.payment.rgbInvoice;
+    if (!assetId || !rgbInvoice) {
+      throw new ApiFailure(
+        409,
+        'NO_PAYMENT',
+        'No token you accept is set up to pay this request. Ask the payee for a request in a token your wallet holds.',
+      );
+    }
+    const asset = (await this.deps.wallet.listAssets()).find((a) => a.assetId === assetId);
+    const words = (v: string) =>
+      asset ? `${formatAssetAmount(v, asset.precision)} ${asset.ticker}` : `${v} base units`;
+    const value = BigInt(amount);
+    if (value <= 0n) throw new ApiFailure(400, 'AMOUNT_ZERO', 'Type an amount greater than zero.');
+    if (this.deps.paymentCap && value > BigInt(this.deps.paymentCap)) {
+      throw new ApiFailure(
+        400,
+        'OVER_CAP',
+        `This is above your payment limit of ${words(this.deps.paymentCap)}. Type a smaller amount.`,
+      );
+    }
+    const spendable = (await this.deps.wallet.assetBalance(assetId)).spendable;
+    if (value > BigInt(spendable)) {
+      throw new ApiFailure(
+        400,
+        'INSUFFICIENT_FUNDS',
+        `You can spend at most ${words(spendable)} right now. Type a smaller amount, or wait for pending payments to settle.`,
+      );
+    }
+    const withAmount: AnalysisReport = {
+      ...report,
+      proposedPayment: { rgbInvoice, assetId, amount, payee: PAYMENT_REQUEST_PAYEE },
+    };
+    const plan = await this.planFromReport(id, withAmount);
+    const confirmationSentence = await this.sentenceFor(plan);
+    this.store.update(id, { report: withAmount, plan, confirmationSentence });
+    return { invoiceId: id, plan, confirmationSentence };
+  }
+
   async confirm(id: string, req: ConfirmRequest): Promise<ConfirmResponse> {
     const inv = this.mustGet(id);
     const report = inv.report;
     if (inv.state === 'BLOCKED' || report?.verdict === 'block') {
-      throw new ApiFailure(409, 'VERDICT_BLOCK', 'This invoice was blocked as dangerous and cannot be paid.');
+      throw new ApiFailure(
+        409,
+        'VERDICT_BLOCK',
+        'Do not pay. This invoice looks dangerous. We will not pay it. Read the warnings to see why.',
+      );
+    }
+    if (
+      inv.state === 'AWAITING_CONFIRMATION' &&
+      report?.kind === 'payment_request' &&
+      !report.proposedPayment &&
+      report.paymentRequest &&
+      !report.paymentRequest.amount
+    ) {
+      throw new ApiFailure(409, 'AMOUNT_NEEDED', 'This request leaves the amount to you: type it first, then confirm.');
     }
     if (inv.state === 'AWAITING_CONFIRMATION' && report && !report.proposedPayment) {
       if (report.flags.some((f) => f.code === FLAG_CODES.AI_UNAVAILABLE)) {
@@ -381,7 +465,11 @@ export class Orchestrator {
       );
     }
     if ((!retry && inv.state !== 'AWAITING_CONFIRMATION') || !report || !inv.plan) {
-      throw new ApiFailure(409, 'INVALID_TRANSITION', `This invoice cannot be confirmed now (state ${inv.state}).`);
+      throw new ApiFailure(
+        409,
+        'INVALID_TRANSITION',
+        `This invoice cannot be confirmed now (state ${inv.state}). Reload the invoice to see its current state.`,
+      );
     }
     if (report.verdict === 'review' && req.override !== true) {
       throw new ApiFailure(
@@ -396,7 +484,7 @@ export class Orchestrator {
         throw new ApiFailure(409, 'SCHEDULING_UNAVAILABLE', 'Scheduled payments are not available. Pay now instead.');
       }
       if (Date.parse(executeAt) <= this.now().getTime()) {
-        throw new ApiFailure(400, 'IN_THE_PAST', 'The payment date must be in the future.');
+        throw new ApiFailure(400, 'IN_THE_PAST', 'The payment date must be in the future. Pick a later date and time.');
       }
     }
     // Rebuild the plan from the report: the planId the user saw must match what we would pay now.
@@ -518,7 +606,11 @@ export class Orchestrator {
         this.transition(id, 'SCHEDULED');
         return result;
       case 'failed':
-        this.fail(id, result.error?.code ?? 'PAYMENT_FAILED', result.error?.message ?? 'The payment failed.');
+        this.fail(
+          id,
+          result.error?.code ?? 'PAYMENT_FAILED',
+          result.error?.message ?? 'The payment failed. Check the transfers list before trying again.',
+        );
         return result;
       case 'submitted':
         // Sent (or maybe sent, after a timeout) but not settled yet: stay EXECUTING; the wallet sync settles it.
@@ -613,7 +705,10 @@ export class Orchestrator {
             status: 'failed',
             transferId,
             ...(t.txid ? { txid: t.txid } : {}),
-            error: { code: 'TransferFailed', message: 'The transfer failed on chain.' },
+            error: {
+              code: 'TransferFailed',
+              message: 'The transfer failed on the network. Check the transfers list, then try the payment again.',
+            },
           },
         });
         this.fail(id, 'TransferFailed', 'The transfer failed. Nothing more will be sent for this invoice.');

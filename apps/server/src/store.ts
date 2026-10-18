@@ -133,6 +133,18 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX receives_status ON receives(status);
   `,
+  // 5: payment requests can be cancelled and archived (additive, never drops data).
+  `
+  ALTER TABLE receives ADD COLUMN cancelled_at TEXT;
+  ALTER TABLE receives ADD COLUMN archived_at TEXT;
+  CREATE INDEX receives_created ON receives(created_at);
+  `,
+  // 6: who pays and what for (Get paid form), and where the request was made (additive; note stays filled).
+  `
+  ALTER TABLE receives ADD COLUMN payer TEXT;
+  ALTER TABLE receives ADD COLUMN purpose TEXT;
+  ALTER TABLE receives ADD COLUMN made_in TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -393,6 +405,16 @@ export class InvoiceStore {
       .prepare('SELECT event_json FROM events WHERE invoice_id = ? ORDER BY seq')
       .all(id) as unknown as { event_json: string }[];
     return rows.map((r) => JSON.parse(r.event_json) as AppEvent);
+  }
+
+  /** Past `transfer` events of one transfer (linked to an invoice or not), oldest first. */
+  transferEvents(transferId: string): Extract<AppEvent, { type: 'transfer' }>[] {
+    const rows = this.db
+      .prepare(
+        "SELECT event_json FROM events WHERE type = 'transfer' AND json_extract(event_json, '$.transferId') = ? ORDER BY seq",
+      )
+      .all(transferId) as unknown as { event_json: string }[];
+    return rows.map((r) => JSON.parse(r.event_json) as Extract<AppEvent, { type: 'transfer' }>);
   }
 
   /** Events without an invoice (e.g. status changes of transfers not linked to an invoice). */

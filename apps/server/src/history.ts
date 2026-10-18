@@ -19,12 +19,13 @@ export class StoreHistory implements HistoryPort {
       // A failed analysis tells us nothing about the document: never a duplicate source.
       if (inv.id === by.excludeInvoiceId || inv.state === 'FAILED') continue;
       const ex = inv.report?.extraction;
+      const stopped = inv.state === 'BLOCKED' || inv.state === 'REJECTED' ? { stopped: true } : {};
       if (issuer && number && ex && norm(ex.issuer.name) === issuer && norm(ex.invoiceNumber) === number) {
-        out.push({ invoiceId: inv.id, matchedOn: 'issuer+number' });
+        out.push({ invoiceId: inv.id, matchedOn: 'issuer+number', ...stopped });
       } else if (by.sha256 && inv.sha256 === by.sha256) {
-        out.push({ invoiceId: inv.id, matchedOn: 'sha256' });
+        out.push({ invoiceId: inv.id, matchedOn: 'sha256', ...stopped });
       } else if (by.rgbInvoice && rgbInvoiceOf(inv) === by.rgbInvoice) {
-        out.push({ invoiceId: inv.id, matchedOn: 'rgbInvoice' });
+        out.push({ invoiceId: inv.id, matchedOn: 'rgbInvoice', ...stopped });
       }
     }
     return out;

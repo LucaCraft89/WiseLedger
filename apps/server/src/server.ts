@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { createTranscriber, Scheduler } from 'ai';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { walletConfigFromEnv } from 'wallet';
+import { booksMismatches } from './books.js';
 import { loadConfig, type ServerConfig } from './config.js';
 import { WalletFiscalService } from './fiscal.js';
 import { SqliteGuardStore } from './guard-store.js';
@@ -45,6 +46,7 @@ export interface AppOptions {
     | 'onSynced'
     | 'syncBusy'
     | 'onReceiveCreated'
+    | 'checkPaymentRequest'
     | 'labels'
     | 'jobs'
     | 'fiscalFor'
@@ -75,8 +77,16 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
       guardStore,
       onSynced: () => settle(),
       syncBusy: () => receives.waitingRecently(),
-      onReceiveCreated: (inv) => {
-        receives.add(inv, 'Made in chat');
+      // The chat card is rendered from this stored request (by receiveId), so it survives a reload.
+      onReceiveCreated: (inv) => ({ receiveId: receives.add(inv, { madeIn: 'chat' }).receiveId }),
+      // "pay this: rgb:…" in the chat opens the same check as an upload; nothing is paid from the chat.
+      checkPaymentRequest: async (text) => {
+        const created = await orchestrator.createInvoice({
+          filename: 'payment-request.txt',
+          mimeType: 'text/plain',
+          data: Buffer.from(text, 'utf8'),
+        });
+        return { invoiceId: created.id };
       },
       labels,
       jobs,
@@ -113,6 +123,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     treasurer,
     wallet,
     uploadDir: config.uploadDir,
+    paymentCap: config.paymentCap,
     schedule: (input) => (scheduler as Scheduler).schedule(input),
   });
   scheduler = new Scheduler({
@@ -124,7 +135,20 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     onResult: (job, result) =>
       app.log.info({ jobId: job.jobId, invoiceId: job.invoiceId, status: result.status }, 'Scheduled payment ran'),
   });
+  // Once, after the first settle: the books' running balance must equal the wallet's settled balance.
+  let booksChecked = false;
+  const checkBooks = () => {
+    if (booksChecked || providers.holder.state !== 'ready') return;
+    booksChecked = true;
+    booksMismatches(wallet, { store, receives, labels })
+      .then((lines) => {
+        for (const line of lines) app.log.warn(`Books self-check: ${line}`);
+        if (lines.length === 0) app.log.info('Books self-check: the running balance matches the wallet');
+      })
+      .catch((err: unknown) => app.log.warn({ err }, 'Books self-check could not run'));
+  };
   settle = () => {
+    checkBooks();
     orchestrator.settleFromTransfers().catch((err: unknown) => app.log.warn({ err }, 'Settling payments failed'));
     wallet
       .listTransfers()
@@ -162,6 +186,7 @@ export async function createApp(overrides: Partial<ServerConfig> = {}, opts: App
     },
     network: config.rgbNetwork,
     uploadMaxMb: config.uploadMaxMb,
+    feeMinSats: config.feeMinSats,
     walletSync: () => ({
       lastSyncAt: providers.sync?.lastSyncAt?.toISOString() ?? null,
       lastError: providers.sync?.lastError ?? null,

@@ -176,4 +176,17 @@ describe('StoreHistory', () => {
     expect(await h.payeeBook()).toEqual([]);
     store.close();
   });
+
+  it('marks an earlier copy that was stopped without paying (R4 then warns instead of blocking)', async () => {
+    const store = new InvoiceStore(':memory:');
+    const at = new Date().toISOString();
+    const base = { kind: 'text' as const, path: '/x', createdAt: at, updatedAt: at, sha256: 'f'.repeat(64) };
+    store.insert({ ...base, state: 'BLOCKED', id: 'a', filename: 'a.txt' });
+    store.insert({ ...base, state: 'PAID', id: 'b', filename: 'b.txt' });
+    const seen = await new StoreHistory(store).seen({ sha256: 'f'.repeat(64), excludeInvoiceId: 'c' });
+    expect(seen).toHaveLength(2);
+    expect(seen).toContainEqual({ invoiceId: 'a', matchedOn: 'sha256', stopped: true });
+    expect(seen).toContainEqual({ invoiceId: 'b', matchedOn: 'sha256' });
+    store.close();
+  });
 });
