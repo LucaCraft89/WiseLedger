@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiseLedger - the three networks</title>
+<style>
+  :root { --bg:#070b17; --panel:#0e1530; --line:#24305a; --txt:#e8ecff; --mut:#8e9acb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(1200px 700px at 20% -10%, #17224d 0%, var(--bg) 60%); color:var(--txt);
+    font-family:"Segoe UI", system-ui, Helvetica, Arial, sans-serif; min-height:100vh; }
+  header { padding:22px 28px 6px; }
+  h1 { margin:0; font-size:24px; font-weight:700; letter-spacing:.2px; }
+  header p { margin:6px 0 0; color:var(--mut); font-size:14px; }
+  .tabs { display:flex; gap:10px; padding:14px 28px 0; flex-wrap:wrap; }
+  .tab { cursor:pointer; padding:10px 18px; border-radius:999px; border:1px solid var(--line); background:#0b1226; color:var(--mut);
+    font-size:14px; font-weight:600; transition:.2s; }
+  .tab:hover { color:var(--txt); border-color:#4a5aa0; }
+  .tab.on { color:#fff; border-color:transparent; box-shadow:0 0 0 1px var(--tc), 0 6px 26px -6px var(--tc); background:linear-gradient(180deg,#16204a,#0e1630); }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:18px; padding:16px 28px 28px; }
+  @media (max-width:1050px){ main{ grid-template-columns:1fr; } }
+  .card { background:linear-gradient(180deg,#0f1736,#0a1128); border:1px solid var(--line); border-radius:16px; }
+  .stage { padding:8px; position:relative; }
+  svg { width:100%; height:auto; display:block; }
+  .controls { display:flex; gap:8px; align-items:center; padding:10px 8px 4px; flex-wrap:wrap; }
+  button { cursor:pointer; border:1px solid var(--line); background:#121b3d; color:var(--txt); border-radius:10px; padding:8px 14px; font-size:14px; font-weight:600; }
+  button:hover { border-color:#5565b0; background:#17224d; }
+  button.primary { background:var(--tc); border-color:transparent; color:#0a0f22; }
+  .spd { margin-left:auto; color:var(--mut); font-size:13px; display:flex; gap:8px; align-items:center; }
+  input[type=range]{ accent-color:var(--tc); }
+  .now { margin:8px; padding:14px 16px; border-radius:12px; background:#0b1230; border:1px solid var(--line); min-height:96px; }
+  .now .k { font-size:12px; color:var(--mut); text-transform:uppercase; letter-spacing:1.2px; }
+  .now .t { font-size:18px; font-weight:700; margin:4px 0 6px; }
+  .now .d { color:#c4ccf0; font-size:14px; line-height:1.55; }
+  aside { padding:14px; }
+  aside h3 { margin:2px 4px 10px; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:var(--mut); }
+  .step { display:flex; gap:10px; padding:9px 10px; border-radius:10px; cursor:pointer; border:1px solid transparent; font-size:13.5px; line-height:1.35; color:#b7c0ea; }
+  .step:hover { background:#121b3d; }
+  .step .n { flex:0 0 24px; height:24px; border-radius:50%; background:#18224a; display:grid; place-items:center; font-size:12px; font-weight:700; color:var(--mut); }
+  .step.done .n { background:#1d2c63; color:#fff; }
+  .step.on { background:#14204d; border-color:var(--tc); color:#fff; }
+  .step.on .n { background:var(--tc); color:#0a0f22; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; padding:10px 14px 14px; font-size:12.5px; color:var(--mut); }
+  .legend i { display:inline-block; width:26px; height:0; border-top:3px solid; vertical-align:middle; margin-right:6px; }
+  .nlabel { fill:var(--txt); font-size:14px; font-weight:700; text-anchor:middle; paint-order:stroke; stroke:#070b17; stroke-width:4px; }
+  .nsub { fill:var(--mut); font-size:11.5px; text-anchor:middle; paint-order:stroke; stroke:#070b17; stroke-width:4px; }
+  .elabel { fill:#aeb8e8; font-size:11.5px; text-anchor:middle; paint-order:stroke; stroke:#070b17; stroke-width:5px; }
+  .badge text { fill:#0a0f22; font-size:11.5px; font-weight:700; text-anchor:middle; }
+  .node circle.body { fill:#0f1736; stroke-width:2.5; transition:.25s; }
+  .node.act circle.body { stroke-width:4.5; }
+  .node.act { filter:drop-shadow(0 0 14px var(--c)); }
+  .edge { fill:none; stroke-width:2.4; transition:.3s; opacity:.28; }
+  .edge.used { opacity:.75; }
+  .edge.hot { opacity:1; stroke-width:3.6; filter:drop-shadow(0 0 6px currentColor); }
+  .pulse { fill:none; stroke-width:3; transform-box:fill-box; transform-origin:center; animation:pl 1.2s ease-out forwards; }
+  @keyframes pl { from{ transform:scale(1); opacity:.9; } to{ transform:scale(2.6); opacity:0; } }
+  @media (prefers-reduced-motion:reduce){ .pulse{ animation:none; opacity:0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>WiseLedger · how RGB payments travel</h1>
+  <p>Three graph maps of the same test network (Mutinynet): press Play, or step through the list on the right by hand.</p>
+</header>
+<div class="tabs" id="tabs"></div>
+<main>
+  <section class="card">
+    <div class="stage"><svg id="svg" viewBox="0 0 1000 600" role="img" aria-label="Network graph">
+      <defs>
+        <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#1b2650"/></pattern>
+      </defs>
+      <rect width="1000" height="600" fill="url(#dots)" opacity=".7"/>
+      <g id="edges"></g><g id="edgeLabels"></g><g id="nodes"></g><g id="fx"></g>
+    </svg></div>
+    <div class="legend" id="legend"></div>
+    <div class="controls">
+      <button id="prev">◀ Back</button>
+      <button id="play" class="primary">▶ Play</button>
+      <button id="next">Next ▶</button>
+      <button id="reset">↺ Restart</button>
+      <label class="spd">Speed <input id="speed" type="range" min="0.5" max="2.5" step="0.25" value="1"></label>
+    </div>
+    <div class="now" id="now"></div>
+  </section>
+  <aside class="card"><h3 id="listTitle">Steps</h3><div id="steps"></div></aside>
+</main>
+<script>
+const K = {
+  chain: { color:'#f2a93b', dash:'7 6', name:'On-chain transaction (Bitcoin)' },
+  proxy: { color:'#a78bfa', dash:'', name:'RGB data delivery (proxy)' },
+  http:  { color:'#5db2ff', dash:'', name:'HTTP / API' },
+  ln:    { color:'#ff7a59', dash:'', name:'Lightning channel' },
+  oob:   { color:'#9aa6d6', dash:'2 6', name:'Out of band (text / QR)' },
+  idx:   { color:'#35d0a5', dash:'', name:'Blockchain read (indexer)' },
+};
+const C = { teal:'#35d0a5', blue:'#5db2ff', amber:'#f2a93b', coral:'#ff7a59', purple:'#a78bfa', pink:'#ff7fb0' };
+
+const SC = {
+ onchain: {
+  tab:'1 · On-chain', color:C.teal,
+  legend:['idx','proxy','chain','oob'],
+  nodes:{
+   payer:{x:140,y:300,i:'💼',t:'WiseLedger (payer)',s:'WDK + rgb-lib',c:C.teal},
+   payee:{x:860,y:300,i:'🏢',t:'Supplier (payee)',s:'RGB wallet',c:C.blue},
+   proxy:{x:500,y:110,i:'📮',t:'RGB proxy',s:'consignment delivery',c:C.purple},
+   esp:{x:370,y:480,i:'🔎',t:'Esplora indexer',s:'KaleidoSwap',c:C.amber},
+   btc:{x:700,y:480,i:'₿',t:'Bitcoin Mutinynet',s:'signet · blocks ~30 s',c:C.amber},
+  },
+  edges:[
+   {id:'oobE',a:'payee',b:'payer',k:'oob',bend:-90,l:'RGB invoice'},
+   {id:'pp',a:'payer',b:'proxy',k:'proxy',bend:-30,l:'rpcs:// JSON-RPC'},
+   {id:'qp',a:'payee',b:'proxy',k:'proxy',bend:30},
+   {id:'pe',a:'payer',b:'esp',k:'idx',bend:-20,l:'HTTPS'},
+   {id:'qe',a:'payee',b:'esp',k:'idx',bend:30},
+   {id:'eb',a:'esp',b:'btc',k:'chain',bend:0,l:'blocks'},
+  ],
+  steps:[
+   {e:'oobE',from:'payee',t:'The supplier creates the RGB invoice',d:'It holds a blinded UTXO (utxob), the expiry (mandatory in rgb-lib) and the proxy endpoint. It arrives as text or a QR code: no network involved.',badge:['payee','invoice created']},
+   {e:'pe',from:'payer',t:'Wallet sync',d:'rgb-lib asks Esplora for colored UTXOs, the TUSDT balance and the state of transfers. The fee rate is always explicit (2 sat/vB on Mutinynet).'},
+   {at:'payer',t:'PaymentGuard + transaction build',d:'The guard has already checked the confirmed plan, amount ≤ cap and one-time execution. rgb-lib prepares the PSBT that commits to the transfer, and the consignment with the asset history.',badge:['payer','tx ready']},
+   {e:'pp',from:'payer',t:'Upload the consignment to the proxy',d:'The asset history does not go on the blockchain: it goes through the RGB proxy. Privacy and scalability come from here.'},
+   {e:'pe',from:'payer',t:'Sign and broadcast the transaction',d:'Broadcast through Esplora. After a timeout there is no automatic retry: the wallet syncs and reads the transfer state.'},
+   {e:'eb',from:'esp',t:'The transaction enters a block',d:'The explorer shows a normal Bitcoin transaction (with the commitment hash), not "5 TUSDT". Confirmed in ~30 s.',badge:['btc','1 confirmation']},
+   {e:'qp',from:'payee',t:'The payee downloads the consignment',d:'From the proxy it takes the data it needs to verify the asset.'},
+   {e:'qe',from:'payee',t:'Check the on-chain confirmation',d:'Asks Esplora whether the transaction with the commitment is confirmed.'},
+   {at:'payee',t:'Client-side validation',d:'Verifies the whole history back to issuance (NIA schema) and that the on-chain commitment matches, on its own. Nobody trusts anybody.',badge:['payee','asset validated']},
+   {e:'qp',from:'payee',t:'Send the ack to the proxy',d:'Accepts the transfer: the proxy records it.'},
+   {e:'pp',from:'proxy',t:'The payer reads the ack: Settled',d:'After a sync the transfer moves to Settled and the app shows the confirmation.',badge:['payer','Settled ✓']},
+  ]},
+ lightning: {
+  tab:'2 · Lightning', color:C.coral,
+  legend:['ln','chain','proxy','oob'],
+  nodes:{
+   payer:{x:130,y:300,i:'💼',t:'WiseLedger',s:'RGB Lightning node',c:C.teal},
+   hub:{x:500,y:300,i:'🔀',t:'Routing node',s:'channels with RGB assets',c:C.coral},
+   payee:{x:870,y:300,i:'🏢',t:'Supplier',s:'RGB Lightning node',c:C.blue},
+   btc:{x:500,y:500,i:'₿',t:'Bitcoin Mutinynet',s:'only open / close channel',c:C.amber},
+   proxy:{x:500,y:95,i:'📮',t:'RGB proxy',s:'channel-open deliveries',c:C.purple},
+  },
+  edges:[
+   {id:'ch1',a:'payer',b:'hub',k:'ln',bend:0,l:'TUSDT channel'},
+   {id:'ch2',a:'hub',b:'payee',k:'ln',bend:0,l:'TUSDT channel'},
+   {id:'f1',a:'payer',b:'btc',k:'chain',bend:-40,l:'funding tx'},
+   {id:'f2',a:'hub',b:'btc',k:'chain',bend:0},
+   {id:'pr1',a:'payer',b:'proxy',k:'proxy',bend:-30},
+   {id:'pr2',a:'hub',b:'proxy',k:'proxy',bend:0},
+   {id:'oobE',a:'payee',b:'payer',k:'oob',bend:140,l:'invoice lntbs…'},
+  ],
+  steps:[
+   {e:'f1',from:'payer',t:'First of all: the channel already exists',d:'Once, an on-chain funding transaction locks sats and TUSDT in the channel (with the RGB data delivered through the proxy). From then on everything is off-chain.',badge:['payer','channel open']},
+   {e:'oobE',from:'payee',t:'The supplier issues a Lightning invoice',d:'It is a BOLT11 (lntbs…) with RGB fields: asset ID, amount in base units and payment_hash.',badge:['payee','invoice lntbs…']},
+   {at:'payer',t:'decodeInvoice and checks',d:'The rail reads the invoice, checks expiry, asset and amount, and verifies that the channel holds enough TUSDT on our side. If not: InsufficientFunds, pay on-chain instead.'},
+   {e:'ch1',from:'payer',t:'sendPayment: HTLC towards the node',d:'The TUSDT amount is locked in the channel with an HTLC tied to the hash. No Bitcoin transaction.'},
+   {e:'ch2',from:'hub',t:'The node forwards the HTLC to the supplier',d:'The routing node keeps a small fee and forwards on the second channel.'},
+   {e:'ch2',from:'payee',t:'The supplier reveals the preimage',d:'To collect, it must reveal the secret matching the hash: that is what settles the HTLC.',badge:['payee','+ TUSDT received']},
+   {e:'ch1',from:'hub',t:'The preimage travels back to the payer',d:'It goes back up the path and unlocks every HTLC until it reaches us.'},
+   {at:'payer',t:'Status: Succeeded → Settled',d:'A few seconds in total. We never retry on our own: after a timeout the status is read again from the payment_hash.',badge:['payer','Settled ✓']},
+  ]},
+ lsp: {
+  tab:'3 · Home-made LSP', color:C.amber,
+  legend:['http','ln','chain','proxy'],
+  nodes:{
+   payerw:{x:120,y:95,i:'👛',t:'Payer wallet',s:'WDK · "lsp fund" command',c:C.teal},
+   app:{x:130,y:430,i:'📱',t:'WiseLedger',s:'app LN node, no channels yet',c:C.teal},
+   lsp:{x:500,y:290,i:'🏦',t:'Home-made LSP (node A)',s:'lsp.ts · HTTP :8790 · peer :9735',c:C.coral},
+   btc:{x:870,y:95,i:'₿',t:'Mutinynet',s:'Esplora + Bitcoin',c:C.amber},
+   proxy:{x:880,y:290,i:'📮',t:'RGB proxy',s:'channel-open deliveries',c:C.purple},
+   cli:{x:850,y:500,i:'🧑‍💼',t:'Customer',s:'LN node that pays',c:C.blue},
+  },
+  edges:[
+   {id:'fund',a:'payerw',b:'lsp',k:'chain',bend:-30,l:'50,000 sats'},
+   {id:'http',a:'app',b:'lsp',k:'http',bend:-45,l:'GET /info · POST /channel-request'},
+   {id:'ch',a:'app',b:'lsp',k:'ln',bend:50,l:'peer + private channel'},
+   {id:'chain',a:'lsp',b:'btc',k:'chain',bend:-30,l:'funding tx'},
+   {id:'rgbp',a:'lsp',b:'proxy',k:'proxy',bend:0},
+   {id:'ln',a:'cli',b:'lsp',k:'ln',bend:-30,l:'channel with the customer'},
+  ],
+  steps:[
+   {e:'fund',from:'payerw',t:'Give the LSP liquidity',d:'"pnpm -F wallet lsp fund": the payer wallet sends sats to node A, which then creates colored UTXOs: rgb-lib funds RGB channels only from those.',badge:['lsp','funds ready']},
+   {e:'http',from:'app',t:'The app calls GET /info',d:'The LSP answers with pubkey, host, peerPort, asset ID and whether it has liquidity available. The app now knows who to connect to.'},
+   {e:'ch',from:'app',t:'The app connects as a peer',d:'connectPeer on pubkey@host:9735 (Lightning P2P network). The LSP refuses requests from nodes that are not connected (NOT_CONNECTED error).'},
+   {e:'http',from:'app',t:'POST /channel-request {pubkey}',d:'The LSP answers 202 "opening". If it is still preparing funds it answers 503 and the app retries every minute (max 10 times).'},
+   {at:'lsp',t:'openChannel',d:'30,010 sats of capacity, 10 TUSDT on the LSP side, 3.1M msat initial push, private channel with anchors. One fixed channel per pubkey.',badge:['lsp','channel opening']},
+   {e:'rgbp',from:'lsp',t:'RGB channel-open deliveries',d:'The asset data for the channel goes through the RGB proxy.'},
+   {e:'chain',from:'lsp',t:'Funding transaction on-chain',d:'The tx enters Mutinynet. One block (~30 s) is needed before the channel is usable.'},
+   {e:'chain',from:'btc',t:'Confirmed: the channel is usable',d:'From here the app can receive TUSDT over Lightning with no further on-chain transactions.',badge:['app','channel open']},
+   {e:'http',from:'app',t:'GET /channel-request/:pubkey',d:'The app checks the status: "open". The Lightning panel shows the channel.'},
+   {e:'ln',from:'cli',t:'A customer pays the app: HTLC to the LSP',d:'The customer has no channel with us, but has one with the LSP: the payment goes through there.'},
+   {e:'ch',from:'lsp',t:'The LSP forwards into the private channel',d:'forwardToPrivateChannels is on (channels to app nodes are private). The TUSDT reach the app within seconds.',badge:['app','+ TUSDT received']},
+  ]},
+};
+
+const $ = (id) => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; };
+let cur = 'onchain', idx = -1, playing = false, run = 0, raf = 0, timer = 0;
+const edgeEls = {}, nodeEls = {}, badgeEls = {};
+
+function setTheme() { document.documentElement.style.setProperty('--tc', SC[cur].color); }
+
+function drawTabs() {
+  const t = $('tabs'); t.innerHTML = '';
+  for (const k in SC) {
+    const b = document.createElement('div');
+    b.className = 'tab' + (k === cur ? ' on' : ''); b.textContent = SC[k].tab;
+    b.style.setProperty('--tc', SC[k].color);
+    b.onclick = () => { stop(); cur = k; idx = -1; build(); };
+    t.appendChild(b);
+  }
+}
+
+function ctrl(a, b, bend) {
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+  return { x: mx + (-dy / L) * bend * 2, y: my + (dx / L) * bend * 2 };
+}
+
+function build() {
+  setTheme(); drawTabs();
+  const S = SC[cur];
+  for (const g of ['edges', 'edgeLabels', 'nodes', 'fx']) $(g).innerHTML = '';
+  for (const k in edgeEls) delete edgeEls[k];
+  for (const e of S.edges) {
+    const a = S.nodes[e.a], b = S.nodes[e.b], c = ctrl(a, b, e.bend || 0), kd = K[e.k];
+    const p = el('path', { d: `M${a.x} ${a.y} Q${c.x} ${c.y} ${b.x} ${b.y}`, class: 'edge', stroke: kd.color }, $('edges'));
+    p.style.color = kd.color; if (kd.dash) p.setAttribute('stroke-dasharray', kd.dash);
+    edgeEls[e.id] = { p, e, a, b };
+    if (e.l) { const t = el('text', { class: 'elabel', x: 0.25 * a.x + 0.5 * c.x + 0.25 * b.x, y: 0.25 * a.y + 0.5 * c.y + 0.25 * b.y - 6 }, $('edgeLabels')); t.textContent = e.l; }
+  }
+  for (const id in S.nodes) {
+    const n = S.nodes[id], g = el('g', { class: 'node', transform: `translate(${n.x} ${n.y})` }, $('nodes'));
+    g.style.setProperty('--c', n.c);
+    el('circle', { class: 'body', r: 40, stroke: n.c }, g);
+    const i = el('text', { y: 11, 'font-size': 30, 'text-anchor': 'middle' }, g); i.textContent = n.i;
+    const t = el('text', { class: 'nlabel', y: 66 }, g); t.textContent = n.t;
+    const s = el('text', { class: 'nsub', y: 83 }, g); s.textContent = n.s;
+    nodeEls[id] = g; badgeEls[id] = null;
+  }
+  $('legend').innerHTML = S.legend.map((k) => `<span><i style="border-color:${K[k].color};border-top-style:${K[k].dash ? 'dashed' : 'solid'}"></i>${K[k].name}</span>`).join('');
+  $('listTitle').textContent = S.tab;
+  const L = $('steps'); L.innerHTML = '';
+  S.steps.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'step'; d.id = 's' + i;
+    d.innerHTML = `<span class="n">${i + 1}</span><span>${s.t}</span>`;
+    d.onclick = () => { stop(); go(i, true); };
+    L.appendChild(d);
+  });
+  paint();
+}
+
+function paint() {
+  const S = SC[cur], cs = S.steps[idx];
+  for (const id in edgeEls) edgeEls[id].p.setAttribute('class', 'edge');
+  S.steps.forEach((s, i) => { if (i <= idx && s.e) edgeEls[s.e].p.classList.add('used'); });
+  if (cs && cs.e) edgeEls[cs.e].p.classList.add('hot');
+  for (const id in nodeEls) nodeEls[id].classList.remove('act');
+  if (cs) { if (cs.at) nodeEls[cs.at].classList.add('act'); if (cs.e) { nodeEls[edgeEls[cs.e].e.a].classList.add('act'); nodeEls[edgeEls[cs.e].e.b].classList.add('act'); } }
+  for (const id in badgeEls) { if (badgeEls[id]) { badgeEls[id].remove(); badgeEls[id] = null; } }
+  S.steps.forEach((s, i) => {
+    if (i > idx || !s.badge) return;
+    const [id, txt] = s.badge, n = S.nodes[id];
+    if (badgeEls[id]) badgeEls[id].remove();
+    const g = el('g', { class: 'badge', transform: `translate(${n.x} ${n.y - 58})` }, $('nodes')), w = txt.length * 7 + 22;
+    el('rect', { x: -w / 2, y: -11, width: w, height: 22, rx: 11, fill: n.c }, g);
+    const t = el('text', { y: 4 }, g); t.textContent = txt; badgeEls[id] = g;
+  });
+  document.querySelectorAll('.step').forEach((d, i) => { d.classList.toggle('on', i === idx); d.classList.toggle('done', i < idx); });
+  const now = $('now');
+  if (!cs) now.innerHTML = `<div class="k">Ready</div><div class="t">Press Play to watch the payment travel</div><div class="d">${S.steps.length} steps. Dashed lines are Bitcoin transactions, solid lines are messages and data deliveries.</div>`;
+  else now.innerHTML = `<div class="k">Step ${idx + 1} of ${S.steps.length}</div><div class="t">${cs.t}</div><div class="d">${cs.d}</div>`;
+  const on = document.querySelector('.step.on'); if (on) on.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function dur() { return 1500 / Number($('speed').value); }
+
+function go(i, withAnim) {
+  const S = SC[cur]; if (i < 0 || i >= S.steps.length) return false;
+  idx = i; paint(); $('fx').innerHTML = ''; cancelAnimationFrame(raf);
+  const s = S.steps[i], myRun = run;
+  return new Promise((res) => {
+    if (s.at) {
+      const n = S.nodes[s.at];
+      el('circle', { class: 'pulse', cx: n.x, cy: n.y, r: 42, stroke: n.c }, $('fx'));
+      setTimeout(res, dur() * 0.8); return;
+    }
+    const E = edgeEls[s.e], rev = s.from === E.e.b, kd = K[E.e.k], len = E.p.getTotalLength();
+    const dot = el('circle', { r: 8, fill: kd.color }, $('fx')); dot.style.filter = `drop-shadow(0 0 8px ${kd.color})`;
+    const trail = el('circle', { r: 4.5, fill: kd.color, opacity: .45 }, $('fx'));
+    const t0 = performance.now(), D = dur();
+    (function tick(now) {
+      if (myRun !== run && !withAnim) return;
+      let u = Math.min(1, (now - t0) / D); const e = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+      const pos = (v) => E.p.getPointAtLength((rev ? 1 - v : v) * len);
+      const p = pos(e), q = pos(Math.max(0, e - .07));
+      dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y); trail.setAttribute('cx', q.x); trail.setAttribute('cy', q.y);
+      if (u < 1) raf = requestAnimationFrame(tick); else { setTimeout(() => { dot.remove(); trail.remove(); }, 200); res(); }
+    })(t0);
+  });
+}
+
+async function auto() {
+  const me = ++run; playing = true; $('play').textContent = '❚❚ Pause';
+  if (idx >= SC[cur].steps.length - 1) idx = -1;
+  while (playing && me === run && idx < SC[cur].steps.length - 1) {
+    await go(idx + 1, false);
+    if (me !== run) return;
+    await new Promise((r) => { timer = setTimeout(r, 750 / Number($('speed').value)); });
+  }
+  if (me === run) { playing = false; $('play').textContent = '▶ Replay'; }
+}
+function stop() { run++; playing = false; clearTimeout(timer); $('play').textContent = '▶ Play'; }
+
+$('play').onclick = () => (playing ? stop() : auto());
+$('next').onclick = () => { stop(); if (idx < SC[cur].steps.length - 1) go(idx + 1, true); };
+$('prev').onclick = () => { stop(); if (idx > 0) go(idx - 1, true); else { idx = -1; $('fx').innerHTML = ''; paint(); } };
+$('reset').onclick = () => { stop(); idx = -1; $('fx').innerHTML = ''; paint(); };
+build();
+</script>
+</body>
+</html>
