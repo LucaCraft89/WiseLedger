@@ -81,6 +81,7 @@ export const FLAG_CODES = {
   R8_CURRENCY: 'R8_CURRENCY',
   R9_MISSING_FIELDS: 'R9_MISSING_FIELDS',
   R10_DATES: 'R10_DATES',
+  R11_RGB_REQUEST: 'R11_RGB_REQUEST',
   AI_UNAVAILABLE: 'AI_UNAVAILABLE',
 } as const;
 export type FlagCode = (typeof FLAG_CODES)[keyof typeof FLAG_CODES];
@@ -117,6 +118,29 @@ export const ProposedPayment = z.object({
 });
 export type ProposedPayment = z.infer<typeof ProposedPayment>;
 
+/** One line of the "Payment request check": every check on the RGB payment request, passed ones included. */
+export const RgbCheckName = z.enum([
+  'decodes',
+  'rail',
+  'network',
+  'not_expired',
+  'asset_approved',
+  'asset_matches',
+  'amount_matches',
+  'transport_known',
+]);
+export type RgbCheckName = z.infer<typeof RgbCheckName>;
+
+export const RgbCheckLine = z.object({
+  check: RgbCheckName,
+  result: Verdict,
+  /** One plain sentence, written by code. */
+  text: z.string().min(1),
+  /** The flag that already explains this failure (the UI links to it instead of repeating it). */
+  flagCode: z.string().optional(),
+});
+export type RgbCheckLine = z.infer<typeof RgbCheckLine>;
+
 export const LlmProviderName = z.enum(['qvac', 'openai', 'mock']);
 export type LlmProviderName = z.infer<typeof LlmProviderName>;
 
@@ -126,6 +150,8 @@ export const AnalysisReport = z.object({
   flags: z.array(RiskFlag),
   verdict: Verdict,
   proposedPayment: ProposedPayment.optional(),
+  /** The RGB payment request check, built by code from the decoded request (absent when the AI could not read it). */
+  rgbCheck: z.array(RgbCheckLine).optional(),
   /** Plain-language summary (≤ 120 words), written by call 2 from fields + flags only. */
   summary: z.string(),
   questionsForUser: z.array(z.string()),

@@ -181,3 +181,64 @@ describe('WdkRgbWallet.btcBalance', () => {
     expect(failing.btcBalance().vanilla.spendable).toBe(5);
   });
 });
+
+describe('WdkRgbWallet.listTransfers settlement fields', () => {
+  // Shapes copied from rgb-lib 0.3.0-beta.8 on Mutinynet (payer's send, payee's blinded receive), paths trimmed.
+  const proxy = [{ endpoint: 'https://proxy.kaleidoswap.com/json-rpc', transportType: 'JsonRpc', used: true }];
+  const real: SdkTransfer[] = [
+    {
+      idx: 17,
+      batchTransferIdx: 17,
+      createdAt: 1792248390,
+      updatedAt: 1792248431,
+      status: 'Settled',
+      requestedAssignment: { Fungible: 25000000 },
+      assignments: [{ Fungible: 737000000 }],
+      kind: 'Send',
+      txid: '633d92804f11322114117efa6281e47e57ae063fd42463123f1288cb19f9d89c',
+      recipientId: 'sb:utxob:nWMregt9-EBzFwnn-3aQi_oq-9Rj413o-FBc7nor-tNzGWFr-~w8Ns',
+      expiration: 1792251990,
+      transportEndpoints: proxy,
+      invoiceString: null,
+    },
+    {
+      idx: 56,
+      batchTransferIdx: 56,
+      createdAt: 1792248303,
+      updatedAt: 1792248435,
+      status: 'WaitingConfirmations',
+      requestedAssignment: { Fungible: 25000000 },
+      assignments: [{ Fungible: 25000000 }],
+      kind: 'ReceiveWitness',
+      txid: null,
+      recipientId: 'sb:wvout:abc',
+      expiration: 1792334703,
+      transportEndpoints: [{ endpoint: 'rpcs://other/json-rpc', used: false }, ...proxy],
+    },
+  ];
+  const account = {
+    getRgbWallet: () => ({ listTransfers: () => real }),
+    getAddress: () => 'tb1q',
+  } as unknown as RgbAccount;
+  const wallet = new WdkRgbWallet(walletConfigFromEnv({ RGB_NETWORK: 'regtest', WALLET_DATA_DIR: '/nonexistent' }), {
+    account,
+  });
+
+  it('maps seal type, transport endpoints (used first), expiry, settle time and schema', async () => {
+    const [recv, send] = await wallet.listTransfers(ASSET);
+    expect(send).toMatchObject({
+      direction: 'outgoing',
+      sealType: 'blinded',
+      transportEndpoints: ['https://proxy.kaleidoswap.com/json-rpc'],
+      expiresAt: '2026-10-17T15:46:30.000Z',
+      settledAt: '2026-10-17T14:47:11.000Z',
+      schema: 'NIA',
+    });
+    expect(recv).toMatchObject({
+      direction: 'incoming',
+      sealType: 'witness',
+      transportEndpoints: ['https://proxy.kaleidoswap.com/json-rpc', 'rpcs://other/json-rpc'],
+    });
+    expect(recv?.settledAt).toBeUndefined();
+  });
+});

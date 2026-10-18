@@ -1,5 +1,6 @@
 // Server configuration from env. Unsupported values fail fast at startup with a plain message.
 import { fileURLToPath } from 'node:url';
+import { transportAllowlistFromEnv } from 'ai';
 
 export interface ServerConfig {
   port: number;
@@ -24,6 +25,11 @@ export interface ServerConfig {
   dbPath: string;
   /** MockWallet status step and MockAnalyzer stage delay, in ms. */
   mockStepMs: number;
+  /**
+   * RGB proxy servers a payment request may route through without a warning (env RGB_TRANSPORT_ALLOWLIST,
+   * comma-separated; default RGB_TRANSPORT_ENDPOINT or the network's default proxy). Absent = not checked.
+   */
+  transportAllowlist?: string[];
 }
 
 export class ConfigError extends Error {
@@ -87,5 +93,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     walletSyncIdleMs: int(env, 'WALLET_SYNC_IDLE_MS', 60_000, 1000),
     dbPath: env.DB_PATH?.trim() || DEFAULT_DB_PATH,
     mockStepMs: int(env, 'MOCK_STEP_MS', 1000),
+    transportAllowlist: transportAllowlistFromEnv(env),
   };
 }
