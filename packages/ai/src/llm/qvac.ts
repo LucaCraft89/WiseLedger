@@ -99,8 +99,25 @@ export class QvacProvider implements LlmProvider {
     return result;
   }
 
+  // One model, one completion at a time: concurrent calls on the shared model stall until the timeout.
+  private busy: Promise<void> = Promise.resolve();
+
   async *stream(req: CompletionRequest): AsyncIterable<LlmEvent> {
     assertRequestShape(req);
+    const prev = this.busy;
+    let release = () => {};
+    this.busy = new Promise<void>((r) => {
+      release = r;
+    });
+    await prev;
+    try {
+      yield* this.streamOne(req);
+    } finally {
+      release();
+    }
+  }
+
+  private async *streamOne(req: CompletionRequest): AsyncIterable<LlmEvent> {
     const modelId = await this.ensureLoaded();
     const sdk = await this.loadSdk();
     const started = Date.now();
