@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { canRetry, DEFAULT_EXPLORER_URL, errorWords, explorerTxUrl, shortId } from './lib/payment.js';
 import { CopyButton, errorText } from './ui.js';
 
@@ -15,12 +15,18 @@ export function ResultCard({
   txid,
   paymentHash,
   lightning = false,
+  stamp,
+  children,
 }: {
+  /** The PAID stamp, drawn top right. */
+  stamp?: ReactNode;
   sentence?: string;
   transferId?: string;
   txid?: string;
   paymentHash?: string;
   lightning?: boolean;
+  /** Folded extras under the confirmation (the "How this was settled" card). */
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -33,7 +39,10 @@ export function ResultCard({
         marginTop: 16,
       }}
     >
-      <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <strong style={{ fontSize: '1.3em' }}>Paid ✓</strong>
+        {stamp}
+      </div>
       {sentence && <div>You paid {sentence}.</div>}
       {transferId && (
         <div style={{ marginTop: 6 }}>
@@ -66,6 +75,7 @@ export function ResultCard({
       ) : (
         <div style={{ marginTop: 6, fontSize: '0.9em' }}>The Bitcoin transaction ID will appear here once known.</div>
       )}
+      {children}
     </div>
   );
 }
@@ -101,7 +111,7 @@ export function FailureCard({
         marginTop: 16,
       }}
     >
-      <strong style={{ fontSize: '1.2em' }}>{unsure ? 'We are not sure the payment went through' : 'Not paid'}</strong>
+      <strong style={{ fontSize: '1.2em' }}>{unsure ? 'I am not sure the payment went through' : 'Not paid'}</strong>
       <div>{errorWords(code, message)}</div>
       {message && message !== errorWords(code, message) && (
         <div style={{ fontSize: '0.85em', color: 'var(--wl-c-muted)' }}>Details: {message}</div>

@@ -1,5 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import type { ApiClient } from './api/client.js';
+import { InvoiceTabs } from './InvoiceListPage.js';
+import { OwlChip } from './ui.js';
 
 export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (invoiceId: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -12,7 +14,7 @@ export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (inv
     e.preventDefault();
     setError(null);
     if (!file && !text.trim()) {
-      setError('Choose an invoice file or paste the invoice text first.');
+      setError('Choose an invoice file or paste its text first, then press “Read this invoice”.');
       return;
     }
     setBusy(true);
@@ -20,7 +22,7 @@ export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (inv
       const res = await api.createInvoice(file ? { file } : { text });
       onCreated(res.invoiceId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'I could not take that invoice. Check the file and try again.');
     } finally {
       setBusy(false);
     }
@@ -28,8 +30,12 @@ export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (inv
 
   return (
     <form onSubmit={submit}>
-      <h2>Check an invoice before paying it</h2>
-      <p>Upload the invoice you received. We read it on this computer, check it for fraud and explain what we found.</p>
+      <h2>Pay an invoice</h2>
+      <InvoiceTabs current="upload" />
+      <p>
+        <OwlChip mood={busy ? 'reading' : 'all_good'} /> Give me the invoice. I read it on this computer and check it
+        before you pay.
+      </p>
 
       {/* One big drop area: drag the invoice here, or click to choose it. */}
       <label
@@ -75,7 +81,7 @@ export function UploadPage({ api, onCreated }: { api: ApiClient; onCreated: (inv
 
       {error && <p style={{ color: 'var(--wl-c-error)' }}>{error}</p>}
       <button type="submit" disabled={busy} style={{ fontSize: '1.1em', padding: '8px 20px' }}>
-        {busy ? 'Uploading…' : 'Check this invoice'}
+        {busy ? 'Reading your invoice… (about 30 seconds on this computer)' : 'Read this invoice'}
       </button>
     </form>
   );

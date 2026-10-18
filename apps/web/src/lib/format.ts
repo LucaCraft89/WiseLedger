@@ -74,9 +74,9 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
 };
 
 export const VERDICT_EXPLAIN: Record<Verdict, string> = {
-  ok: 'We found nothing suspicious.',
+  ok: 'I found nothing suspicious.',
   review: 'Some details look unusual. Read the warnings below before you pay.',
-  block: 'This invoice looks dangerous. We will not pay it.',
+  block: 'This invoice looks dangerous. I will not pay it.',
 };
 
 export const VERDICT_COLORS: Record<Verdict, string> = {

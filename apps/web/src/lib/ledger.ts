@@ -140,12 +140,16 @@ export const toolChipText = (c: Pick<ToolCall, 'name' | 'ok'>): string =>
   `${TOOL_WORDS[c.name] ?? c.name} ${c.ok ? '✓' : '✗ failed'}`;
 
 /** Where to see what a tool made or read ("See it in Wallet"); null when there is nothing to open. */
-export function toolLink(c: Pick<ToolCall, 'name' | 'ok'>): { href: string; label: string } | null {
+export function toolLink(c: Pick<ToolCall, 'name' | 'ok' | 'result'>): { href: string; label: string } | null {
   if (!c.ok) return null;
-  if (c.name === 'create_receive_invoice') return { href: '#/wallet/get-paid', label: 'See it in Wallet' };
-  if (c.name === 'label_transfer' || c.name === 'list_transfers')
-    return { href: '#/transfers', label: 'See transfers' };
-  if (c.name === 'get_balance') return { href: '#/wallet', label: 'Open Wallet' };
+  // The payment request card under the reply links to it already.
+  if (c.name === 'create_receive_invoice') return null;
+  if (c.name === 'check_payment_request') {
+    const id = (c.result as { invoiceId?: unknown } | undefined)?.invoiceId;
+    return typeof id === 'string' ? { href: `#/invoice/${encodeURIComponent(id)}`, label: 'Open the check' } : null;
+  }
+  if (c.name === 'label_transfer' || c.name === 'list_transfers') return { href: '#/books', label: 'See the books' };
+  if (c.name === 'get_balance') return { href: '#/', label: 'Open the Desk' };
   return null;
 }
 

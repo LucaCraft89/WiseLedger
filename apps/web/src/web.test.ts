@@ -456,7 +456,9 @@ describe('failure card', () => {
     expect(errorWords('InsufficientFunds')).toBe('Not enough funds in the wallet.');
     expect(errorWords('TREASURER_PARSE')).toBe('The AI could not start the payment. Nothing was sent.');
     expect(errorWords('weird', 'Server text')).toBe('Server text');
-    expect(errorWords(undefined)).toBe('The payment failed.');
+    expect(errorWords(undefined)).toBe(
+      'The payment failed. Nothing is retried automatically: check My invoices before paying again.',
+    );
     for (const [code, words] of Object.entries(ERROR_WORDS)) expect(words, code).not.toMatch(/_/);
   });
 

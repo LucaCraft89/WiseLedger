@@ -31,6 +31,7 @@ import {
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
+import { booksFromApi, deskFromApi, receiptFromApi } from './desk.js';
 import { createFakeOnboarding } from './fake-onboarding.js';
 
 const MONTHS = [
@@ -77,7 +78,7 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
 /** Getting-started hints of the fake /api/health (the real server sends faucet and asset hints). */
 export const FAKE_HINTS = [
   'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
-  'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
+  'Pay an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
 ];
 
 export interface FakeOptions {
@@ -139,6 +140,19 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const labels = new MemoryLabelStore();
   const transferInvoice = new Map<string, string>();
   const receiveList: ReceiveRequestDto[] = [];
+  // Demo backend only (nothing here is real): a pretend payer pays each open request 6 s after it was made and it
+  // arrives 6 s later, so the stamp can be seen going OPEN → ARRIVING → PAID without a second wallet.
+  const demoPayer = (r: ReceiveRequestDto) => {
+    const age = Date.now() - Date.parse(r.createdAt);
+    const to = (status: 'incoming' | 'received') =>
+      Object.assign(r, {
+        status,
+        updatedAt: new Date().toISOString(),
+        ...(status === 'received' ? { receivedAmount: r.amount ?? '10000000' } : {}),
+      });
+    if (r.status === 'waiting' && age > 6000 && Date.parse(r.expiresAt) > Date.now()) to('incoming');
+    if (r.status === 'incoming' && age > 12_000) to('received');
+  };
   let jobSeq = 0;
 
   // Two past payments, so the transfers table, labels and "my last payment" have something to work with.
@@ -359,8 +373,17 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     emit(r, { type: 'stage', invoiceId: id, at: at(), stage: 'done', status: 'end' });
   }
 
-  return {
+  const client: ApiClient = {
     mode: 'fake',
+    desk: () => deskFromApi(client),
+    books: (q) => booksFromApi(client, q),
+    receipt: (id) => receiptFromApi(client, id),
+    async payees(q = '') {
+      const names = (await client.receives({ status: 'all', limit: 100 })).receives
+        .map((r) => r.payer)
+        .filter((n): n is string => typeof n === 'string' && n.toLowerCase().includes(q.toLowerCase()));
+      return { names: [...new Set(names)].slice(0, 8) };
+    },
     async health() {
       return {
         ok: true,
@@ -493,9 +516,15 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       const inv = await wallet.createReceiveInvoice({
         ...(req.assetId ? { assetId: req.assetId } : {}),
         ...(req.amount ? { amount: req.amount } : {}),
-        expirySec: (req.expiryMinutes ?? 60) * 60,
+        expirySec:
+          req.expirySec ??
+          (req.validUntil
+            ? Math.max(1, Math.round((Date.parse(req.validUntil) - Date.now()) / 1000))
+            : (req.expiryMinutes ?? 60) * 60),
       });
-      const at = new Date().toISOString();
+      // Strictly increasing, so the `before` cursor never skips two requests made in the same millisecond.
+      const last = receiveList[0] ? Date.parse(receiveList[0].createdAt) : 0;
+      const at = new Date(Math.max(Date.now(), last + 1)).toISOString();
       receiveList.unshift({
         receiveId: `rcv_fake_${receiveList.length + 1}`,
         rgbInvoice: inv.rgbInvoice,
@@ -506,17 +535,77 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
-        ...(req.note ? { note: req.note } : {}),
+        ...(req.payer ? { payer: req.payer } : {}),
+        ...(req.purpose ? { purpose: req.purpose } : {}),
+        ...(req.payer || req.purpose || req.note
+          ? { note: [req.payer, req.purpose].filter(Boolean).join(' · ') || (req.note ?? '') }
+          : {}),
+        madeIn: req.madeIn ?? 'form',
       });
       return {
         rgbInvoice: inv.rgbInvoice,
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
+        receiveId: receiveList[0]?.receiveId,
       };
     },
-    async receives() {
-      return { receives: receiveList.map((r) => ({ ...r })) };
+    async receives(q = {}) {
+      receiveList.forEach(demoPayer);
+      // Same rules as the server: expired after expiresAt; "older" = archived or closed for a day.
+      const now = Date.now();
+      for (const r of receiveList) {
+        if (r.status === 'waiting' && Date.parse(r.expiresAt) < now)
+          Object.assign(r, { status: 'expired', updatedAt: new Date(now).toISOString() });
+      }
+      const older = (r: ReceiveRequestDto) =>
+        !!r.archivedAt ||
+        (['expired', 'cancelled', 'failed'].includes(r.status) && now - Date.parse(r.updatedAt) > 86_400_000);
+      const groups: Record<string, string[]> = {
+        open: ['waiting', 'incoming'],
+        paid: ['received'],
+        closed: ['expired', 'cancelled', 'failed'],
+      };
+      const rows = receiveList
+        .filter((r) => older(r) === (q.archived === '1'))
+        .filter((r) => !q.status || q.status === 'all' || (groups[q.status] ?? []).includes(r.status))
+        .filter((r) => !q.before || r.createdAt < q.before);
+      const limit = q.limit ?? 20;
+      const page = rows.slice(0, limit).map((r) => ({ ...r, older: older(r) }));
+      const last = page.at(-1);
+      return { receives: page, ...(rows.length > limit && last ? { nextBefore: last.createdAt } : {}) };
+    },
+    async receiveGet(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
+      demoPayer(r);
+      return { ...r };
+    },
+    async receiveCancel(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
+      if (r.status === 'incoming')
+        throw new ApiCallError('PAYMENT_ON_ITS_WAY', 'Someone is already paying this request. Wait for it to arrive.');
+      if (r.status !== 'waiting')
+        throw new ApiCallError('NOT_OPEN', `This request is already ${r.status}: there is nothing to cancel.`);
+      const at = new Date().toISOString();
+      Object.assign(r, { status: 'cancelled', cancelledAt: at, updatedAt: at });
+      return { ...r };
+    },
+    async receiveArchive(id) {
+      const r = receiveList.find((x) => x.receiveId === id);
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
+      if (r.status === 'waiting' || r.status === 'incoming') {
+        throw new ApiCallError(
+          'STILL_OPEN',
+          'This request can still be paid. Cancel it first, or wait until it is paid or expires.',
+        );
+      }
+      r.archivedAt ??= new Date().toISOString();
+      return { ...r };
+    },
+    async setAmount() {
+      throw new ApiCallError('NOT_AVAILABLE', 'Demo mode has no payment-request-only invoices.');
     },
     async lightning() {
       // Only what the mock wallet itself reports; a wallet without Lightning means off.
@@ -561,6 +650,35 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     async transfers() {
       return { transfers: await transferList() };
     },
+    async transfer(transferId) {
+      const dto = (await transferList()).find((x) => x.transferId === transferId);
+      const t = await wallet.getTransfer(transferId);
+      if (!dto || !t) throw new ApiCallError('NOT_FOUND', 'I could not find this payment.');
+      const a = t.assetId ? (await wallet.listAssets()).find((x) => x.assetId === t.assetId) : undefined;
+      const invoiceId = transferInvoice.get(transferId);
+      const inv = invoiceId ? recs.get(invoiceId) : undefined;
+      return {
+        transfer: {
+          ...dto,
+          kind: t.direction,
+          rail: t.rail ?? 'onchain',
+          ...(t.sealType ? { sealType: t.sealType } : {}),
+          ...(t.recipientId ? { recipientId: t.recipientId } : {}),
+          ...(t.transportEndpoints ? { transportEndpoints: t.transportEndpoints } : {}),
+          ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+          ...(t.settledAt ? { settledAt: t.settledAt } : {}),
+        },
+        ...(a
+          ? { asset: { assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, schema: a.schema } }
+          : {}),
+        statusTimes: {
+          WaitingCounterparty: t.createdAt,
+          ...(t.status !== 'WaitingCounterparty' ? { [t.status]: t.updatedAt } : {}),
+        },
+        ...(inv && invoiceId ? { invoice: { invoiceId, filename: inv.summary.filename } } : {}),
+        ...(t.paymentHash ? { lightning: { paymentHash: t.paymentHash } } : {}),
+      };
+    },
     async setLabels(transferId, req) {
       const parsed = LabelsPutRequest.safeParse(req);
       if (!parsed.success) {
@@ -603,4 +721,5 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     fiscalUrl: () => null,
     ...onboarding,
   };
+  return client;
 }

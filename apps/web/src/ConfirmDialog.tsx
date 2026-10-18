@@ -8,7 +8,9 @@ import {
   type PaymentProgress,
   REVIEW_TICK_LABEL,
 } from './lib/confirm.js';
+import { toBaseUnits } from './lib/live.js';
 import { splitFlags } from './lib/payment.js';
+import { OwlChip } from './ui.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
@@ -19,9 +21,14 @@ export function ConfirmDialog(props: {
   flags: readonly RiskFlag[];
   /** Undefined when no payment was prepared (blocked invoices). */
   sentence?: string;
+  /** How it travels, in words: "via Lightning, instant" / "on-chain, about a minute". */
+  railWords?: string;
   onConfirm: (override: true | undefined) => Promise<void>;
   onReject: (reason: string | undefined) => Promise<void>;
+  /** Open-amount payment request: ask for the amount first (the server checks it and builds the sentence). */
+  amount?: { ticker: string; precision: number; onSet: (baseUnits: string) => Promise<void> };
 }) {
+  const [typed, setTyped] = useState('');
   const [ticked, setTicked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -37,7 +44,7 @@ export function ConfirmDialog(props: {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError(err instanceof Error ? err.message : 'That did not work. Wait a moment and press the button again.');
     } finally {
       setBusy(false);
     }
@@ -50,7 +57,7 @@ export function ConfirmDialog(props: {
       style={{ border: '2px solid var(--wl-c-strong)', borderRadius: 6, padding: 16, marginTop: 16 }}
     >
       <h3 id="confirm-title" style={{ marginTop: 0 }}>
-        Confirm payment
+        Ready to pay?
       </h3>
 
       {/* The flag cards are already shown in "Checks" above: one line here, so nothing is read twice. */}
@@ -61,7 +68,47 @@ export function ConfirmDialog(props: {
         </p>
       )}
 
-      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600, marginBottom: 4 }}>{props.sentence}</p>}
+      {props.amount && props.verdict !== 'block' && (
+        <form
+          data-testid="amount-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const a = props.amount;
+            if (!a) return;
+            const base = toBaseUnits(typed, a.precision);
+            if (!base.ok) return setError(base.error);
+            if (!base.value) return setError('Type the amount to pay.');
+            const value = base.value;
+            void run(() => a.onSet(value))();
+          }}
+          style={{ marginBottom: 12 }}
+        >
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            {props.sentence ? 'Change the amount' : 'This request leaves the amount to you. How much do you pay?'}{' '}
+            <input
+              inputMode="decimal"
+              placeholder="e.g. 10.00"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              style={{ width: 120 }}
+            />{' '}
+            {props.amount.ticker}
+          </label>
+          <button type="submit" className={props.sentence ? 'wl-secondary' : undefined} disabled={busy}>
+            Use this amount
+          </button>
+        </form>
+      )}
+
+      {props.sentence && (
+        <>
+          <OwlChip mood="thinking" />
+          <p className="wl-sayline" style={{ fontWeight: 600, marginBottom: 4 }}>
+            {props.sentence}
+          </p>
+          {props.railWords && <p style={{ marginTop: 0, color: 'var(--wl-c-muted)' }}>I will pay {props.railWords}.</p>}
+        </>
+      )}
       {assetIdHint(props.sentence) && (
         <p data-testid="asset-id-hint" style={{ fontSize: '0.9em', marginTop: 0 }}>
           {assetIdHint(props.sentence)}
@@ -129,21 +176,22 @@ export function ConfirmDialog(props: {
       ) : (
         <div>
           <button
-            type="button"
-            disabled={!gate.canConfirm || busy || !props.sentence}
-            onClick={run(() => props.onConfirm(gate.override))}
-            style={{ fontSize: '1.1em', padding: '8px 20px', marginRight: 12 }}
-          >
-            Confirm and pay
-          </button>
-          <button
             className="wl-secondary"
             type="button"
             disabled={busy}
             onClick={() => setRejecting(true)}
-            style={{ padding: '8px 20px' }}
+            style={{ padding: '8px 20px', marginRight: 12 }}
           >
-            Do not pay
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="wl-accent"
+            disabled={!gate.canConfirm || busy || !props.sentence}
+            onClick={run(() => props.onConfirm(gate.override))}
+            style={{ fontSize: '1.1em', padding: '8px 20px' }}
+          >
+            Pay
           </button>
           <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
             {gateHint(props.verdict, ticked)}

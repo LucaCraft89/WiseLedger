@@ -2,6 +2,8 @@ import { fiscalUrl } from '../lib/ledger.js';
 import {
   type AppEvent,
   AppEvent as AppEventSchema,
+  type BooksQuery,
+  type BooksResponse,
   type BtcTransactionsResponse,
   type ChatRequest,
   type ChatResponse,
@@ -10,6 +12,7 @@ import {
   type ConfirmRequest,
   type ConfirmResponse,
   type CreateInvoiceResponse,
+  type DeskResponse,
   type FiscalQuery,
   type HealthResponse,
   type InvoiceDetailResponse,
@@ -24,12 +27,19 @@ import {
   type OnboardingRestoreResponse,
   type OnboardingStatusResponse,
   type OnboardingUnlockRequest,
+  type PayeesResponse,
+  type ReceiptResponse,
+  type ReceiveRequestDto,
+  type ReceivesListQuery,
   type ReceivesListResponse,
   type RejectResponse,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  type SetAmountRequest,
+  type SetAmountResponse,
   SSE_EVENT_NAME,
   type TranscribeResponse,
+  type TransferDetailResponse,
   type TransfersResponse,
   type WalletReceiveRequest,
   type WalletReceiveResponse,
@@ -54,14 +64,32 @@ export interface ApiClient {
   wallet(): Promise<WalletResponse>;
   /** New RGB receive invoice (optional asset and amount in base units). */
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
-  /** Payment requests handed out, newest first, with the status of the payment that answers each. */
-  receives(): Promise<ReceivesListResponse>;
+  /** Payment requests handed out, newest first, one page (20 by default; `nextBefore` when more follow). */
+  receives(q?: ReceivesListQuery): Promise<ReceivesListResponse>;
+  /** One payment request with its live status. */
+  receiveGet(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Stop showing a waiting request as open (409 while someone is paying it). */
+  receiveCancel(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Move a closed or paid request under "Older requests". */
+  receiveArchive(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Open-amount payment request: the amount the user typed → plan and sentence to confirm. */
+  setAmount(invoiceId: string, req: SetAmountRequest): Promise<SetAmountResponse>;
   /** Lightning node and channels. A server without the route (404) counts as Lightning off. */
   lightning(): Promise<LightningStatusResponse>;
   /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
   btcTransactions(): Promise<BtcTransactionsResponse>;
+  /** What needs the user today and what happened lately (GET /api/desk). */
+  desk(): Promise<DeskResponse>;
+  /** The ledger with a running balance, newest first, one page (`nextBefore` when more follow). */
+  books(q?: Partial<BooksQuery>): Promise<BooksResponse>;
+  /** A settled payment as a receipt (404 NO_RECEIPT for anything else). */
+  receipt(transferId: string): Promise<ReceiptResponse>;
+  /** "Who pays you?" suggestions: earlier payers and the payee book. */
+  payees(q?: string): Promise<PayeesResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
+  /** One transfer with asset, status times and linked invoice ("How this was settled"). */
+  transfer(transferId: string): Promise<TransferDetailResponse>;
   /** Replace the labels of one transfer. */
   setLabels(transferId: string, req: LabelsPutRequest): Promise<LabelsPutResponse>;
   /** Talk to the Treasurer (local AI with wallet tools). */
@@ -151,7 +179,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiCallError(
       'NETWORK',
-      'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+      'WiseLedger could not be reached on this computer. Check that it is running, then try again.',
     );
   }
   const body: unknown = await res.json().catch(() => undefined);
@@ -173,7 +201,7 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export function createHttpClient(base = ''): ApiClient {
-  return {
+  const client: ApiClient = {
     mode: 'server',
     health: () => call(`${base}/api/health`),
     createInvoice(input) {
@@ -198,7 +226,16 @@ export function createHttpClient(base = ''): ApiClient {
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
-    receives: () => call(`${base}/api/wallet/receives`),
+    receives: (q) => {
+      const qs = new URLSearchParams(
+        Object.entries(q ?? {}).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])),
+      ).toString();
+      return call(`${base}/api/wallet/receives${qs ? `?${qs}` : ''}`);
+    },
+    receiveGet: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}`),
+    receiveCancel: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}/cancel`, json({})),
+    receiveArchive: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}/archive`, json({})),
+    setAmount: (id, req) => call(`${base}/api/invoices/${encodeURIComponent(id)}/amount`, json(req)),
     async lightning() {
       try {
         return await call<LightningStatusResponse>(`${base}/api/wallet/lightning`);
@@ -207,8 +244,18 @@ export function createHttpClient(base = ''): ApiClient {
         throw err;
       }
     },
+    desk: () => call(`${base}/api/desk`),
+    books: (q) => {
+      const qs = new URLSearchParams(
+        Object.entries(q ?? {}).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])),
+      ).toString();
+      return call(`${base}/api/books${qs ? `?${qs}` : ''}`);
+    },
+    receipt: (transferId) => call(`${base}/api/receipts/${encodeURIComponent(transferId)}`),
+    payees: (q) => call(`${base}/api/payees${q ? `?q=${encodeURIComponent(q)}` : ''}`),
     btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
+    transfer: (transferId) => call(`${base}/api/transfers/${encodeURIComponent(transferId)}`),
     setLabels: (transferId, req) =>
       call(`${base}/api/labels/${encodeURIComponent(transferId)}`, { ...json(req), method: 'PUT' }),
     chat: (req) => call(`${base}/api/agent/chat`, json(req)),
@@ -219,7 +266,7 @@ export function createHttpClient(base = ''): ApiClient {
       } catch {
         throw new ApiCallError(
           'NETWORK',
-          'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+          'WiseLedger could not be reached on this computer. Check that it is running, then try again.',
         );
       }
       // An older server without the stream route: the plain JSON chat still works.
@@ -269,4 +316,5 @@ export function createHttpClient(base = ''): ApiClient {
     onboardingRestore: (req) => call(`${base}/api/onboarding/restore`, json(req)),
     onboardingUnlock: (req) => call(`${base}/api/onboarding/unlock`, json(req)),
   };
+  return client;
 }

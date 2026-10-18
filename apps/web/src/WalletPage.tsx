@@ -4,21 +4,23 @@ import {
   type BtcTransactionDto,
   formatAssetAmount,
   type LightningStatusResponse,
+  type ReceiveFilter,
   type ReceiveRequestDto,
   type WalletReceiveResponse,
   type WalletResponse,
 } from './api/contracts.js';
 import { formatDate } from './lib/format.js';
-import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
 import { explorerTxUrl } from './lib/payment.js';
+import { isOpen, mergePage, openFirst, parseGetPaid, RECEIVE_FILTERS, receiveHref } from './lib/receive.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
-import { TransfersTable } from './TransfersTable.js';
+import { ReceiveCard, requestAmount, StatusBadge } from './ReceiveCard.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: WalletTab }) {
+/** Settings › Your money, technically: the words of the wallet (token ID, address, Lightning, limits), each explained. */
+export function MoneyPage({ api }: { api: ApiClient }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
     try {
       setW(await api.wallet());
     } catch (err) {
-      const msg = errorText(err, 'Could not open the wallet.');
+      const msg = errorText(err, 'I could not open the wallet. Check that the server is running, then try again.');
       setError(msg);
       toast(msg, 'error');
     }
@@ -41,16 +43,19 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
   if (error && !w) {
     return (
       <section>
-        <h2>Wallet</h2>
+        <h2>Your money, technically</h2>
         <ErrorBox error={error} retry={() => void load()} />
       </section>
     );
   }
-  if (!w) return <Loading text="Opening the wallet…" />;
+  if (!w) return <Loading text="Opening… (a few seconds)" />;
 
   return (
     <section>
-      <h2>Wallet</h2>
+      <h2>Your money, technically</h2>
+      <p>
+        <a href="#/settings">← Settings</a>
+      </p>
       <p style={{ color: 'var(--wl-c-muted)' }}>
         {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} ·{' '}
         {w.ready ? 'Ready to use' : 'Not ready yet: check again in a minute'}{' '}
@@ -59,88 +64,53 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
         </button>
       </p>
 
-      <nav aria-label="Wallet sections" className="wl-tabs">
-        {WALLET_TABS.map((t) => (
-          <a key={t.id} href={t.href} aria-current={tab === t.id ? 'page' : undefined}>
-            {t.label}
-          </a>
-        ))}
-      </nav>
+      <h3>Tokens</h3>
+      {w.assets.length === 0 && (
+        <Empty text="This wallet holds no tokens yet. The “Getting started” tips on the Desk say how to get test tokens." />
+      )}
+      {w.assets.map((a) => (
+        <div key={a.assetId} style={box} data-testid="asset-balance">
+          <div style={{ fontSize: '1.6em' }}>
+            <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
+            <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
+          </div>
+          <div style={{ color: 'var(--wl-c-muted)' }}>
+            Ready to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
+            {a.balance.future !== a.balance.settled && (
+              <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
+            )}
+          </div>
+          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+            Token ID (the unique code of this token, used in every payment):{' '}
+            <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
+          </div>
+        </div>
+      ))}
 
-      {tab === 'overview' && (
+      {w.btcBalanceSats !== undefined && (
         <>
-          {w.assets.length === 0 && (
-            <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
-          )}
-          {w.assets.map((a) => (
-            <div key={a.assetId} style={box} data-testid="asset-balance">
-              <div style={{ fontSize: '1.6em' }}>
-                <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
-                <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
-              </div>
-              <div style={{ color: 'var(--wl-c-muted)' }}>
-                Available to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
-                {a.balance.future !== a.balance.settled && (
-                  <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
-                )}
-              </div>
-            </div>
-          ))}
-          {w.btcBalanceSats !== undefined && <BitcoinBalance sats={w.btcBalanceSats} />}
-          {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
-          <RecentTransfers api={api} assets={w.assets} />
+          <BitcoinBalance sats={w.btcBalanceSats} />
+          <BtcTransactions api={api} />
         </>
       )}
-
-      {tab === 'get-paid' && <ReceiveForm api={api} wallet={w} />}
-
-      {tab === 'details' && (
+      {w.address && (
         <>
-          <h3>Tokens</h3>
-          {w.assets.map((a) => (
-            <div key={a.assetId} style={box}>
-              <strong>{a.ticker}</strong> {a.name}
-              <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
-                Token ID (the unique code of this token, used in every payment):{' '}
-                <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
-              </div>
+          <h3>Bitcoin address</h3>
+          <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
+              <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
+              <CopyButton value={w.address} what="Address" />
             </div>
-          ))}
-          {w.btcBalanceSats !== undefined && (
-            <>
-              <BitcoinBalance sats={w.btcBalanceSats} />
-              <BtcTransactions api={api} />
-            </>
-          )}
-          {w.address && (
-            <>
-              <h3>Bitcoin address</h3>
-              <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
-                  <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
-                  <CopyButton value={w.address} what="Address" />
-                </div>
-              </div>
-            </>
-          )}
-          <LightningPanel api={api} assets={w.assets} />
+          </div>
         </>
       )}
+      <LightningPanel api={api} assets={w.assets} />
+      {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
     </section>
   );
 }
-
-export type WalletTab = 'overview' | 'get-paid' | 'details';
-export const WALLET_TABS: readonly { id: WalletTab; href: string; label: string }[] = [
-  { id: 'overview', href: '#/wallet', label: 'Overview' },
-  { id: 'get-paid', href: '#/wallet/get-paid', label: 'Get paid' },
-  { id: 'details', href: '#/wallet/details', label: 'Details' },
-];
-/** "#/wallet/get-paid" → "get-paid"; anything else under #/wallet → overview. */
-export const walletTab = (hash: string): WalletTab =>
-  WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview';
 
 /** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
 export function SpendingRules({
@@ -164,7 +134,7 @@ export function SpendingRules({
   const wdk = spending.enforcedBy === 'wdk-policy';
   return (
     <>
-      <h3>Spending rules</h3>
+      <h3>Safety limits</h3>
       <div style={box} data-testid="spending-rules">
         <div>
           Up to <strong>{fmt(spending.paymentCap, main)}</strong> per payment
@@ -228,7 +198,10 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
     api
       .lightning()
       .then((r) => live && setLn(r))
-      .catch((err: unknown) => live && setError(errorText(err, 'Could not read the Lightning status.')));
+      .catch(
+        (err: unknown) =>
+          live && setError(errorText(err, 'I could not read the Lightning status. Try again in a minute.')),
+      );
     return () => {
       live = false;
     };
@@ -336,33 +309,68 @@ function BtcTransactions({ api }: { api: ApiClient }) {
   );
 }
 
-function RecentTransfers({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
-  const load = useCallback(async () => recentTransfers((await api.transfers()).transfers, 10), [api]);
-  const { data, error, loading, reload } = useLoad(load);
+/** Get paid: one request (#/get-paid/<id>), or the form (pre-filled with ?like=<id>) and the list. */
+export function GetPaid({ api, wallet, hash }: { api: ApiClient; wallet: WalletResponse; hash: string }) {
+  const { receiveId, like } = parseGetPaid(hash);
+  const [listTick, setListTick] = useState(0);
+  if (receiveId) {
+    return (
+      <>
+        <p>
+          <a href="#/get-paid">← All payment requests</a>
+        </p>
+        <ReceiveCard api={api} receiveId={receiveId} variant="detail" />
+      </>
+    );
+  }
   return (
     <>
-      <h3>Recent transfers</h3>
-      <p style={{ marginTop: 0 }}>
-        <a href="#/transfers">All transfers and fiscal report</a> · <a href="#/schedule">Scheduled payments</a>
-      </p>
-      {error ? <ErrorBox error={error} retry={reload} /> : null}
-      {loading && !data ? <Loading text="Loading transfers…" /> : null}
-      {data && data.length === 0 && <Empty text="No transfers yet." />}
-      {data && data.length > 0 && <TransfersTable api={api} transfers={data} assets={assets} />}
+      <ReceiveForm api={api} wallet={wallet} like={like} onCreated={() => setListTick((t) => t + 1)} />
+      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
     </>
   );
 }
 
-function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }) {
+function ReceiveForm({
+  api,
+  wallet,
+  like,
+  onCreated,
+}: {
+  api: ApiClient;
+  wallet: WalletResponse;
+  /** receiveId of an old request to copy (amount, token, note). */
+  like?: string | undefined;
+  onCreated: () => void;
+}) {
   const toast = useToast();
   const [assetId, setAssetId] = useState(wallet.assets[0]?.assetId ?? '');
   const [amount, setAmount] = useState('');
   const [expiry, setExpiry] = useState('60');
   const [note, setNote] = useState('');
-  const [listTick, setListTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<WalletReceiveResponse | null>(null);
+
+  // "Make a new request like this": same token, amount and note as the old one.
+  useEffect(() => {
+    if (!like) return;
+    let live = true;
+    api.receiveGet(like).then(
+      (r) => {
+        if (!live) return;
+        const a = wallet.assets.find((x) => x.assetId === r.assetId);
+        setAssetId(r.assetId ?? '');
+        setAmount(r.amount && a ? formatAssetAmount(r.amount, a.precision) : '');
+        setNote(r.note ?? '');
+        setCreated(null);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, like, wallet.assets]);
 
   const asset = wallet.assets.find((a) => a.assetId === assetId);
 
@@ -385,10 +393,10 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
       });
       setCreated(res);
       setNote('');
-      setListTick((t) => t + 1);
+      onCreated();
       toast('Payment request created', 'success');
     } catch (err) {
-      const msg = errorText(err, 'Could not create the payment request.');
+      const msg = errorText(err, 'I could not create the payment request. Check the amount and try again.');
       setFormError(msg);
       toast(msg, 'error');
     } finally {
@@ -398,7 +406,7 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
 
   return (
     <>
-      <h3>Receive a payment</h3>
+      <h3>Make a payment request</h3>
       <form
         style={box}
         onSubmit={(e) => {
@@ -410,6 +418,7 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           Create a payment request (an “RGB invoice”) and send it to the person who will pay you. They paste it into
           their wallet.
         </p>
+        {like && <p data-testid="receive-prefilled">Filled in like your earlier request: check it, then create it.</p>}
         <label style={{ display: 'block', marginBottom: 8 }}>
           Asset{' '}
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
@@ -451,50 +460,94 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         </button>
       </form>
 
-      {created && (
-        <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
-          <strong>Your payment request</strong>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
-            <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
-              <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
-              {created.amount && asset && (
-                <p>
-                  Amount: {formatAssetAmount(created.amount, asset.precision)} {asset.ticker}
-                </p>
-              )}
-              <p>Valid until {formatDate(created.expiresAt)}. After that, create a new one.</p>
+      {created?.receiveId ? (
+        <div data-testid="receive-invoice">
+          <ReceiveCard api={api} receiveId={created.receiveId} variant="detail" onChanged={onCreated} />
+        </div>
+      ) : (
+        created && (
+          <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
+            <strong>Your payment request</strong>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+              <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
+                <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
+                <p>Valid until {formatDate(created.expiresAt)}. After that, create a new one.</p>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
-      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
     </>
   );
 }
 
-export const RECEIVE_STATUS_WORDS: Record<ReceiveRequestDto['status'], string> = {
-  waiting: 'Waiting for payment',
-  incoming: 'Payment on its way (waiting for a block)',
-  received: 'Received ✓',
-  expired: 'Expired: create a new request',
-  failed: 'The payment failed: ask them to try again',
-};
-
-/** Payment requests handed out, refreshed every 10 s while one is still open. */
+/** Payment requests handed out: open ones first, filter chips, 20 at a time, older ones folded away. */
 export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet: WalletResponse; tick: number }) {
+  const [filter, setFilter] = useState<ReceiveFilter>('all');
+  const [olderOpen, setOlderOpen] = useState(false);
+  return (
+    <>
+      <h3>Payment requests you sent</h3>
+      <fieldset style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, border: 0, padding: 0 }}>
+        <legend style={{ position: 'absolute', left: -9999 }}>Show</legend>
+        {RECEIVE_FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className={filter === f.id ? undefined : 'wl-secondary'}
+            aria-pressed={filter === f.id}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </fieldset>
+      <RequestList api={api} wallet={wallet} tick={tick} filter={filter} older={false} />
+      <details
+        style={{ marginTop: 12 }}
+        open={olderOpen}
+        onToggle={(e) => setOlderOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary>Older requests</summary>
+        {olderOpen && <RequestList api={api} wallet={wallet} tick={tick} filter={filter} older />}
+      </details>
+    </>
+  );
+}
+
+function RequestList({
+  api,
+  wallet,
+  tick,
+  filter,
+  older,
+}: {
+  api: ApiClient;
+  wallet: WalletResponse;
+  tick: number;
+  filter: ReceiveFilter;
+  older: boolean;
+}) {
   const [list, setList] = useState<ReceiveRequestDto[] | null>(null);
+  const [next, setNext] = useState<string | undefined>();
   const [error, setError] = useState<unknown>(null);
   const [refresh, setRefresh] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const query = useCallback(
+    (before?: string) => api.receives({ status: filter, archived: older ? '1' : '0', ...(before ? { before } : {}) }),
+    [api, filter, older],
+  );
   useEffect(() => {
     void tick;
     void refresh;
     let live = true;
-    api.receives().then(
+    query().then(
       (r) => {
         if (!live) return;
         setList(r.receives);
+        setNext(r.nextBefore);
         setError(null);
       },
       (e: unknown) => {
@@ -504,8 +557,8 @@ export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet:
     return () => {
       live = false;
     };
-  }, [api, tick, refresh]);
-  const open = list?.some((r) => r.status === 'waiting' || r.status === 'incoming');
+  }, [query, tick, refresh]);
+  const open = list?.some((r) => isOpen(r));
   useEffect(() => {
     if (!open) return;
     const id = setInterval(() => setRefresh((n) => n + 1), 10_000);
@@ -513,39 +566,68 @@ export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet:
   }, [open]);
 
   if (error) return <ErrorBox error={error} retry={() => setRefresh((n) => n + 1)} />;
-  if (!list || list.length === 0) return null;
+  if (!list) return <Loading text="Loading your payment requests…" />;
+  if (list.length === 0) {
+    return (
+      <Empty
+        text={
+          older
+            ? 'No older requests.'
+            : filter === 'all'
+              ? 'No payment requests yet. Create one above to get paid.'
+              : 'Nothing here. Try another filter, or look under “Older requests”.'
+        }
+      />
+    );
+  }
   return (
-    <>
-      <h3>Payment requests you sent</h3>
-      <div aria-live="polite">
-        {list.slice(0, 10).map((r) => (
-          <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
-        ))}
-      </div>
-    </>
+    <div aria-live="polite">
+      {openFirst(list).map((r) => (
+        <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
+      ))}
+      {next && (
+        <button
+          type="button"
+          className="wl-secondary"
+          disabled={loadingMore}
+          onClick={async () => {
+            setLoadingMore(true);
+            try {
+              const r = await query(next);
+              setList((cur) => mergePage(cur ?? [], r.receives));
+              setNext(r.nextBefore);
+            } catch (e) {
+              setError(e);
+            } finally {
+              setLoadingMore(false);
+            }
+          }}
+        >
+          {loadingMore ? 'Loading…' : 'Show more'}
+        </button>
+      )}
+    </div>
   );
 }
 
 export function PaymentRequestRow({ r, wallet }: { r: ReceiveRequestDto; wallet: WalletResponse }) {
-  const asset = wallet.assets.find((a) => a.assetId === r.assetId);
-  const amount = r.receivedAmount ?? r.amount;
   return (
-    <div style={{ ...box, marginBottom: 8 }} data-testid="receive-row">
-      <strong>{RECEIVE_STATUS_WORDS[r.status]}</strong>
-      {' · '}
-      {amount && asset ? `${formatAssetAmount(amount, asset.precision)} ${asset.ticker}` : 'any amount'}
-      {r.note ? ` · ${r.note}` : ''}
-      <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+    <a
+      href={receiveHref(r.receiveId)}
+      data-testid="receive-row"
+      data-status={r.status}
+      style={{ ...box, marginBottom: 8, display: 'block', color: 'inherit', textDecoration: 'none' }}
+    >
+      <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <StatusBadge status={r.status} />
+        <strong>{requestAmount(r, wallet.assets)}</strong>
+        {r.note ? <span>· {r.note}</span> : null}
+      </span>
+      <span style={{ display: 'block', fontSize: '0.9em', marginTop: 4, color: 'var(--wl-c-muted)' }}>
         Created {formatDate(r.createdAt)}
-        {r.txid && (
-          <>
-            {' · '}
-            <a href={explorerTxUrl(r.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
-              View on the block explorer
-            </a>
-          </>
-        )}
-      </div>
-    </div>
+        {r.cancelledAt && r.status === 'received' ? ' · arrived after you cancelled it' : ''} ·{' '}
+        <span style={{ color: 'var(--wl-c-link, inherit)', textDecoration: 'underline' }}>Open</span>
+      </span>
+    </a>
   );
 }

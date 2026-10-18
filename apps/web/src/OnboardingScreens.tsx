@@ -106,7 +106,7 @@ export function SetupScreen({
     try {
       await action();
     } catch (err) {
-      setError(errorText(err, 'Something went wrong. Please try again.'));
+      setError(errorText(err, 'That did not work. Check what you typed and try again.'));
     } finally {
       setBusy(false);
     }
@@ -322,7 +322,7 @@ export function UnlockScreen({ api, onDone }: { api: ApiClient; onDone: () => vo
             setError(
               err instanceof ApiCallError && err.code === 'WalletLocked' && err.status !== 429
                 ? 'That passphrase is not right. Check it and try again.'
-                : errorText(err, 'Could not unlock the wallet. Try again.'),
+                : errorText(err, 'I could not unlock the wallet. Check the passphrase and try again.'),
             );
           } finally {
             setBusy(false);

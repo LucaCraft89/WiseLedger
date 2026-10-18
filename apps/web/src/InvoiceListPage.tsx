@@ -6,16 +6,20 @@ import { filterInvoices, HISTORY_FILTER_LABELS, HISTORY_FILTERS, type HistoryFil
 
 const cell = { padding: '6px 8px', borderBottom: '1px solid var(--wl-c-line)', textAlign: 'left' } as const;
 
-/** Tabs shared by My invoices and Scheduled payments (one entry in the main navigation). */
-export function InvoiceTabs({ current }: { current: 'invoices' | 'schedule' }) {
+/** Tabs of the Pay section: upload, the list of invoices, and scheduled payments. */
+export function InvoiceTabs({ current }: { current: 'upload' | 'invoices' | 'schedule' }) {
+  const tabs = [
+    { id: 'upload', href: '#/pay', label: 'Pay an invoice' },
+    { id: 'invoices', href: '#/pay/invoices', label: 'My invoices' },
+    { id: 'schedule', href: '#/pay/scheduled', label: 'Scheduled' },
+  ] as const;
   return (
-    <nav aria-label="Invoice sections" className="wl-tabs">
-      <a href="#/invoices" aria-current={current === 'invoices' ? 'page' : undefined}>
-        All invoices
-      </a>
-      <a href="#/schedule" aria-current={current === 'schedule' ? 'page' : undefined}>
-        Scheduled payments
-      </a>
+    <nav aria-label="Pay sections" className="wl-tabs">
+      {tabs.map((t) => (
+        <a key={t.id} href={t.href} aria-current={current === t.id ? 'page' : undefined}>
+          {t.label}
+        </a>
+      ))}
     </nav>
   );
 }
@@ -34,7 +38,12 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
         setInvoices(r.invoices);
         setError(null);
       } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : 'Could not load your invoices.');
+        if (alive)
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'I could not load your invoices. Make sure the server is running, then try again.',
+          );
       }
     };
     void load();
@@ -54,7 +63,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Your invoices</h2>
+      <h2>Pay an invoice</h2>
       <InvoiceTabs current="invoices" />
       <nav aria-label="Filter invoices" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         {HISTORY_FILTERS.map((f) => {
@@ -95,7 +104,7 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
                 <th style={cell}>Supplier</th>
                 <th style={{ ...cell, textAlign: 'right' }}>Amount</th>
                 <th style={cell}>Status</th>
-                <th style={cell}>Our check</th>
+                <th style={cell}>My check</th>
                 <th style={cell}>Date</th>
               </tr>
             </thead>

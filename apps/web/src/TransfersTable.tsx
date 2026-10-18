@@ -1,4 +1,4 @@
-import { useReducer, useState } from 'react';
+import { Fragment, useReducer, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { formatAssetAmount, type TransferDto, type WalletResponse } from './api/contracts.js';
 import { shortDate } from './lib/format.js';
@@ -13,6 +13,7 @@ import {
   TRANSFER_STATUS_WORDS,
 } from './lib/ledger.js';
 import { explorerTxUrl, shortId } from './lib/payment.js';
+import { SettlementCard } from './SettlementCard.js';
 import { errorText, useToast } from './ui.js';
 
 type Assets = WalletResponse['assets'];
@@ -44,6 +45,7 @@ export function TransfersTable({
   transfers: readonly TransferDto[];
   assets: Assets;
 }) {
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.95em' }} data-testid="transfers-table">
@@ -59,47 +61,70 @@ export function TransfersTable({
         </thead>
         <tbody>
           {transfers.map((t) => (
-            <tr key={t.transferId}>
-              <td style={{ ...cell, whiteSpace: 'nowrap' }} title={new Date(t.createdAt).toLocaleString()}>
-                {shortDate(t.createdAt)}
-              </td>
-              <td style={cell}>{isUnpaidRequest(t) ? 'Payment request' : DIRECTION_WORDS[t.direction]}</td>
-              <td style={{ ...cell, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                {isUnpaidRequest(t) ? '' : t.direction === 'out' ? '− ' : '+ '}
-                {amountText(t, assets)}
-              </td>
-              <td style={cell}>
-                <span
-                  style={{
-                    ...chip,
-                    background: TRANSFER_STATUS_TONE[t.status].bg,
-                    color: TRANSFER_STATUS_TONE[t.status].fg,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {isUnpaidRequest(t) ? 'Not paid yet' : TRANSFER_STATUS_WORDS[t.status]}
-                </span>
-              </td>
-              <td style={cell}>
-                <LabelCell api={api} transferId={t.transferId} initial={t.labels} />
-              </td>
-              <td style={cell}>
-                {t.txid ? (
-                  <a href={t.explorerUrl ?? explorerTxUrl(t.txid)} target="_blank" rel="noreferrer" title={t.txid}>
-                    {shortId(t.txid, 6)}
-                  </a>
-                ) : t.paymentHash ? (
-                  <span title={`Lightning payment hash ${t.paymentHash}`}>Lightning · {shortId(t.paymentHash, 6)}</span>
-                ) : (
-                  '—'
-                )}
-                {t.invoiceId && (
-                  <div>
-                    <a href={`#/invoice/${encodeURIComponent(t.invoiceId)}`}>Invoice</a>
-                  </div>
-                )}
-              </td>
-            </tr>
+            <Fragment key={t.transferId}>
+              <tr>
+                <td style={{ ...cell, whiteSpace: 'nowrap' }} title={new Date(t.createdAt).toLocaleString()}>
+                  {shortDate(t.createdAt)}
+                </td>
+                <td style={cell}>{isUnpaidRequest(t) ? 'Payment request' : DIRECTION_WORDS[t.direction]}</td>
+                <td style={{ ...cell, whiteSpace: 'nowrap', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {isUnpaidRequest(t) ? '' : t.direction === 'out' ? '− ' : '+ '}
+                  {amountText(t, assets)}
+                </td>
+                <td style={cell}>
+                  <span
+                    style={{
+                      ...chip,
+                      background: TRANSFER_STATUS_TONE[t.status].bg,
+                      color: TRANSFER_STATUS_TONE[t.status].fg,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {isUnpaidRequest(t) ? 'Not paid yet' : TRANSFER_STATUS_WORDS[t.status]}
+                  </span>
+                </td>
+                <td style={cell}>
+                  <LabelCell api={api} transferId={t.transferId} initial={t.labels} />
+                </td>
+                <td style={cell}>
+                  {t.txid ? (
+                    <a href={t.explorerUrl ?? explorerTxUrl(t.txid)} target="_blank" rel="noreferrer" title={t.txid}>
+                      {shortId(t.txid, 6)}
+                    </a>
+                  ) : t.paymentHash ? (
+                    <span title={`Lightning payment hash ${t.paymentHash}`}>
+                      Lightning · {shortId(t.paymentHash, 6)}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                  {t.invoiceId && (
+                    <div>
+                      <a href={`#/invoice/${encodeURIComponent(t.invoiceId)}`}>Invoice</a>
+                    </div>
+                  )}
+                  {!isUnpaidRequest(t) && (
+                    <div>
+                      <button
+                        type="button"
+                        className="wl-quiet"
+                        aria-expanded={open === t.transferId}
+                        onClick={() => setOpen(open === t.transferId ? null : t.transferId)}
+                      >
+                        {open === t.transferId ? 'Hide how it was settled' : 'How it was settled'}
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+              {open === t.transferId && (
+                <tr data-testid="settlement-row">
+                  <td colSpan={6} style={cell}>
+                    <SettlementCard api={api} transferId={t.transferId} refreshKey={t.status} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -108,7 +133,7 @@ export function TransfersTable({
 }
 
 /** Label chips; click "+ Add label" → type → Enter saves, Esc cancels. × removes a label. */
-function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
+export function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
   const toast = useToast();
   const [labels, setLabels] = useState(initial);
   const [s, dispatch] = useReducer(labelEditReducer, { mode: 'idle' });
@@ -119,7 +144,7 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
       setLabels(res.labels);
       dispatch({ type: 'saved' });
     } catch (err) {
-      const msg = errorText(err, 'Could not save the label.');
+      const msg = errorText(err, 'I could not save the label. Try again in a moment.');
       dispatch({ type: 'failed', error: msg });
       toast(msg, 'error');
     }

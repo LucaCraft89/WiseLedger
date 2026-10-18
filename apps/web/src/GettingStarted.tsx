@@ -53,7 +53,7 @@ export function GettingStarted({ api, always = false }: { api: ApiClient; always
           </li>
         ))}
         <li>
-          Then <a href="#/">check an invoice</a> and confirm the payment. It is done when the invoice page says{' '}
+          Then <a href="#/pay">pay an invoice</a> and confirm the payment. It is done when the invoice page says{' '}
           <strong>Paid</strong>.
         </li>
       </ol>

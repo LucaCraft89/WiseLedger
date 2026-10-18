@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { ChatResponse } from './api/contracts.js';
+import { type ChatResponse, OWL_NAME } from './api/contracts.js';
 import { chatSession } from './lib/chat-session.js';
 import {
   CHAT_SUGGESTIONS,
@@ -9,14 +9,15 @@ import {
   fiscalFilename,
   fiscalFromToolCall,
   type NeedsConfirmation,
-  receiveFromToolCall,
   type ToolCall,
   toolChipText,
   toolLink,
 } from './lib/ledger.js';
+import { receiveIdOf } from './lib/receive.js';
 import { canRecordVoice, micErrorText, startRecording, VOICE_MAX_SECONDS, type VoiceRecording } from './lib/voice.js';
 import { Markdown } from './Markdown.js';
-import { CopyButton, ErrorBox, errorText, useToast } from './ui.js';
+import { ReceiveCard } from './ReceiveCard.js';
+import { ErrorBox, errorText, useToast } from './ui.js';
 
 const bubble = (role: ChatTurn['role']) =>
   ({
@@ -28,14 +29,14 @@ const bubble = (role: ChatTurn['role']) =>
     whiteSpace: role === 'user' ? 'pre-wrap' : 'normal',
   }) as const;
 
-/** #/chat: ask the Treasurer (local AI with wallet tools). Spending always needs a confirmation card. */
+/** #/ask: ask Wise (local AI with wallet tools). Spending always needs a confirmation card. */
 export function ChatPage({ api }: { api: ApiClient }) {
   // The conversation lives outside this page (lib/chat-session): switching section never loses an answer.
   const { messages, busy, live, error: chatError } = useSyncExternalStore(chatSession.subscribe, chatSession.get);
   const [draft, setDraft] = useState('');
   const [micError, setError] = useState<unknown>(null);
   const error =
-    micError ?? (chatError ? errorText(chatError, 'The Treasurer did not answer. Try again in a minute.') : null);
+    micError ?? (chatError ? errorText(chatError, 'I did not answer. Wait a minute, then ask me again.') : null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [voiceHint, setVoiceHint] = useState(false);
@@ -55,7 +56,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h2>Ask the Treasurer</h2>
+        <h2>Ask {OWL_NAME}</h2>
         {messages.length > 0 && (
           <button
             type="button"
@@ -64,7 +65,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
               chatSession.clear();
               setError(null);
             }}
-            title="Clear this conversation and start again (the Treasurer forgets it too)"
+            title="Clear this conversation and start again (I forget it too)"
           >
             New chat
           </button>
@@ -125,7 +126,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         />
         <input
           ref={inputRef}
-          aria-label="Message to the Treasurer"
+          aria-label="Message to Wise"
           value={draft}
           maxLength={2000}
           placeholder="Type a request, e.g. What is my TUSDT balance?"
@@ -197,9 +198,9 @@ function MicButton({
       const { text } = await api.transcribe(wav);
       if (text.trim()) onText(text.trim());
       else
-        onError('We could not make out any words. Try again a little closer to the microphone, or type your request.');
+        onError('I could not make out any words. Try again a little closer to the microphone, or type your request.');
     } catch (err) {
-      onError(errorText(err, 'We could not turn your voice into text. Try again, or type your request.'));
+      onError(errorText(err, 'I could not turn your voice into text. Try again, or type your request.'));
     } finally {
       setSt({ s: 'idle' });
     }
@@ -238,6 +239,18 @@ function ReplyExtras({ api, reply, restored }: { api: ApiClient; reply: ChatResp
           ))}
         </div>
       )}
+      {/* Payment requests made in this reply: read from the server by ID (live status, still there after a reload). */}
+      {reply.toolCalls.flatMap((c, i) => {
+        const id = c.name === 'create_receive_invoice' && c.ok ? receiveIdOf(c.result) : undefined;
+        return id ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: tool calls have no ID and never reorder
+          <div key={`rcv-${i}`} style={{ marginTop: 8 }}>
+            <ReceiveCard api={api} receiveId={id} variant="chat" />
+          </div>
+        ) : (
+          []
+        );
+      })}
       {reply.needsConfirmation &&
         (restored ? (
           <p style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)', margin: '6px 0 0' }}>
@@ -255,7 +268,6 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
   const fiscal = fiscalFromToolCall(call);
   const url = fiscal ? api.fiscalUrl(fiscal) : null;
   const link = toolLink(call);
-  const request = receiveFromToolCall(call);
   return (
     <span
       title={`Tool: ${call.name}${call.error ? `. ${call.error}` : ''}`}
@@ -268,12 +280,6 @@ function ToolChip({ api, call }: { api: ApiClient; call: ToolCall }) {
       }}
     >
       {toolChipText(call)}
-      {request && (
-        <>
-          {' '}
-          <CopyButton value={request} what="Payment request" />
-        </>
-      )}
       {link && (
         <>
           {' '}
@@ -322,11 +328,14 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
       setSt({ s: 'done', text });
       toast(text, 'success');
     } catch (err) {
-      setSt({ s: 'error', text: errorText(err, 'Could not schedule the payment.') });
+      setSt({
+        s: 'error',
+        text: errorText(err, 'I could not schedule the payment. Ask me again, or schedule it from the invoice page.'),
+      });
     }
   }
 
-  const invoiceLink = nc.invoiceId ? `#/invoice/${encodeURIComponent(nc.invoiceId)}` : '#/invoices';
+  const invoiceLink = nc.invoiceId ? `#/invoice/${encodeURIComponent(nc.invoiceId)}` : '#/pay/invoices';
   return (
     <div
       data-testid="confirm-card"
@@ -346,7 +355,7 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
         </p>
       ) : st.s === 'done' ? (
         <p style={{ margin: 0, color: 'var(--wl-c-ok-text)' }}>
-          {st.text} <a href="#/schedule">See scheduled payments</a>
+          {st.text} <a href="#/pay/scheduled">See scheduled payments</a>
         </p>
       ) : st.s === 'cancelled' ? (
         <p style={{ margin: 0, color: 'var(--wl-c-muted)' }}>Cancelled. Nothing was scheduled.</p>

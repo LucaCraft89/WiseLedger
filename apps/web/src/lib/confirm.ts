@@ -50,21 +50,21 @@ export function assetIdHint(sentence: string | undefined): string | null {
 export const BLOCK_EXPLANATION = 'This invoice was stopped because it looks unsafe. You cannot pay it from here.';
 export const REVIEW_TICK_LABEL = 'I have read the warnings and want to pay anyway';
 
-/** Whether "Confirm and pay" is enabled, and the override flag to send. */
+/** Whether "Pay" is enabled, and the override flag to send. */
 export function confirmGate(verdict: Verdict, ticked: boolean): { canConfirm: boolean; override?: true } {
   if (verdict === 'block') return { canConfirm: false };
   if (verdict === 'review') return ticked ? { canConfirm: true, override: true } : { canConfirm: false };
   return { canConfirm: true };
 }
 
-/** The override rule in words, shown next to "Confirm and pay". */
+/** The override rule in words, shown next to "Pay". */
 export function gateHint(verdict: Verdict, ticked: boolean): string {
   if (verdict === 'block') return 'You cannot pay this invoice: it was stopped because it looks unsafe.';
   if (verdict === 'review')
     return ticked
       ? 'You read the warnings. You can pay now.'
       : 'Tick the box above to say you read the warnings. Then you can pay.';
-  return 'We found nothing suspicious. Read the sentence above, then pay.';
+  return 'I found nothing suspicious. Read the sentence above, then pay.';
 }
 
 export type ProgressStatus = 'pending' | 'running' | 'done';
@@ -95,7 +95,7 @@ const LN_RANK: Record<Exclude<TransferStatus, 'Failed'>, number> = {
 export const PROGRESS_LABELS = [
   'Submitted',
   "Waiting for the supplier's wallet",
-  'Waiting for a block confirmation',
+  'Waiting for Bitcoin to confirm (about a minute)',
   'Paid',
 ] as const;
 
