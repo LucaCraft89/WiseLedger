@@ -12,7 +12,7 @@ import {
   receiveIdOf,
   whyNotUsable,
 } from './lib/receive.js';
-import { walletTab } from './WalletPage.js';
+import { redirectFor } from './lib/routes.js';
 
 describe('payment requests: helpers', () => {
   it('status is icon + word + tone; copy and QR only while waiting', () => {
@@ -51,13 +51,12 @@ describe('payment requests: helpers', () => {
     ]);
   });
 
-  it('routes: detail view, "make a new request like this", and the Get paid tab', () => {
+  it('routes: detail view, "make a new request like this", and the Get paid page', () => {
     expect(parseGetPaid(receiveHref('rcv_1'))).toEqual({ receiveId: 'rcv_1' });
     expect(parseGetPaid(likeHref('rcv_1'))).toEqual({ like: 'rcv_1' });
-    expect(parseGetPaid('#/wallet/get-paid')).toEqual({});
-    expect(walletTab(receiveHref('rcv_1'))).toBe('get-paid');
-    expect(walletTab(likeHref('rcv_1'))).toBe('get-paid');
-    expect(walletTab('#/wallet/details')).toBe('details');
+    expect(parseGetPaid('#/get-paid')).toEqual({});
+    expect(receiveHref('rcv_1').startsWith('#/get-paid/')).toBe(true);
+    expect(redirectFor('#/wallet/get-paid/rcv_1')).toBe('#/get-paid/rcv_1');
     expect(receiveIdOf({ receiveId: 'rcv_9', rgbInvoice: 'rgb:x' })).toBe('rcv_9');
     expect(receiveIdOf({ rgbInvoice: 'rgb:x' })).toBeUndefined();
   });

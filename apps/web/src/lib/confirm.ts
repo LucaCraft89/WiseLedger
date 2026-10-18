@@ -50,14 +50,14 @@ export function assetIdHint(sentence: string | undefined): string | null {
 export const BLOCK_EXPLANATION = 'This invoice was stopped because it looks unsafe. You cannot pay it from here.';
 export const REVIEW_TICK_LABEL = 'I have read the warnings and want to pay anyway';
 
-/** Whether "Confirm and pay" is enabled, and the override flag to send. */
+/** Whether "Pay" is enabled, and the override flag to send. */
 export function confirmGate(verdict: Verdict, ticked: boolean): { canConfirm: boolean; override?: true } {
   if (verdict === 'block') return { canConfirm: false };
   if (verdict === 'review') return ticked ? { canConfirm: true, override: true } : { canConfirm: false };
   return { canConfirm: true };
 }
 
-/** The override rule in words, shown next to "Confirm and pay". */
+/** The override rule in words, shown next to "Pay". */
 export function gateHint(verdict: Verdict, ticked: boolean): string {
   if (verdict === 'block') return 'You cannot pay this invoice: it was stopped because it looks unsafe.';
   if (verdict === 'review')

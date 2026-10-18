@@ -1,6 +1,8 @@
 import QRCode from 'qrcode';
 import { Component, createContext, type ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { ApiCallError } from './api/client.js';
+import type { OwlMood } from './api/contracts.js';
+import { OWL_CHIPS, WAIT_WORDS } from './lib/owl.js';
 import { apiErrorWords } from './lib/payment.js';
 
 type ToastKind = 'info' | 'success' | 'error';
@@ -175,6 +177,21 @@ export function Loading({ text = 'Loading…' }: { text?: string }) {
     <p role="status" style={{ color: 'var(--wl-c-muted)' }}>
       {text}
     </p>
+  );
+}
+
+/** The existing owl image with a small status chip (icon + word) and, while it works, how long it takes. */
+export function OwlChip({ mood, size = 40 }: { mood: OwlMood; size?: number }) {
+  const chip = OWL_CHIPS[mood];
+  const wait = WAIT_WORDS[mood];
+  return (
+    <span className="wl-owl">
+      <img src="/brand/owl-192.png" width={size} height={size} alt="" />
+      <span className="wl-chip" data-mood={mood}>
+        <span aria-hidden="true">{chip.icon}</span> {chip.word}
+        {wait ? <small> ({wait})</small> : null}
+      </span>
+    </span>
   );
 }
 

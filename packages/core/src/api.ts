@@ -384,6 +384,58 @@ export const FiscalQuery = z.object({
 });
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
+/** The product's one character: the owl. Every screen and prompt takes the name from here. */
+export const OWL_NAME = 'Wise';
+/** What the owl is doing, shown as a status chip next to the existing owl image (never a new drawing). */
+export const OwlMood = z.enum(['reading', 'thinking', 'all_good', 'stopped', 'waiting_bitcoin', 'paid']);
+export type OwlMood = z.infer<typeof OwlMood>;
+
+// GET /api/desk (A): what needs the user today. Until the server has the route the web app builds the same shape
+// from the other routes (real data either way).
+export const DeskNeedKind = z.enum([
+  'problem',
+  'confirm',
+  'review',
+  'due_soon',
+  'scheduled_today',
+  'request_expiring',
+  'low_fees',
+]);
+export type DeskNeedKind = z.infer<typeof DeskNeedKind>;
+export const DeskNeed = z.object({
+  kind: DeskNeedKind,
+  /** Plain words, in the owl's voice for the items about invoices and requests. */
+  title: z.string(),
+  detail: z.string().optional(),
+  /** Where the one action goes (a hash route). */
+  href: z.string(),
+  /** Label of the one action ("Review it", "Open"). */
+  action: z.string(),
+  at: IsoDateTime.optional(),
+});
+export type DeskNeed = z.infer<typeof DeskNeed>;
+export const DeskLatelyKind = z.enum(['paid', 'received', 'blocked']);
+export const DeskLately = z.object({
+  kind: DeskLatelyKind,
+  text: z.string(),
+  href: z.string(),
+  at: IsoDateTime,
+});
+export type DeskLately = z.infer<typeof DeskLately>;
+export const DeskResponse = z.object({
+  /** Spendable tokens, base units. */
+  balances: z.array(
+    z.object({ assetId: z.string(), ticker: z.string(), precision: z.number().int(), spendable: BaseUnits }),
+  ),
+  /** Bitcoin for fees, sats. */
+  btcSats: BaseUnits.optional(),
+  /** At most 5, most urgent first. */
+  needsYou: z.array(DeskNeed).max(5),
+  /** At most 5, newest first. */
+  lately: z.array(DeskLately).max(5),
+});
+export type DeskResponse = z.infer<typeof DeskResponse>;
+
 /** Route table, for clients and docs. */
 // GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
 export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed', 'cancelled']);
@@ -484,6 +536,7 @@ export const API_ROUTES = {
   labelsPut: 'PUT /api/labels/:transferId',
   fiscal: 'GET /api/fiscal',
   health: 'GET /api/health',
+  desk: 'GET /api/desk',
   onboarding: 'GET /api/onboarding',
   onboardingCreate: 'POST /api/onboarding/create',
   onboardingSeedConfirmed: 'POST /api/onboarding/seed-confirmed',

@@ -4,6 +4,7 @@ import {
   type AppEvent,
   type InvoiceDetailResponse,
   isLightningInvoice,
+  OWL_NAME,
   type PaymentPlan,
   type Stage,
 } from './api/contracts.js';
@@ -21,10 +22,11 @@ import {
 } from './lib/confirm.js';
 import { buildFullTimeline, eventKey, formatDate, stateHistory } from './lib/format.js';
 import { LIVE_STAGE_TEXT, liveAiView, mergeEvents, toolCallParts } from './lib/live.js';
+import { moodForState, owlHeadline, railWords } from './lib/owl.js';
 import { FailureCard, ResultCard } from './PaymentCards.js';
 import { ReportView } from './ReportView.js';
 import { SettlementCard } from './SettlementCard.js';
-import { errorText, useToast } from './ui.js';
+import { errorText, OwlChip, useToast } from './ui.js';
 
 const STEP_ICON = { pending: '○', running: '…', done: '✓', error: '✗' } as const;
 const STEP_WORD = { pending: 'not started', running: 'in progress', done: 'done', error: 'failed' } as const;
@@ -99,6 +101,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   // A failed payment gets its own card with the error in plain words.
   const errors = progress.failed ? [] : events.filter((e) => e.type === 'error');
   const live = liveAiView(events);
+  const mood = moodForState(invoice.state);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
   // A payment request without an amount: the user types it (the asset is the request's or the approved one).
   const pr = report?.kind === 'payment_request' ? report.paymentRequest : undefined;
@@ -109,7 +112,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   // bottom once the report is there (the answer comes first).
   const steps = (
     <>
-      <h3>Progress</h3>
+      <h3>{OWL_NAME} at the reading desk</h3>
+      <p style={{ color: 'var(--wl-c-muted)', marginTop: 0 }}>
+        I read invoices here. I never touch money at this desk.
+      </p>
       <ol>
         {timeline.map((s) => (
           <li
@@ -130,7 +136,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
 
       {toolCalls.length > 0 && (
         <div data-testid="tool-calls">
-          <h3>What the Treasurer did</h3>
+          <h3>{OWL_NAME} at the till</h3>
+          <p style={{ color: 'var(--wl-c-muted)', marginTop: 0 }}>
+            I move money here. I never read invoices at this desk.
+          </p>
           <ul style={{ overflowWrap: 'anywhere' }}>
             {toolCalls.map((e) => {
               if (e.type !== 'toolCall') return null;
@@ -167,8 +176,9 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
     <section>
       <h2>{invoice.filename}</h2>
       <p>
-        Status: <StatusChip state={invoice.state} />
+        {mood && <OwlChip mood={mood} />} <StatusChip state={invoice.state} />
       </p>
+      {report && <p className="wl-sayline">{owlHeadline(report.verdict, report.flags.length, invoice.state)}</p>}
 
       {!report && steps}
 
@@ -182,6 +192,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           verdict={invoice.state === 'BLOCKED' ? 'block' : report.verdict}
           flags={report.flags}
           sentence={plan ? sentenceFor(plan, assets, confirmationSentence) : undefined}
+          railWords={plan ? railWords(plan.rgbInvoice) : undefined}
           {...(openAmountAsset
             ? {
                 amount: {
@@ -238,7 +249,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       )}
 
       <p style={{ marginTop: 32 }}>
-        <a href="#/">Check another invoice</a> · <a href="#/invoices">All invoices</a>
+        <a href="#/pay">Pay another invoice</a> · <a href="#/pay/invoices">My invoices</a>
       </p>
     </section>
   );

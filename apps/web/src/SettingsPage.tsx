@@ -72,7 +72,11 @@ export function SettingsPage({ api }: { api: ApiClient }) {
                 )}
               </dl>
               <p style={{ marginBottom: 0 }}>
-                Every payment needs your OK. Your spending rules are checked before anything is sent.
+                Every payment needs your OK. Your safety limits are checked before anything is sent.
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                <a href="#/settings/money">Your money, technically</a>: tokens, Bitcoin address, Lightning and safety
+                limits, each explained.
               </p>
             </section>
           </div>

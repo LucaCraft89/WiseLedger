@@ -17,7 +17,7 @@ export function SchedulePage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Your invoices</h2>
+      <h2>Pay an invoice</h2>
       <InvoiceTabs current="schedule" />
       <p>
         Payments you confirmed for a later date. They run on this computer, so keep WiseLedger open.{' '}
@@ -28,7 +28,7 @@ export function SchedulePage({ api }: { api: ApiClient }) {
       {error ? <ErrorBox error={error} retry={reload} /> : null}
       {loading && !data ? <Loading text="Loading scheduled payments…" /> : null}
       {data && data.length === 0 && (
-        <Empty text="No scheduled payments. Ask the Treasurer, e.g. “Pay the Acme invoice on Friday”." />
+        <Empty text="No scheduled payments. Ask Wise, e.g. “Pay the Acme invoice on Friday”." />
       )}
       {data?.map((job) => (
         <JobRow key={job.jobId} api={api} job={job} onChanged={reload} />

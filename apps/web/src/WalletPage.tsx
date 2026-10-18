@@ -10,18 +10,17 @@ import {
   type WalletResponse,
 } from './api/contracts.js';
 import { formatDate } from './lib/format.js';
-import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
 import { explorerTxUrl } from './lib/payment.js';
 import { isOpen, mergePage, openFirst, parseGetPaid, RECEIVE_FILTERS, receiveHref } from './lib/receive.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
 import { ReceiveCard, requestAmount, StatusBadge } from './ReceiveCard.js';
-import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-export function WalletPage({ api, tab = 'overview', hash = '' }: { api: ApiClient; tab?: WalletTab; hash?: string }) {
+/** Settings › Your money, technically: the words of the wallet (token ID, address, Lightning, limits), each explained. */
+export function MoneyPage({ api }: { api: ApiClient }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +30,7 @@ export function WalletPage({ api, tab = 'overview', hash = '' }: { api: ApiClien
     try {
       setW(await api.wallet());
     } catch (err) {
-      const msg = errorText(err, 'Could not open the wallet.');
+      const msg = errorText(err, 'I could not open the wallet. Check that the server is running, then try again.');
       setError(msg);
       toast(msg, 'error');
     }
@@ -44,16 +43,19 @@ export function WalletPage({ api, tab = 'overview', hash = '' }: { api: ApiClien
   if (error && !w) {
     return (
       <section>
-        <h2>Wallet</h2>
+        <h2>Your money, technically</h2>
         <ErrorBox error={error} retry={() => void load()} />
       </section>
     );
   }
-  if (!w) return <Loading text="Opening the wallet…" />;
+  if (!w) return <Loading text="Opening your wallet… (a few seconds)" />;
 
   return (
     <section>
-      <h2>Wallet</h2>
+      <h2>Your money, technically</h2>
+      <p>
+        <a href="#/settings">← Settings</a>
+      </p>
       <p style={{ color: 'var(--wl-c-muted)' }}>
         {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} ·{' '}
         {w.ready ? 'Ready to use' : 'Not ready yet: check again in a minute'}{' '}
@@ -62,90 +64,53 @@ export function WalletPage({ api, tab = 'overview', hash = '' }: { api: ApiClien
         </button>
       </p>
 
-      <nav aria-label="Wallet sections" className="wl-tabs">
-        {WALLET_TABS.map((t) => (
-          <a key={t.id} href={t.href} aria-current={tab === t.id ? 'page' : undefined}>
-            {t.label}
-          </a>
-        ))}
-      </nav>
+      <h3>Tokens</h3>
+      {w.assets.length === 0 && (
+        <Empty text="This wallet holds no tokens yet. The “Getting started” tips on the Desk say how to get test tokens." />
+      )}
+      {w.assets.map((a) => (
+        <div key={a.assetId} style={box} data-testid="asset-balance">
+          <div style={{ fontSize: '1.6em' }}>
+            <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
+            <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
+          </div>
+          <div style={{ color: 'var(--wl-c-muted)' }}>
+            Ready to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
+            {a.balance.future !== a.balance.settled && (
+              <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
+            )}
+          </div>
+          <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
+            Token ID (the unique code of this token, used in every payment):{' '}
+            <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
+          </div>
+        </div>
+      ))}
 
-      {tab === 'overview' && (
+      {w.btcBalanceSats !== undefined && (
         <>
-          {w.assets.length === 0 && (
-            <Empty text="This wallet holds no tokens yet. The “Getting started” tips above say how to get test tokens." />
-          )}
-          {w.assets.map((a) => (
-            <div key={a.assetId} style={box} data-testid="asset-balance">
-              <div style={{ fontSize: '1.6em' }}>
-                <strong>{formatAssetAmount(a.balance.spendable, a.precision)}</strong> {a.ticker}{' '}
-                <small style={{ color: 'var(--wl-c-muted)', fontSize: '0.55em' }}>{a.name}</small>
-              </div>
-              <div style={{ color: 'var(--wl-c-muted)' }}>
-                Available to spend · confirmed {formatAssetAmount(a.balance.settled, a.precision)}
-                {a.balance.future !== a.balance.settled && (
-                  <> · incoming included {formatAssetAmount(a.balance.future, a.precision)}</>
-                )}
-              </div>
-            </div>
-          ))}
-          {w.btcBalanceSats !== undefined && <BitcoinBalance sats={w.btcBalanceSats} />}
-          {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
-          <RecentTransfers api={api} assets={w.assets} />
+          <BitcoinBalance sats={w.btcBalanceSats} />
+          <BtcTransactions api={api} />
         </>
       )}
-
-      {tab === 'get-paid' && <GetPaid api={api} wallet={w} hash={hash} />}
-
-      {tab === 'details' && (
+      {w.address && (
         <>
-          <h3>Tokens</h3>
-          {w.assets.map((a) => (
-            <div key={a.assetId} style={box}>
-              <strong>{a.ticker}</strong> {a.name}
-              <div style={{ fontSize: '0.9em', color: 'var(--wl-c-muted)' }}>
-                Token ID (the unique code of this token, used in every payment):{' '}
-                <code title={a.assetId}>{shortId(a.assetId)}</code> <CopyButton value={a.assetId} what="Token ID" />
-              </div>
+          <h3>Bitcoin address</h3>
+          <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
+              <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
+              <CopyButton value={w.address} what="Address" />
             </div>
-          ))}
-          {w.btcBalanceSats !== undefined && (
-            <>
-              <BitcoinBalance sats={w.btcBalanceSats} />
-              <BtcTransactions api={api} />
-            </>
-          )}
-          {w.address && (
-            <>
-              <h3>Bitcoin address</h3>
-              <div style={{ ...box, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Qr value={w.address} size={160} alt="QR code of the Bitcoin address" />
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ margin: 0 }}>Send test bitcoin here to pay network fees.</p>
-                  <code style={{ wordBreak: 'break-all' }}>{w.address}</code>{' '}
-                  <CopyButton value={w.address} what="Address" />
-                </div>
-              </div>
-            </>
-          )}
-          <LightningPanel api={api} assets={w.assets} />
+          </div>
         </>
       )}
+      <LightningPanel api={api} assets={w.assets} />
+      {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
     </section>
   );
 }
-
-export type WalletTab = 'overview' | 'get-paid' | 'details';
-export const WALLET_TABS: readonly { id: WalletTab; href: string; label: string }[] = [
-  { id: 'overview', href: '#/wallet', label: 'Overview' },
-  { id: 'get-paid', href: '#/wallet/get-paid', label: 'Get paid' },
-  { id: 'details', href: '#/wallet/details', label: 'Details' },
-];
-/** "#/wallet/get-paid" → "get-paid"; anything else under #/wallet → overview. */
-export const walletTab = (hash: string): WalletTab =>
-  hash.startsWith('#/wallet/get-paid')
-    ? 'get-paid'
-    : (WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview');
 
 /** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
 export function SpendingRules({
@@ -169,7 +134,7 @@ export function SpendingRules({
   const wdk = spending.enforcedBy === 'wdk-policy';
   return (
     <>
-      <h3>Spending rules</h3>
+      <h3>Safety limits</h3>
       <div style={box} data-testid="spending-rules">
         <div>
           Up to <strong>{fmt(spending.paymentCap, main)}</strong> per payment
@@ -341,32 +306,15 @@ function BtcTransactions({ api }: { api: ApiClient }) {
   );
 }
 
-function RecentTransfers({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
-  const load = useCallback(async () => recentTransfers((await api.transfers()).transfers, 10), [api]);
-  const { data, error, loading, reload } = useLoad(load);
-  return (
-    <>
-      <h3>Recent transfers</h3>
-      <p style={{ marginTop: 0 }}>
-        <a href="#/transfers">All transfers and fiscal report</a> · <a href="#/schedule">Scheduled payments</a>
-      </p>
-      {error ? <ErrorBox error={error} retry={reload} /> : null}
-      {loading && !data ? <Loading text="Loading transfers…" /> : null}
-      {data && data.length === 0 && <Empty text="No transfers yet." />}
-      {data && data.length > 0 && <TransfersTable api={api} transfers={data} assets={assets} />}
-    </>
-  );
-}
-
-/** Get paid: one request (#/wallet/get-paid/<id>), or the form (pre-filled with ?like=<id>) and the list. */
-function GetPaid({ api, wallet, hash }: { api: ApiClient; wallet: WalletResponse; hash: string }) {
+/** Get paid: one request (#/get-paid/<id>), or the form (pre-filled with ?like=<id>) and the list. */
+export function GetPaid({ api, wallet, hash }: { api: ApiClient; wallet: WalletResponse; hash: string }) {
   const { receiveId, like } = parseGetPaid(hash);
   const [listTick, setListTick] = useState(0);
   if (receiveId) {
     return (
       <>
         <p>
-          <a href="#/wallet/get-paid">← All payment requests</a>
+          <a href="#/get-paid">← All payment requests</a>
         </p>
         <ReceiveCard api={api} receiveId={receiveId} variant="detail" />
       </>
@@ -455,7 +403,7 @@ function ReceiveForm({
 
   return (
     <>
-      <h3>Receive a payment</h3>
+      <h3>Make a payment request</h3>
       <form
         style={box}
         onSubmit={(e) => {

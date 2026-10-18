@@ -10,6 +10,7 @@ import {
   type ConfirmRequest,
   type ConfirmResponse,
   type CreateInvoiceResponse,
+  type DeskResponse,
   type FiscalQuery,
   type HealthResponse,
   type InvoiceDetailResponse,
@@ -40,6 +41,7 @@ import {
   type WalletReceiveResponse,
   type WalletResponse,
 } from './contracts.js';
+import { deskFromApi } from './desk.js';
 
 export type InvoiceInput = { file: File } | { text: string; filename?: string };
 
@@ -73,6 +75,8 @@ export interface ApiClient {
   lightning(): Promise<LightningStatusResponse>;
   /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
   btcTransactions(): Promise<BtcTransactionsResponse>;
+  /** What needs the user today and what happened lately (GET /api/desk; built from the other routes when the server has none). */
+  desk(): Promise<DeskResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
   /** One transfer with asset, status times and linked invoice ("How this was settled"). */
@@ -188,7 +192,7 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export function createHttpClient(base = ''): ApiClient {
-  return {
+  const client: ApiClient = {
     mode: 'server',
     health: () => call(`${base}/api/health`),
     createInvoice(input) {
@@ -228,6 +232,14 @@ export function createHttpClient(base = ''): ApiClient {
         return await call<LightningStatusResponse>(`${base}/api/wallet/lightning`);
       } catch (err) {
         if (err instanceof ApiCallError && err.status === 404) return LIGHTNING_OFF;
+        throw err;
+      }
+    },
+    async desk() {
+      try {
+        return await call<DeskResponse>(`${base}/api/desk`);
+      } catch (err) {
+        if (err instanceof ApiCallError && err.status === 404) return deskFromApi(client);
         throw err;
       }
     },
@@ -294,4 +306,5 @@ export function createHttpClient(base = ''): ApiClient {
     onboardingRestore: (req) => call(`${base}/api/onboarding/restore`, json(req)),
     onboardingUnlock: (req) => call(`${base}/api/onboarding/unlock`, json(req)),
   };
+  return client;
 }

@@ -2,24 +2,28 @@ import { useCallback, useEffect, useState } from 'react';
 import { type ApiClient, READY_ONBOARDING } from './api/client.js';
 import type { OnboardingStatusResponse } from './api/contracts.js';
 import { connectServer, demoClient, demoRequested } from './api/select.js';
+import { BooksPage } from './BooksPage.js';
 import { ChatPage } from './ChatPage.js';
+import { DeskPage } from './DeskPage.js';
+import { GetPaidPage } from './GetPaidPage.js';
 import { GettingStarted } from './GettingStarted.js';
+import { IntroCards } from './IntroCards.js';
 import { InvoiceListPage } from './InvoiceListPage.js';
 import { InvoicePage } from './InvoicePage.js';
-import { screenForOnboarding } from './lib/onboarding.js';
+import { introSeen, screenForOnboarding } from './lib/onboarding.js';
+import { NAV, redirectFor, sectionOf } from './lib/routes.js';
 import { SetupScreen, UnlockScreen } from './OnboardingScreens.js';
 import { SchedulePage } from './SchedulePage.js';
 import { SettingsPage } from './SettingsPage.js';
 import { ThemeSwitch } from './ThemeSwitch.js';
-import { TransfersPage } from './TransfersPage.js';
 import { UploadPage } from './UploadPage.js';
-import { WalletPage, walletTab } from './WalletPage.js';
+import { MoneyPage } from './WalletPage.js';
 
 /**
- * Hash routing: `#/` = upload, `#/invoices` = list, `#/invoice/<id>` = invoice page, `#/wallet` = wallet,
- * `#/transfers` = transfers + fiscal report, `#/schedule` = scheduled payments, `#/chat` = Treasurer chat,
- * `#/settings` = settings and the Local AI panel. Before the wallet is set up (or while it is locked) the
- * first-run screens replace every route.
+ * Hash routing: `#/` = Desk, `#/pay` (+ `/invoices`, `/scheduled`) = pay, `#/invoice/<id>` = one invoice,
+ * `#/get-paid` = payment requests, `#/books` = transfers, payees, fiscal report, `#/ask` = chat with Wise,
+ * `#/settings` (+ `/money`) = settings. Old hashes redirect (lib/routes.ts). Before the wallet is set up (or while it
+ * is locked) the first-run screens replace every route.
  */
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -31,25 +35,20 @@ function useHashRoute(): string {
   return hash;
 }
 
-const NAV = [
-  { href: '#/', label: 'Check an invoice' },
-  { href: '#/invoices', label: 'My invoices' },
-  { href: '#/wallet', label: 'Wallet' },
-  { href: '#/chat', label: 'Ask the Treasurer' },
-  { href: '#/settings', label: 'Settings' },
-] as const;
-
 function isCurrent(href: string, hash: string): boolean {
-  if (href === '#/') return hash === '' || hash === '#' || hash === '#/';
-  if (href === '#/wallet') return hash.startsWith('#/wallet');
-  // Scheduled payments live under My invoices (a tab there).
-  return hash === href || (href === '#/invoices' && (hash.startsWith('#/invoice/') || hash === '#/schedule'));
+  return sectionOf(hash) === href;
 }
 
 export function App() {
   const [api, setApi] = useState<ApiClient | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatusResponse | null>(null);
-  const hash = useHashRoute();
+  const [introDone, setIntroDone] = useState(introSeen);
+  const rawHash = useHashRoute();
+  const redirect = redirectFor(rawHash);
+  const hash = redirect ?? rawHash;
+  useEffect(() => {
+    if (redirect) window.location.replace(redirect);
+  }, [redirect]);
 
   const checkOnboarding = useCallback(async (client: ApiClient) => {
     // A server that cannot answer here still gets the normal pages, which show their own plain errors.
@@ -104,7 +103,6 @@ export function App() {
 
   const screen = screenForOnboarding(onboarding.state);
   const invoiceId = hash.match(/^#\/invoice\/(.+)$/)?.[1];
-  const home = hash === '' || hash === '#' || hash === '#/';
   return (
     <>
       <a href="#main" className="wl-skip">
@@ -144,7 +142,9 @@ export function App() {
           </p>
         )}
         <main id="main" tabIndex={-1}>
-          {screen === 'setup' ? (
+          {screen === 'setup' && !introDone ? (
+            <IntroCards onDone={() => setIntroDone(true)} />
+          ) : screen === 'setup' ? (
             <SetupScreen api={api} status={onboarding} onDone={() => void checkOnboarding(api)} />
           ) : screen === 'unlock' ? (
             <UnlockScreen api={api} onDone={() => void checkOnboarding(api)} />
@@ -158,28 +158,32 @@ export function App() {
               )}
               {invoiceId ? (
                 <InvoicePage key={invoiceId} api={api} invoiceId={decodeURIComponent(invoiceId)} />
-              ) : hash.startsWith('#/wallet') ? (
+              ) : hash.startsWith('#/get-paid') ? (
                 <>
+                  <GetPaidPage api={api} hash={hash} />
                   <GettingStarted api={api} />
-                  <WalletPage api={api} tab={walletTab(hash)} hash={hash} />
                 </>
-              ) : hash === '#/transfers' ? (
-                <TransfersPage api={api} />
-              ) : hash === '#/schedule' ? (
+              ) : hash === '#/books' ? (
+                <BooksPage api={api} />
+              ) : hash === '#/pay/scheduled' ? (
                 <SchedulePage api={api} />
-              ) : hash === '#/chat' ? (
-                <ChatPage api={api} />
-              ) : hash === '#/invoices' ? (
+              ) : hash === '#/pay/invoices' ? (
                 <InvoiceListPage api={api} />
+              ) : hash === '#/pay' ? (
+                <UploadPage
+                  api={api}
+                  onCreated={(id) => (window.location.hash = `#/invoice/${encodeURIComponent(id)}`)}
+                />
+              ) : hash === '#/ask' ? (
+                <ChatPage api={api} />
+              ) : hash === '#/settings/money' ? (
+                <MoneyPage api={api} />
               ) : hash === '#/settings' ? (
                 <SettingsPage api={api} />
               ) : (
                 <>
-                  {home && <GettingStarted api={api} />}
-                  <UploadPage
-                    api={api}
-                    onCreated={(id) => (window.location.hash = `#/invoice/${encodeURIComponent(id)}`)}
-                  />
+                  <DeskPage api={api} />
+                  <GettingStarted api={api} />
                 </>
               )}
             </>

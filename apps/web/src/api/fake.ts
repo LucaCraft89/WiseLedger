@@ -31,6 +31,7 @@ import {
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
+import { deskFromApi } from './desk.js';
 import { createFakeOnboarding } from './fake-onboarding.js';
 
 const MONTHS = [
@@ -77,7 +78,7 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
 /** Getting-started hints of the fake /api/health (the real server sends faucet and asset hints). */
 export const FAKE_HINTS = [
   'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
-  'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
+  'Pay an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
 ];
 
 export interface FakeOptions {
@@ -359,8 +360,9 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     emit(r, { type: 'stage', invoiceId: id, at: at(), stage: 'done', status: 'end' });
   }
 
-  return {
+  const client: ApiClient = {
     mode: 'fake',
+    desk: () => deskFromApi(client),
     async health() {
       return {
         ok: true,
@@ -687,4 +689,5 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     fiscalUrl: () => null,
     ...onboarding,
   };
+  return client;
 }

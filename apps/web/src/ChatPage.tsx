@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ApiClient } from './api/client.js';
-import type { ChatResponse } from './api/contracts.js';
+import { type ChatResponse, OWL_NAME } from './api/contracts.js';
 import { chatSession } from './lib/chat-session.js';
 import {
   CHAT_SUGGESTIONS,
@@ -29,14 +29,14 @@ const bubble = (role: ChatTurn['role']) =>
     whiteSpace: role === 'user' ? 'pre-wrap' : 'normal',
   }) as const;
 
-/** #/chat: ask the Treasurer (local AI with wallet tools). Spending always needs a confirmation card. */
+/** #/ask: ask Wise (local AI with wallet tools). Spending always needs a confirmation card. */
 export function ChatPage({ api }: { api: ApiClient }) {
   // The conversation lives outside this page (lib/chat-session): switching section never loses an answer.
   const { messages, busy, live, error: chatError } = useSyncExternalStore(chatSession.subscribe, chatSession.get);
   const [draft, setDraft] = useState('');
   const [micError, setError] = useState<unknown>(null);
   const error =
-    micError ?? (chatError ? errorText(chatError, 'The Treasurer did not answer. Try again in a minute.') : null);
+    micError ?? (chatError ? errorText(chatError, 'I did not answer. Wait a minute, then ask me again.') : null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [voiceHint, setVoiceHint] = useState(false);
@@ -56,7 +56,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h2>Ask the Treasurer</h2>
+        <h2>Ask {OWL_NAME}</h2>
         {messages.length > 0 && (
           <button
             type="button"
@@ -65,7 +65,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
               chatSession.clear();
               setError(null);
             }}
-            title="Clear this conversation and start again (the Treasurer forgets it too)"
+            title="Clear this conversation and start again (I forget it too)"
           >
             New chat
           </button>
@@ -126,7 +126,7 @@ export function ChatPage({ api }: { api: ApiClient }) {
         />
         <input
           ref={inputRef}
-          aria-label="Message to the Treasurer"
+          aria-label="Message to Wise"
           value={draft}
           maxLength={2000}
           placeholder="Type a request, e.g. What is my TUSDT balance?"
@@ -332,7 +332,7 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
     }
   }
 
-  const invoiceLink = nc.invoiceId ? `#/invoice/${encodeURIComponent(nc.invoiceId)}` : '#/invoices';
+  const invoiceLink = nc.invoiceId ? `#/invoice/${encodeURIComponent(nc.invoiceId)}` : '#/pay/invoices';
   return (
     <div
       data-testid="confirm-card"
@@ -352,7 +352,7 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
         </p>
       ) : st.s === 'done' ? (
         <p style={{ margin: 0, color: 'var(--wl-c-ok-text)' }}>
-          {st.text} <a href="#/schedule">See scheduled payments</a>
+          {st.text} <a href="#/pay/scheduled">See scheduled payments</a>
         </p>
       ) : st.s === 'cancelled' ? (
         <p style={{ margin: 0, color: 'var(--wl-c-muted)' }}>Cancelled. Nothing was scheduled.</p>

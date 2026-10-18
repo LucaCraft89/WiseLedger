@@ -10,6 +10,7 @@ import {
 } from './lib/confirm.js';
 import { toBaseUnits } from './lib/live.js';
 import { splitFlags } from './lib/payment.js';
+import { OwlChip } from './ui.js';
 
 /**
  * "Confirm payment" panel: flags first, then the sentence built by code.
@@ -20,6 +21,8 @@ export function ConfirmDialog(props: {
   flags: readonly RiskFlag[];
   /** Undefined when no payment was prepared (blocked invoices). */
   sentence?: string;
+  /** How it travels, in words: "via Lightning, instant" / "on-chain, about a minute". */
+  railWords?: string;
   onConfirm: (override: true | undefined) => Promise<void>;
   onReject: (reason: string | undefined) => Promise<void>;
   /** Open-amount payment request: ask for the amount first (the server checks it and builds the sentence). */
@@ -41,7 +44,7 @@ export function ConfirmDialog(props: {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError(err instanceof Error ? err.message : 'That did not work. Wait a moment and press the button again.');
     } finally {
       setBusy(false);
     }
@@ -54,7 +57,7 @@ export function ConfirmDialog(props: {
       style={{ border: '2px solid var(--wl-c-strong)', borderRadius: 6, padding: 16, marginTop: 16 }}
     >
       <h3 id="confirm-title" style={{ marginTop: 0 }}>
-        Confirm payment
+        Ready to pay?
       </h3>
 
       {/* The flag cards are already shown in "Checks" above: one line here, so nothing is read twice. */}
@@ -97,7 +100,15 @@ export function ConfirmDialog(props: {
         </form>
       )}
 
-      {props.sentence && <p style={{ fontSize: '1.15em', fontWeight: 600, marginBottom: 4 }}>{props.sentence}</p>}
+      {props.sentence && (
+        <>
+          <OwlChip mood="thinking" />
+          <p className="wl-sayline" style={{ fontWeight: 600, marginBottom: 4 }}>
+            {props.sentence}
+          </p>
+          {props.railWords && <p style={{ marginTop: 0, color: 'var(--wl-c-muted)' }}>I will pay {props.railWords}.</p>}
+        </>
+      )}
       {assetIdHint(props.sentence) && (
         <p data-testid="asset-id-hint" style={{ fontSize: '0.9em', marginTop: 0 }}>
           {assetIdHint(props.sentence)}
@@ -165,21 +176,22 @@ export function ConfirmDialog(props: {
       ) : (
         <div>
           <button
-            type="button"
-            disabled={!gate.canConfirm || busy || !props.sentence}
-            onClick={run(() => props.onConfirm(gate.override))}
-            style={{ fontSize: '1.1em', padding: '8px 20px', marginRight: 12 }}
-          >
-            Confirm and pay
-          </button>
-          <button
             className="wl-secondary"
             type="button"
             disabled={busy}
             onClick={() => setRejecting(true)}
-            style={{ padding: '8px 20px' }}
+            style={{ padding: '8px 20px', marginRight: 12 }}
           >
-            Do not pay
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="wl-accent"
+            disabled={!gate.canConfirm || busy || !props.sentence}
+            onClick={run(() => props.onConfirm(gate.override))}
+            style={{ fontSize: '1.1em', padding: '8px 20px' }}
+          >
+            Pay
           </button>
           <p data-testid="gate-hint" style={{ margin: '8px 0 0', fontSize: '0.95em' }}>
             {gateHint(props.verdict, ticked)}
