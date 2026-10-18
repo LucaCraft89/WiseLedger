@@ -5,6 +5,7 @@
 //   pnpm -F wallet lsp              serve: GET /info · POST /channel-request {pubkey} · GET /channel-request/:pubkey
 //   pnpm -F wallet lsp status       node, BTC, TUSDT, channels, requests
 //   pnpm -F wallet lsp fund [sats]  payer WDK wallet → sats to node A (default 50,000), + 2 free colorable UTXOs
+//   pnpm -F wallet dev              `pnpm dev` runs this: serve when LN_ENABLED=true on a real wallet, else exit quietly
 //
 // The client first connects to A as a peer (`<pubkey>@<host>:<peerPort>` from /info), then requests the channel.
 // Env: LSP_HTTP_PORT (8790), LSP_PEER_PORT (9735), LSP_HOST (127.0.0.1, what /info advertises), LSP_CHANNEL_SATS
@@ -53,6 +54,10 @@ function saveRequests(r: Record<string, ChannelRequest>): void {
 const PUBKEY = /^0[23][0-9a-f]{64}$/;
 
 const [cmd = 'serve', arg] = process.argv.slice(2).filter((a) => a !== '--');
+if (cmd === 'dev' && (!/^(1|true|yes)$/i.test(env.LN_ENABLED ?? '') || (env.WALLET_BACKEND ?? 'mock') === 'mock')) {
+  log('lsp', 'Lightning is off (LN_ENABLED is not true, or the mock wallet): the LSP is not started.');
+  process.exit(0);
+}
 const node = await LnNode.open({ name: 'lsp', dataDir, peerPort: PEER_PORT, forwardToPrivateChannels: true });
 log('lsp', `node ${node.pubkey} · peer port ${PEER_PORT}`);
 
@@ -259,6 +264,7 @@ process.on('SIGTERM', stop);
 
 switch (cmd) {
   case 'serve':
+  case 'dev':
     await serve();
     break;
   case 'status':

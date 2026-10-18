@@ -16,6 +16,7 @@
     "test:live": "LIVE_WALLET=1 LIVE_CHAIN=1 vitest run",
     "demo:prepare": "tsx scripts/demo-prepare.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
+    "dev": "tsx scripts/lsp.ts dev || echo \"[lsp] the LSP stopped: Lightning payments will not go through until pnpm dev is restarted\"",
     "lsp": "tsx scripts/lsp.ts",
     "lsp-client": "tsx scripts/lsp-client.ts"
   },
