@@ -9,9 +9,13 @@
 > A local AI that reads your invoices, catches the fraudulent ones, and pays the good ones with RGB assets on Bitcoin, from your own self-custodial wallet. Nothing leaves your device.
 
 ## For the judges
-Two ways to run it. Both use the same commands; the binary only saves you installing Node and pnpm.
+Two ways to run the same **real** app (QVAC AI on your machine, a self-custodial RGB wallet on the Mutinynet test network). Try **A** first; if the binary does not start, use **B**. The first run takes ~10 minutes, mostly the one-time model download and waiting for test sats.
 
-**Machine:** Linux x64 with glibc ≥ 2.38 (Ubuntu 24.04, Debian 13, Fedora 40+; on Windows use WSL2 Ubuntu 24.04), ~4 GB free RAM, ~6 GB disk, internet (Mutinynet test network and a one-time ~2.6 GB model download). Check: `ldd --version | head -1`.
+### Prerequisites
+- **Machine:** Linux x64 with glibc ≥ 2.38 (Ubuntu 24.04, Debian 13, Fedora 40+); on Windows use **WSL2 Ubuntu 24.04**; Apple Silicon Macs: path B only. Check: `uname -sm; ldd --version | head -1`.
+- ~4 GB free RAM, ~6 GB free disk, internet (Mutinynet and a one-time ~2.6 GB model download).
+- **Path A** also needs `zstd`: `sudo apt install zstd` (Fedora: `sudo dnf install zstd`).
+- **Path B** also needs `git`, `curl`, **Node 22** (≥ 22.17, not 24+) and **pnpm**. One command installs them: `bash infra/wsl-bootstrap.sh` (Ubuntu / WSL2 / Debian) or `bash infra/fedora-bootstrap.sh` (Fedora). macOS: `brew install node@22 git jq && corepack enable`.
 
 ### A. The release binary (one file): the real app
 Download `wiseledger-linux-x64.run` from [Releases](https://github.com/LucaCraft89/WiseLedger/releases/latest). It is a self-extracting archive: Node 22, pnpm, the source code of this repository with its installed dependencies, and the RGB Lightning modules. Nothing of ours is compiled: the app runs from the TypeScript sources it unpacks, so you can read them in `~/WiseLedger-app/`. It runs the **real** product: QVAC on your machine, a self-custodial RGB wallet on Mutinynet, RGB over Lightning with our own LSP.
@@ -25,9 +29,18 @@ chmod +x wiseledger-linux-x64.run
 From then on `./wiseledger-linux-x64.run` just starts the app. Any other argument is passed to `pnpm` in `~/WiseLedger-app` (`./wiseledger-linux-x64.run -F wallet lsp status` = `pnpm -F wallet lsp status` from source). Settings: `~/WiseLedger-app/.env` (Lightning is on). Wallets and seeds: `~/WiseLedger-app/.data/` (keep it). The supplier wallet's log: `.data/payee-watch.log`.
 
 ### B. From source (if the binary does not start)
-Follow [Quick start](#quick-start-copy-paste-checked-from-a-fresh-clone-on-18-oct-2026) below: `git clone`, Node 22, `pnpm install`, then the same commands as above with `pnpm` instead of `./wiseledger-linux-x64.run`.
+```bash
+git clone https://github.com/LucaCraft89/WiseLedger && cd WiseLedger
+nvm install 22 && nvm use 22        # any Node 22.17+ (not 24+)
+corepack enable                     # the pinned pnpm (or: npm install -g pnpm@12.11.2)
+pnpm install
+pnpm check                          # must end with "secret-scan: ok"
+pnpm demo:mock                      # 1 minute, no AI and no chain: must end with "All three paths behaved"
+cp .env.example .env                # real backends by default: QVAC + RGB wallet on Mutinynet
+```
+Then do the two sections below with `W` = `pnpm`: get test sats and TUSDT (once), run the demo.
 
-### Get test sats and TUSDT by hand (from source; the binary does this for you)
+### Get test sats and TUSDT (path B, once; the binary does this for you)
 Replace `W` with `./wiseledger-linux-x64.run` (binary) or `pnpm` (source).
 1. `W wallet:smoke`: prints the **payer address** (`tb1…`).
 2. **Sats:** paste that address into <https://faucet.mutinynet.com> and ask for 100 000 sats. Mutinynet makes a block every ~30 s.
@@ -36,7 +49,7 @@ Replace `W` with `./wiseledger-linux-x64.run` (binary) or `pnpm` (source).
 5. **TUSDT:** `W -F wallet issue-asset` issues your own `TUSDT` (RGB NIA, precision 6, 1000 tokens, no value) and prints its asset ID `rgb:…`. Our own TUSDT cannot be sent from a faucet: an RGB token is its contract, so each judge issues one, exactly as we did.
 6. Put that ID in `~/WiseLedger-app/.env` (binary) or `.env` (source): `ASSET_ALLOWLIST=rgb:…`.
 
-### Run the demo
+### Run the demo (path B; with the binary just run `./wiseledger-linux-x64.run`)
 ```bash
 W demo:prepare                # fresh RGB invoices from the supplier wallet + 4 invoice PDFs in .data/demo/
 W dev                         # terminal 1: open http://localhost:5173 (first start downloads the QVAC model, ~2.6 GB)
