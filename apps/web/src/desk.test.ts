@@ -52,11 +52,12 @@ describe('books: people you pay', () => {
 
 describe('navigation', () => {
   it('has six sections in the fixed order', () => {
-    expect(NAV.map((n) => n.label)).toEqual(['Desk', 'Pay', 'Get paid', 'Books', 'Ask Wise', 'Settings']);
+    expect(NAV.map((n) => n.label)).toEqual(['Desk', 'Pay', 'Get paid', 'Books', 'Ask Wise', 'Me', 'Settings']);
   });
   it('old hashes redirect, current ones do not', () => {
-    expect(redirectFor('#/wallet')).toBe('#/settings/money');
-    expect(redirectFor('#/wallet/details')).toBe('#/settings/money');
+    expect(redirectFor('#/wallet')).toBe('#/me');
+    expect(redirectFor('#/settings/money')).toBe('#/me');
+    expect(redirectFor('#/wallet/details')).toBe('#/me');
     expect(redirectFor('#/wallet/get-paid')).toBe('#/get-paid');
     expect(redirectFor('#/wallet/get-paid?like=r1')).toBe('#/get-paid?like=r1');
     expect(redirectFor('#/chat')).toBe('#/ask');
@@ -69,7 +70,7 @@ describe('navigation', () => {
   it('maps every page to one nav entry', () => {
     expect(sectionOf('#/invoice/x')).toBe('#/pay');
     expect(sectionOf('#/pay/scheduled')).toBe('#/pay');
-    expect(sectionOf('#/settings/money')).toBe('#/settings');
+    expect(sectionOf('#/me')).toBe('#/me');
     expect(sectionOf('')).toBe('#/');
   });
 });

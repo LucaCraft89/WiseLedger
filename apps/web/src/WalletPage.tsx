@@ -10,17 +10,19 @@ import {
   type WalletResponse,
 } from './api/contracts.js';
 import { formatDate } from './lib/format.js';
+import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
 import { explorerTxUrl } from './lib/payment.js';
 import { isOpen, mergePage, openFirst, parseGetPaid, RECEIVE_FILTERS, receiveHref } from './lib/receive.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
 import { ReceiveCard, requestAmount, StatusBadge } from './ReceiveCard.js';
+import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-/** Settings › Your money, technically: the words of the wallet (token ID, address, Lightning, limits), each explained. */
-export function MoneyPage({ api }: { api: ApiClient }) {
+/** `#/me`: my balance, my transactions, my addresses and limits, and the RGB details behind them, each explained. */
+export function MePage({ api }: { api: ApiClient }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function MoneyPage({ api }: { api: ApiClient }) {
   if (error && !w) {
     return (
       <section>
-        <h2>Your money, technically</h2>
+        <h2>Me</h2>
         <ErrorBox error={error} retry={() => void load()} />
       </section>
     );
@@ -52,10 +54,7 @@ export function MoneyPage({ api }: { api: ApiClient }) {
 
   return (
     <section>
-      <h2>Your money, technically</h2>
-      <p>
-        <a href="#/settings">← Settings</a>
-      </p>
+      <h2>Me</h2>
       <p style={{ color: 'var(--wl-c-muted)' }}>
         {BACKEND_WORDS[w.backend]} · {NETWORK_WORDS[w.network]} ·{' '}
         {w.ready ? 'Ready to use' : 'Not ready yet: check again in a minute'}{' '}
@@ -64,7 +63,7 @@ export function MoneyPage({ api }: { api: ApiClient }) {
         </button>
       </p>
 
-      <h3>Tokens</h3>
+      <h3>My balance</h3>
       {w.assets.length === 0 && (
         <Empty text="This wallet holds no tokens yet. The “Getting started” tips on the Desk say how to get test tokens." />
       )}
@@ -87,12 +86,9 @@ export function MoneyPage({ api }: { api: ApiClient }) {
         </div>
       ))}
 
-      {w.btcBalanceSats !== undefined && (
-        <>
-          <BitcoinBalance sats={w.btcBalanceSats} />
-          <BtcTransactions api={api} />
-        </>
-      )}
+      {w.btcBalanceSats !== undefined && <BitcoinBalance sats={w.btcBalanceSats} />}
+      <MyTransactions api={api} assets={w.assets} />
+      {w.btcBalanceSats !== undefined && <BtcTransactions api={api} />}
       {w.address && (
         <>
           <h3>Bitcoin address</h3>
@@ -108,7 +104,120 @@ export function MoneyPage({ api }: { api: ApiClient }) {
       )}
       <LightningPanel api={api} assets={w.assets} />
       {w.spending && <SpendingRules spending={w.spending} assets={w.assets} />}
+      <RgbDetails api={api} wallet={w} />
     </section>
+  );
+}
+
+/** The last 10 token transfers, each opening into how RGB settled it; the full list and labels live in Books. */
+function MyTransactions({ api, assets }: { api: ApiClient; assets: WalletResponse['assets'] }) {
+  const load = useCallback(async () => recentTransfers((await api.transfers()).transfers, 10), [api]);
+  const { data, error, loading, reload } = useLoad(load);
+  return (
+    <>
+      <h3>My transactions</h3>
+      {error ? <ErrorBox error={error} retry={reload} /> : null}
+      {loading && !data ? <Loading text="Loading transactions…" /> : null}
+      {data && data.length === 0 && (
+        <Empty text="No transactions yet. Pay an invoice or get paid and it shows up here." />
+      )}
+      {data && data.length > 0 && (
+        <>
+          <TransfersTable api={api} transfers={data} assets={assets} />
+          <p>
+            <a href="#/books">All transactions, labels and the fiscal report: Books</a>
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
+const RGB_TERMS: [string, string][] = [
+  ['Token ID', 'The unique code of a token. Two tokens can share a name, never an ID: payments always use the ID.'],
+  [
+    'NIA',
+    'The token type (Non-Inflatable Asset): a fixed amount issued once, made of fungible units like dollars or euros.',
+  ],
+  ['Smallest unit', 'Amounts are stored in whole smallest units. With precision 6, 5000000 units are 5 tokens.'],
+  [
+    'Payment request',
+    'An “RGB invoice”: it names where the tokens go, hiding the receiver behind a blinded seal, and says how long it is valid.',
+  ],
+  [
+    'Seal',
+    'The Bitcoin output a token amount is tied to. Paying a token moves it to a new seal; Bitcoin only holds the proof, never the token data.',
+  ],
+  ['Sats', 'Bitcoin pays the network fee and carries the proofs. That is why a few sats must stay in the wallet.'],
+];
+
+/** The facts of the RGB wallet in one folded block: protocol, network, wallet engine, every token with its full ID. */
+export function RgbDetails({ api, wallet }: { api: ApiClient; wallet: WalletResponse }) {
+  const load = useCallback(() => api.health(), [api]);
+  const { data: health } = useLoad(load);
+  return (
+    <>
+      <h3>RGB technical details</h3>
+      <details style={box} data-testid="rgb-details">
+        <summary>Show the RGB facts of this wallet</summary>
+        <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px', margin: '12px 0' }}>
+          <dt>Protocol</dt>
+          <dd style={{ margin: 0 }}>RGB on Bitcoin v0.11.1</dd>
+          <dt>Network</dt>
+          <dd style={{ margin: 0 }}>{NETWORK_WORDS[wallet.network]}</dd>
+          <dt>Wallet engine</dt>
+          <dd style={{ margin: 0 }}>{BACKEND_WORDS[wallet.backend]}</dd>
+          {health?.wallet.blockHeight !== undefined && (
+            <>
+              <dt>Latest block</dt>
+              <dd style={{ margin: 0 }}>{health.wallet.blockHeight.toLocaleString()}</dd>
+            </>
+          )}
+          {wallet.address && (
+            <>
+              <dt>Bitcoin address</dt>
+              <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>
+                <code>{wallet.address}</code>
+              </dd>
+            </>
+          )}
+        </dl>
+        {wallet.assets.map((a) => (
+          <div key={a.assetId} style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="rgb-asset">
+            <strong>
+              {a.ticker} · {a.name}
+            </strong>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px', margin: '8px 0 0' }}>
+              <dt>Token ID</dt>
+              <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>
+                <code>{a.assetId}</code> <CopyButton value={a.assetId} what="Token ID" />
+              </dd>
+              <dt>Type</dt>
+              <dd style={{ margin: 0 }}>NIA (fungible, fixed supply)</dd>
+              <dt>Precision</dt>
+              <dd style={{ margin: 0 }}>
+                {a.precision} decimals (1 {a.ticker} = {(10 ** a.precision).toLocaleString()} smallest units)
+              </dd>
+              <dt>Settled</dt>
+              <dd style={{ margin: 0 }}>{a.balance.settled} smallest units</dd>
+              <dt>Spendable</dt>
+              <dd style={{ margin: 0 }}>{a.balance.spendable} smallest units</dd>
+              <dt>With incoming</dt>
+              <dd style={{ margin: 0 }}>{a.balance.future} smallest units</dd>
+            </dl>
+          </div>
+        ))}
+        <h4>What these words mean</h4>
+        <dl style={{ margin: 0 }}>
+          {RGB_TERMS.map(([term, text]) => (
+            <div key={term} style={{ marginBottom: 6 }}>
+              <dt style={{ fontWeight: 600 }}>{term}</dt>
+              <dd style={{ margin: 0, color: 'var(--wl-c-muted)' }}>{text}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </>
   );
 }
 

@@ -117,6 +117,8 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const live = liveAiView(events);
   const mood = moodForState(invoice.state);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
+  // Rule flags arrive before the summary is written (about 4 s later): show them instead of waiting for the report.
+  const liveFlags = events.flatMap((e) => (e.type === 'flag' ? [e.flag] : []));
   // A payment request without an amount: the user types it (the asset is the request's or the approved one).
   const pr = report?.kind === 'payment_request' ? report.paymentRequest : undefined;
   const openAmountAsset =
@@ -147,6 +149,18 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       </ol>
 
       <LiveAiPanel stage={live.stage} text={live.text} />
+
+      {!report && liveFlags.length > 0 && (
+        <div data-testid="live-flags">
+          <h3>Checks done so far</h3>
+          <p style={{ color: 'var(--wl-c-muted)', marginTop: 0 }}>The rules are finished; I am writing the summary.</p>
+          <ul>
+            {liveFlags.map((f) => (
+              <li key={`${f.code}-${f.message}`}>{f.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {toolCalls.length > 0 && (
         <div data-testid="tool-calls">

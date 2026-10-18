@@ -75,8 +75,8 @@ export function SettingsPage({ api }: { api: ApiClient }) {
                 Every payment needs your OK. Your safety limits are checked before anything is sent.
               </p>
               <p style={{ marginBottom: 0 }}>
-                <a href="#/settings/money">Your money, technically</a>: tokens, Bitcoin address, Lightning and safety
-                limits, each explained.
+                <a href="#/me">Me</a>: balance, transactions, Bitcoin address, Lightning, safety limits and the RGB
+                details, each explained.
               </p>
             </section>
           </div>

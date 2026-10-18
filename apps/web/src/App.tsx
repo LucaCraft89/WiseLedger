@@ -17,7 +17,7 @@ import { SchedulePage } from './SchedulePage.js';
 import { SettingsPage } from './SettingsPage.js';
 import { ThemeSwitch } from './ThemeSwitch.js';
 import { UploadPage } from './UploadPage.js';
-import { MoneyPage } from './WalletPage.js';
+import { MePage } from './WalletPage.js';
 
 /**
  * Hash routing: `#/` = Desk, `#/pay` (+ `/invoices`, `/scheduled`) = pay, `#/invoice/<id>` = one invoice,
@@ -178,8 +178,8 @@ export function App() {
                 />
               ) : hash === '#/ask' ? (
                 <ChatPage api={api} />
-              ) : hash === '#/settings/money' ? (
-                <MoneyPage api={api} />
+              ) : hash === '#/me' ? (
+                <MePage api={api} />
               ) : hash === '#/settings' ? (
                 <SettingsPage api={api} />
               ) : (

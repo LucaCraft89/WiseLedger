@@ -1,10 +1,11 @@
-// Navigation: six sections, same order everywhere. Old hashes keep working (they redirect).
+// Navigation: seven sections, same order everywhere. Old hashes keep working (they redirect).
 export const NAV = [
   { href: '#/', label: 'Desk' },
   { href: '#/pay', label: 'Pay' },
   { href: '#/get-paid', label: 'Get paid' },
   { href: '#/books', label: 'Books' },
   { href: '#/ask', label: 'Ask Wise' },
+  { href: '#/me', label: 'Me' },
   { href: '#/settings', label: 'Settings' },
 ] as const;
 
@@ -14,8 +15,9 @@ export function redirectFor(hash: string): string | null {
   if (wallet) {
     const rest = wallet[1] ?? '';
     if (rest.startsWith('get-paid')) return `#/get-paid${rest.slice('get-paid'.length)}`;
-    return '#/settings/money';
+    return '#/me';
   }
+  if (hash === '#/settings/money') return '#/me';
   if (hash === '#/chat') return '#/ask';
   if (hash === '#/invoices') return '#/pay/invoices';
   if (hash === '#/schedule') return '#/pay/scheduled';
@@ -30,6 +32,7 @@ export function sectionOf(hash: string): (typeof NAV)[number]['href'] {
   if (hash.startsWith('#/get-paid')) return '#/get-paid';
   if (hash.startsWith('#/books')) return '#/books';
   if (hash.startsWith('#/ask')) return '#/ask';
+  if (hash.startsWith('#/me')) return '#/me';
   if (hash.startsWith('#/settings')) return '#/settings';
   return '#/';
 }
