@@ -56,20 +56,20 @@ export const ERROR_WORDS: Record<string, string> = {
   InvoiceExpired: "The supplier's payment request expired — ask for a new one.",
   NoUtxo: 'The wallet is not ready to pay yet: it needs a few minutes to prepare its coins. Wait, then try again.',
   TransferFailed: 'The payment did not go through.',
-  SubmitTimeout: 'The payment was sent but we have no answer yet. We are checking — do NOT pay again.',
+  SubmitTimeout: 'The payment was sent but I have no answer yet. I am checking — do NOT pay again.',
   PolicyDenied:
     'Your spending rules do not allow this payment: the Tether WDK policy engine in the wallet refused it. Nothing was sent.',
   UnknownAsset: 'This wallet does not hold the token the supplier asks for.',
   InvalidInvoice: "The supplier's payment request is not valid. Ask them to send it again.",
   NetworkUnavailable:
-    'We could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
+    'I could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
   WalletLocked: 'Your wallet is locked. Enter your passphrase to unlock it.',
   WALLET_NOT_READY: 'Your wallet is not set up yet. Create or restore it first, then try again.',
   INVALID_MNEMONIC: 'These recovery words are not valid. Check the spelling and the order of each word.',
   PASSPHRASE_TOO_SHORT: 'This passphrase is too short. Choose a longer one.',
   ALREADY_SET_UP: 'This wallet is already set up. Reload the page to open it.',
   TOO_MANY_TRIES: 'Too many wrong passphrases. Wait a minute, then try again.',
-  NETWORK: 'We could not reach WiseLedger on this computer. Check that it is running, then try again.',
+  NETWORK: 'WiseLedger could not be reached on this computer. Check that it is running, then try again.',
   unknown_plan: 'This payment was not prepared by WiseLedger, so it was not sent.',
   not_confirmed: 'You have not confirmed this payment yet, so it was not sent.',
   hash_mismatch: 'The payment details changed after you confirmed, so nothing was sent. Please check them again.',
@@ -92,7 +92,11 @@ export function apiErrorWords(code: string, message: string, status?: number): s
 }
 
 export function errorWords(code: string | undefined, fallback?: string): string {
-  return (code && ERROR_WORDS[code]) || fallback || 'The payment failed.';
+  return (
+    (code && ERROR_WORDS[code]) ||
+    fallback ||
+    'The payment failed. Nothing is retried automatically: check My invoices before paying again.'
+  );
 }
 
 /** Failures before signing (the wallet's RELEASE_ON_FAILURE list) plus TREASURER_PARSE (nothing was sent). */

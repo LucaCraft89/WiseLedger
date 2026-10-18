@@ -48,3 +48,37 @@ export function checkWord(words: readonly string[], index: number, typed: string
   const want = words[index];
   return !!want && typed.trim().toLowerCase() === want.toLowerCase();
 }
+
+/** The owl's three introduction cards, shown once before the recovery-words screens. */
+export const INTRO_CARDS: readonly string[] = [
+  "I'm Wise. I keep your keys on this computer: your money stays yours.",
+  'I keep your books: invoices, payments, who you paid and why.',
+  'I read every invoice before you pay, and I never pay without your yes.',
+];
+
+const INTRO_KEY = 'wl-intro-seen';
+export type KeyValueStore = Pick<Storage, 'getItem' | 'setItem'>;
+
+export function introSeen(store: KeyValueStore | undefined = safeStorage()): boolean {
+  try {
+    return store?.getItem(INTRO_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markIntroSeen(store: KeyValueStore | undefined = safeStorage()): void {
+  try {
+    store?.setItem(INTRO_KEY, '1');
+  } catch {
+    /* private window: the cards may show again, which is harmless */
+  }
+}
+
+function safeStorage(): Storage | undefined {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}

@@ -49,7 +49,7 @@ export function FlagCard({ flag, anchor }: { flag: RiskFlag; anchor?: boolean })
       <div>{flag.message}</div>
       {flag.evidence && (
         <div style={{ fontSize: '0.85em', marginTop: 4 }} title={flag.evidence}>
-          What we saw:{' '}
+          What I saw:{' '}
           <q
             style={{
               fontFamily: 'ui-monospace, monospace',

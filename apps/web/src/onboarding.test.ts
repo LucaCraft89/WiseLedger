@@ -172,7 +172,7 @@ describe('fake onboarding', () => {
 describe('error copy for the new codes', () => {
   it('has plain words for the wallet and onboarding codes', () => {
     expect(errorWords('NetworkUnavailable')).toBe(
-      'We could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
+      'I could not reach the Bitcoin test network. Nothing was sent. Check your internet and try again.',
     );
     expect(errorWords('WalletLocked')).toBe('Your wallet is locked. Enter your passphrase to unlock it.');
     for (const code of ['WALLET_NOT_READY', 'INVALID_MNEMONIC', 'PASSPHRASE_TOO_SHORT', 'ALREADY_SET_UP']) {
@@ -295,6 +295,18 @@ describe('get paid: payment requests (A m4.s1 receive side)', () => {
     expect(html).toContain('Received');
     expect(html).toContain('data-tone="ok"');
     expect(html).toContain('Acme, refund October');
-    expect(html).toContain(`href="#/wallet/get-paid/${r.receiveId}"`);
+    expect(html).toContain(`href="#/get-paid/${r.receiveId}"`);
+  });
+});
+
+describe('the owl introduction cards', () => {
+  it('are three, and shown once', async () => {
+    const { INTRO_CARDS, introSeen, markIntroSeen } = await import('./lib/onboarding.js');
+    const mem = new Map<string, string>();
+    const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+    expect(INTRO_CARDS).toHaveLength(3);
+    expect(introSeen(store)).toBe(false);
+    markIntroSeen(store);
+    expect(introSeen(store)).toBe(true);
   });
 });

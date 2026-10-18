@@ -178,6 +178,16 @@ export const WalletReceiveRequest = z.object({
     .optional(),
   /** Who should pay or what for ("Acme, refund October"); shown in the payment request list (M4). */
   note: z.string().trim().max(120).optional(),
+  /** Who pays you ("Acme Srl"); `note` is then filled as "payer · purpose" for older readers. */
+  payer: z.string().trim().max(80).optional(),
+  /** What it is for ("October hosting"). */
+  purpose: z.string().trim().max(120).optional(),
+  /** How long the request stays valid, in seconds (1 h … 30 days; outside → 400). Wins over expiryMinutes. */
+  expirySec: z.number().int().positive().optional(),
+  /** Valid until this ISO time (1 h … 30 days from now; outside → 400). Use either this or expirySec. */
+  validUntil: IsoDateTime.optional(),
+  /** Where the request is made (default form; the web's invoice PDF says invoice_pdf). */
+  madeIn: z.enum(['form', 'invoice_pdf']).optional(),
 });
 export type WalletReceiveRequest = z.infer<typeof WalletReceiveRequest>;
 
@@ -384,6 +394,12 @@ export const FiscalQuery = z.object({
 });
 export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
+/** The product's one character: the owl. Every screen and prompt takes the name from here. */
+export const OWL_NAME = 'Wise';
+/** What the owl is doing, shown as a status chip next to the existing owl image (never a new drawing). */
+export const OwlMood = z.enum(['reading', 'thinking', 'all_good', 'stopped', 'waiting_bitcoin', 'paid']);
+export type OwlMood = z.infer<typeof OwlMood>;
+
 /** Route table, for clients and docs. */
 // GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
 export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed', 'cancelled']);
@@ -408,6 +424,12 @@ export const ReceiveRequestDto = z.object({
   archivedAt: z.string().optional(),
   /** True when it lists under "Older requests" (archived, closed > 24 h ago, or received > 7 days ago). */
   older: z.boolean().optional(),
+  /** Who pays (Get paid form "Who pays you?"). */
+  payer: z.string().optional(),
+  /** What it is for. */
+  purpose: z.string().optional(),
+  /** Where it was made: the Get paid form, the chat, or an invoice PDF. Absent on requests made before M5. */
+  madeIn: z.enum(['form', 'chat', 'invoice_pdf']).optional(),
 });
 export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
 
@@ -467,9 +489,11 @@ export const DeskNeedsKind = z.enum([
   'request_expiring',
   'low_fee_balance',
   'health_problem',
+  /** No Bitcoin for fees at all (below the cost of one RGB send): listed first. */
+  'no_fee_money',
 ]);
 export type DeskNeedsKind = z.infer<typeof DeskNeedsKind>;
-export const DeskLatelyKind = z.enum(['paid', 'received', 'blocked', 'scheduled']);
+export const DeskLatelyKind = z.enum(['paid', 'received', 'blocked', 'scheduled', 'checked']);
 export type DeskLatelyKind = z.infer<typeof DeskLatelyKind>;
 /** The one next step for an item: a button label and the app page it opens ("#/invoice/<id>"). */
 export const DeskAction = z.object({ label: z.string(), href: z.string() });
@@ -483,6 +507,13 @@ export const DeskNeedsItem = z.object({
   /** When it is due, expires or runs. */
   dueAt: IsoDateTime.optional(),
   action: DeskAction,
+  /** Base units the item is about (invoice amount, request amount). */
+  amount: BaseUnits.optional(),
+  assetId: z.string().optional(),
+  /** ok = nothing wrong, review = read the warnings, block = something stops you. */
+  tone: z.enum(['ok', 'review', 'block']).optional(),
+  /** Same as action.label (kept separate for the card button). */
+  actionLabel: z.string().optional(),
 });
 export type DeskNeedsItem = z.infer<typeof DeskNeedsItem>;
 export const DeskLatelyItem = z.object({
@@ -492,6 +523,9 @@ export const DeskLatelyItem = z.object({
   amount: BaseUnits.optional(),
   assetId: z.string().optional(),
   at: IsoDateTime,
+  /** Money in, out, or none (a stopped or checked invoice moved nothing). */
+  direction: z.enum(['in', 'out', 'none']).optional(),
+  stamp: z.enum(['PAID', 'STOPPED', 'CHECKED', 'SCHEDULED', 'RECEIVED']).optional(),
 });
 export type DeskLatelyItem = z.infer<typeof DeskLatelyItem>;
 export const DeskResponse = z.object({
@@ -520,11 +554,100 @@ export const DeskResponse = z.object({
     secondsAgo: z.number().int().nonnegative().optional(),
     text: z.string(),
   }),
+  /** busy = an analysis or payment is running now; attention = needsYou is not empty; quiet = nothing to do. */
+  mood: z.enum(['busy', 'attention', 'quiet']).optional(),
+  /** This calendar month (server local time). Invoices sent twice count once. */
+  month: z
+    .object({
+      invoicesRead: z.number().int().nonnegative(),
+      invoicesStopped: z.number().int().nonnegative(),
+      /** Sum of the amounts of the stopped invoices, per asset (base units). */
+      protectedAmount: z.array(z.object({ assetId: z.string(), amount: BaseUnits })),
+      paymentsMade: z.number().int().nonnegative(),
+      received: z.number().int().nonnegative(),
+    })
+    .optional(),
+  /** Last successful wallet sync (same as updated.at); absent before the first sync. */
+  syncedAt: IsoDateTime.optional(),
+  /** True once the user went through "I saved my recovery words" in onboarding. */
+  recoveryWordsSaved: z.boolean().optional(),
 });
 export type DeskResponse = z.infer<typeof DeskResponse>;
 
+// GET /api/books?assetId=&limit=&before= — the asset's ledger with a running balance, newest first.
+export const BooksQuery = z.object({
+  /** Default: the one payment asset (first NIA asset held). */
+  assetId: z.string().optional(),
+  /** Default 20, max 100. */
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  /** `nextBefore` of the previous page. */
+  before: z.string().optional(),
+});
+export type BooksQuery = z.infer<typeof BooksQuery>;
+export const BookStamp = z.enum(['PAID', 'RECEIVED', 'ISSUED', 'PENDING', 'FAILED']);
+export type BookStamp = z.infer<typeof BookStamp>;
+export const BookRow = z.object({
+  /** Settle time for settled rows, else the creation time. */
+  at: IsoDateTime,
+  kind: z.enum(['payment', 'receipt', 'issuance']),
+  /** Plain text built by code ("Paid Acme Srl", "Received from Beta Spa · October hosting"). */
+  title: z.string(),
+  counterparty: z.string().optional(),
+  in: BaseUnits.optional(),
+  out: BaseUnits.optional(),
+  /** Network fee in sats, when known. */
+  fee: z.string().optional(),
+  /** Settled balance after this row; null while pending or for a failed transfer. */
+  balanceAfter: BaseUnits.nullable(),
+  pending: z.boolean().optional(),
+  transferId: z.string().optional(),
+  invoiceId: z.string().optional(),
+  receiveId: z.string().optional(),
+  stamp: BookStamp,
+  labels: z.array(z.string()),
+});
+export type BookRow = z.infer<typeof BookRow>;
+export const BooksResponse = z.object({
+  assetId: z.string().optional(),
+  ticker: z.string().optional(),
+  precision: z.number().int().min(0).optional(),
+  /** wallet.assetBalance().settled; equals the newest settled row's balanceAfter. */
+  settledBalance: BaseUnits,
+  rows: z.array(BookRow),
+  nextBefore: z.string().optional(),
+});
+export type BooksResponse = z.infer<typeof BooksResponse>;
+
+// GET /api/receipts/:transferId — a settled payment (in or out) as a receipt; 404 for anything else.
+export const ReceiptResponse = z.object({
+  transferId: z.string(),
+  direction: z.enum(['in', 'out']),
+  payerName: z.string(),
+  payeeName: z.string(),
+  invoiceNumber: z.string().optional(),
+  amount: BaseUnits,
+  asset: z.object({ assetId: z.string(), ticker: z.string(), precision: z.number().int().min(0) }),
+  rail: z.enum(['onchain', 'lightning']),
+  txid: z.string().optional(),
+  paymentHash: z.string().optional(),
+  settledAt: IsoDateTime,
+  planId: z.string().optional(),
+  verdict: z.enum(['ok', 'review', 'block']).optional(),
+  invoiceId: z.string().optional(),
+  receiveId: z.string().optional(),
+  labels: z.array(z.string()),
+});
+export type ReceiptResponse = z.infer<typeof ReceiptResponse>;
+
+// GET /api/payees?q= — "Who pays you?" suggestions: payee book + earlier payers, max 8.
+export const PayeesResponse = z.object({ names: z.array(z.string()).max(8) });
+export type PayeesResponse = z.infer<typeof PayeesResponse>;
+
 export const API_ROUTES = {
   desk: 'GET /api/desk',
+  books: 'GET /api/books',
+  receipt: 'GET /api/receipts/:transferId',
+  payees: 'GET /api/payees',
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
   getInvoice: 'GET /api/invoices/:id',

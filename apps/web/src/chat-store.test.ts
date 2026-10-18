@@ -59,7 +59,7 @@ describe('chat retention', () => {
       href: '#/invoice/inv_1',
       label: 'Open the check',
     });
-    expect(toolLink({ name: 'label_transfer', ok: true })).toEqual({ href: '#/transfers', label: 'See transfers' });
+    expect(toolLink({ name: 'label_transfer', ok: true })).toEqual({ href: '#/books', label: 'See the books' });
     expect(toolLink({ name: 'create_receive_invoice', ok: false })).toBeNull();
     expect(receiveFromToolCall({ name: 'create_receive_invoice', ok: true, result: { rgbInvoice: 'rgb:x' } })).toBe(
       'rgb:x',

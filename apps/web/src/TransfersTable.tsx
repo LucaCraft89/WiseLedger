@@ -133,7 +133,7 @@ export function TransfersTable({
 }
 
 /** Label chips; click "+ Add label" → type → Enter saves, Esc cancels. × removes a label. */
-function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
+export function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: string; initial: string[] }) {
   const toast = useToast();
   const [labels, setLabels] = useState(initial);
   const [s, dispatch] = useReducer(labelEditReducer, { mode: 'idle' });
@@ -144,7 +144,7 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
       setLabels(res.labels);
       dispatch({ type: 'saved' });
     } catch (err) {
-      const msg = errorText(err, 'Could not save the label.');
+      const msg = errorText(err, 'I could not save the label. Try again in a moment.');
       dispatch({ type: 'failed', error: msg });
       toast(msg, 'error');
     }

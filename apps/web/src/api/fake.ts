@@ -31,6 +31,7 @@ import {
   sha256Hex,
   type TransferDto,
 } from './contracts.js';
+import { booksFromApi, deskFromApi, receiptFromApi } from './desk.js';
 import { createFakeOnboarding } from './fake-onboarding.js';
 
 const MONTHS = [
@@ -77,7 +78,7 @@ export function monthRange(message: string, now: Date = new Date()): { from: str
 /** Getting-started hints of the fake /api/health (the real server sends faucet and asset hints). */
 export const FAKE_HINTS = [
   'Demo mode: the pretend wallet already holds test TUSDT, so no faucet is needed.',
-  'Check an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
+  'Pay an invoice: upload any file. A name with "scam" shows a blocked invoice, "eur" one to review.',
 ];
 
 export interface FakeOptions {
@@ -139,6 +140,19 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
   const labels = new MemoryLabelStore();
   const transferInvoice = new Map<string, string>();
   const receiveList: ReceiveRequestDto[] = [];
+  // Demo backend only (nothing here is real): a pretend payer pays each open request 6 s after it was made and it
+  // arrives 6 s later, so the stamp can be seen going OPEN → ARRIVING → PAID without a second wallet.
+  const demoPayer = (r: ReceiveRequestDto) => {
+    const age = Date.now() - Date.parse(r.createdAt);
+    const to = (status: 'incoming' | 'received') =>
+      Object.assign(r, {
+        status,
+        updatedAt: new Date().toISOString(),
+        ...(status === 'received' ? { receivedAmount: r.amount ?? '10000000' } : {}),
+      });
+    if (r.status === 'waiting' && age > 6000 && Date.parse(r.expiresAt) > Date.now()) to('incoming');
+    if (r.status === 'incoming' && age > 12_000) to('received');
+  };
   let jobSeq = 0;
 
   // Two past payments, so the transfers table, labels and "my last payment" have something to work with.
@@ -359,8 +373,17 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     emit(r, { type: 'stage', invoiceId: id, at: at(), stage: 'done', status: 'end' });
   }
 
-  return {
+  const client: ApiClient = {
     mode: 'fake',
+    desk: () => deskFromApi(client),
+    books: (q) => booksFromApi(client, q),
+    receipt: (id) => receiptFromApi(client, id),
+    async payees(q = '') {
+      const names = (await client.receives({ status: 'all', limit: 100 })).receives
+        .map((r) => r.payer)
+        .filter((n): n is string => typeof n === 'string' && n.toLowerCase().includes(q.toLowerCase()));
+      return { names: [...new Set(names)].slice(0, 8) };
+    },
     async health() {
       return {
         ok: true,
@@ -493,7 +516,11 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       const inv = await wallet.createReceiveInvoice({
         ...(req.assetId ? { assetId: req.assetId } : {}),
         ...(req.amount ? { amount: req.amount } : {}),
-        expirySec: (req.expiryMinutes ?? 60) * 60,
+        expirySec:
+          req.expirySec ??
+          (req.validUntil
+            ? Math.max(1, Math.round((Date.parse(req.validUntil) - Date.now()) / 1000))
+            : (req.expiryMinutes ?? 60) * 60),
       });
       // Strictly increasing, so the `before` cursor never skips two requests made in the same millisecond.
       const last = receiveList[0] ? Date.parse(receiveList[0].createdAt) : 0;
@@ -508,7 +535,12 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
         expiresAt: inv.expiresAt,
         ...(inv.assetId ? { assetId: inv.assetId } : {}),
         ...(inv.amount ? { amount: inv.amount } : {}),
-        ...(req.note ? { note: req.note } : {}),
+        ...(req.payer ? { payer: req.payer } : {}),
+        ...(req.purpose ? { purpose: req.purpose } : {}),
+        ...(req.payer || req.purpose || req.note
+          ? { note: [req.payer, req.purpose].filter(Boolean).join(' · ') || (req.note ?? '') }
+          : {}),
+        madeIn: req.madeIn ?? 'form',
       });
       return {
         rgbInvoice: inv.rgbInvoice,
@@ -519,6 +551,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
       };
     },
     async receives(q = {}) {
+      receiveList.forEach(demoPayer);
       // Same rules as the server: expired after expiresAt; "older" = archived or closed for a day.
       const now = Date.now();
       for (const r of receiveList) {
@@ -544,12 +577,13 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     },
     async receiveGet(id) {
       const r = receiveList.find((x) => x.receiveId === id);
-      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
+      demoPayer(r);
       return { ...r };
     },
     async receiveCancel(id) {
       const r = receiveList.find((x) => x.receiveId === id);
-      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
       if (r.status === 'incoming')
         throw new ApiCallError('PAYMENT_ON_ITS_WAY', 'Someone is already paying this request. Wait for it to arrive.');
       if (r.status !== 'waiting')
@@ -560,7 +594,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     },
     async receiveArchive(id) {
       const r = receiveList.find((x) => x.receiveId === id);
-      if (!r) throw new ApiCallError('NOT_FOUND', 'We could not find this payment request.');
+      if (!r) throw new ApiCallError('NOT_FOUND', 'I could not find this payment request.');
       if (r.status === 'waiting' || r.status === 'incoming') {
         throw new ApiCallError(
           'STILL_OPEN',
@@ -619,7 +653,7 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     async transfer(transferId) {
       const dto = (await transferList()).find((x) => x.transferId === transferId);
       const t = await wallet.getTransfer(transferId);
-      if (!dto || !t) throw new ApiCallError('NOT_FOUND', 'We could not find this payment in your wallet.');
+      if (!dto || !t) throw new ApiCallError('NOT_FOUND', 'I could not find this payment.');
       const a = t.assetId ? (await wallet.listAssets()).find((x) => x.assetId === t.assetId) : undefined;
       const invoiceId = transferInvoice.get(transferId);
       const inv = invoiceId ? recs.get(invoiceId) : undefined;
@@ -687,4 +721,5 @@ export function createFakeClient(opts: FakeOptions = {}): ApiClient {
     fiscalUrl: () => null,
     ...onboarding,
   };
+  return client;
 }

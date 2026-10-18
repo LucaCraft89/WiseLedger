@@ -30,6 +30,20 @@ export interface ReceiveRequest {
   archivedAt?: string;
   /** Lists under "Older requests": archived, closed for more than 24 h, or received more than 7 days ago. */
   older: boolean;
+  payer?: string;
+  purpose?: string;
+  madeIn?: ReceiveMadeIn;
+}
+
+export type ReceiveMadeIn = 'form' | 'chat' | 'invoice_pdf';
+
+/** What the user said about a request when making it. */
+export interface ReceiveMeta {
+  payer?: string;
+  purpose?: string;
+  /** Free text; filled as "payer · purpose" when absent, for readers that only know `note`. */
+  note?: string;
+  madeIn?: ReceiveMadeIn;
 }
 
 interface Row {
@@ -48,6 +62,9 @@ interface Row {
   updated_at: string;
   cancelled_at: string | null;
   archived_at: string | null;
+  payer: string | null;
+  purpose: string | null;
+  made_in: string | null;
 }
 
 const OPEN: readonly ReceiveStatus[] = ['waiting', 'incoming'];
@@ -95,11 +112,16 @@ export class SqliteReceiveStore {
       ...(r.received_amount ? { receivedAmount: r.received_amount } : {}),
       ...(r.cancelled_at ? { cancelledAt: r.cancelled_at } : {}),
       ...(r.archived_at ? { archivedAt: r.archived_at } : {}),
+      ...(r.payer ? { payer: r.payer } : {}),
+      ...(r.purpose ? { purpose: r.purpose } : {}),
+      ...(r.made_in ? { madeIn: r.made_in as ReceiveMadeIn } : {}),
     };
   }
 
   /** Remembers an invoice the wallet just created. */
-  add(inv: ReceiveInvoice, note?: string): ReceiveRequest {
+  add(inv: ReceiveInvoice, meta: ReceiveMeta | string = {}): ReceiveRequest {
+    const m: ReceiveMeta = typeof meta === 'string' ? { note: meta } : meta;
+    const note = m.note ?? ([m.payer, m.purpose].filter(Boolean).join(' · ') || undefined);
     // Strictly increasing created_at: the paging cursor (`before` = createdAt of the last row) never skips a request
     // made in the same millisecond as another.
     const last = (this.store.db.prepare('SELECT MAX(created_at) AS at FROM receives').get() as { at: string | null })
@@ -108,8 +130,8 @@ export class SqliteReceiveStore {
     const receiveId = `rcv_${randomUUID().replaceAll('-', '').slice(0, 16)}`;
     this.store.db
       .prepare(
-        `INSERT INTO receives (receive_id, rgb_invoice, recipient_id, asset_id, amount, note, status, created_at, expires_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?)`,
+        `INSERT INTO receives (receive_id, rgb_invoice, recipient_id, asset_id, amount, note, status, created_at, expires_at, updated_at, payer, purpose, made_in)
+         VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         receiveId,
@@ -121,6 +143,9 @@ export class SqliteReceiveStore {
         at,
         inv.expiresAt,
         at,
+        m.payer ?? null,
+        m.purpose ?? null,
+        m.madeIn ?? null,
       );
     return this.get(receiveId) as ReceiveRequest;
   }
@@ -149,6 +174,17 @@ export class SqliteReceiveStore {
         .prepare(`SELECT 1 FROM receives WHERE status IN ('waiting', 'incoming') AND created_at >= ? LIMIT 1`)
         .get(since) !== undefined
     );
+  }
+
+  /** Distinct earlier payers whose name contains `q` (case-insensitive), most recent first. */
+  payers(q = '', max = 8): string[] {
+    const rows = this.store.db
+      .prepare(
+        `SELECT payer, MAX(created_at) AS at FROM receives WHERE payer IS NOT NULL AND instr(lower(payer), lower(?)) > 0
+         GROUP BY lower(payer) ORDER BY at DESC LIMIT ?`,
+      )
+      .all(q, max) as { payer: string }[];
+    return rows.map((r) => r.payer);
   }
 
   /** Every request, newest first (tests, small lists). */

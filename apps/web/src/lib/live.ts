@@ -1,4 +1,4 @@
-import type { AppEvent, Stage, ToolCallEvent } from '../api/contracts.js';
+import type { AnalysisStep, AppEvent, Stage, ToolCallEvent } from '../api/contracts.js';
 import { eventKey } from './format.js';
 
 /** Characters of live AI text kept on screen (the tail). */
@@ -11,13 +11,15 @@ export const LIVE_STAGE_TEXT: Partial<Record<Stage, { title: string; detail: str
     title: 'Extracting the details…',
     detail: 'The local AI is reading the invoice fields: supplier, amount, due date, payment details.',
   },
-  checking: { title: 'Checking the safety rules…', detail: 'Comparing the invoice with your history and our rules.' },
+  checking: { title: 'Checking the safety rules…', detail: 'Comparing the invoice with your history and my rules.' },
   summarizing: { title: 'Writing the summary…', detail: 'The local AI is writing a summary in plain words.' },
 };
 
 export interface LiveAiView {
   /** Stage the Analyst is working on now; undefined when it is not working. */
   stage?: Stage;
+  /** The finer Analyst step (A's StageEvent.step), when the server sends it. */
+  step?: AnalysisStep;
   /** Analyst tokens received during the current stage (last LIVE_TEXT_CAP chars). */
   text: string;
   /** True once the analysis finished (or failed). */
@@ -30,12 +32,12 @@ export function liveAiView(events: readonly AppEvent[]): LiveAiView {
   for (const e of events) {
     if (e.type === 'stage') {
       if (e.stage === 'analyzed' || e.status === 'error') {
-        view = { ...view, stage: undefined, finished: true };
+        view = { ...view, stage: undefined, step: undefined, finished: true };
       } else if (e.status === 'start' && LIVE_STAGE_TEXT[e.stage]) {
-        view = { stage: e.stage, text: '', finished: false };
+        view = { stage: e.stage, ...(e.step ? { step: e.step } : {}), text: '', finished: false };
       } else if (e.status === 'start') {
         // Later stages (planning, executing) belong to the Treasurer.
-        view = { ...view, stage: undefined };
+        view = { ...view, stage: undefined, step: undefined };
       }
     } else if (e.type === 'token' && e.agent === 'analyst') {
       view = { ...view, text: (view.text + e.text).slice(-LIVE_TEXT_CAP) };

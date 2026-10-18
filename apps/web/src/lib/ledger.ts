@@ -148,9 +148,8 @@ export function toolLink(c: Pick<ToolCall, 'name' | 'ok' | 'result'>): { href: s
     const id = (c.result as { invoiceId?: unknown } | undefined)?.invoiceId;
     return typeof id === 'string' ? { href: `#/invoice/${encodeURIComponent(id)}`, label: 'Open the check' } : null;
   }
-  if (c.name === 'label_transfer' || c.name === 'list_transfers')
-    return { href: '#/transfers', label: 'See transfers' };
-  if (c.name === 'get_balance') return { href: '#/wallet', label: 'Open Wallet' };
+  if (c.name === 'label_transfer' || c.name === 'list_transfers') return { href: '#/books', label: 'See the books' };
+  if (c.name === 'get_balance') return { href: '#/', label: 'Open the Desk' };
   return null;
 }
 

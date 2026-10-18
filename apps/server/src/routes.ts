@@ -1,10 +1,12 @@
 // REST + SSE routes from core API_ROUTES. Requests are validated with the core zod DTOs.
 
-import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, TranscribeError, type Transcriber } from 'ai';
+import { MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, safeName, TranscribeError, type Transcriber } from 'ai';
 import {
   API_ROUTES,
   type ApiError,
   type AppEvent,
+  BooksQuery,
+  type BooksResponse,
   type BtcTransactionDto,
   type BtcTransactionsResponse,
   ChatRequest,
@@ -23,6 +25,8 @@ import {
   isWalletError,
   type LightningStatusResponse,
   type LlmInfo,
+  type PayeesResponse,
+  type ReceiptResponse,
   type ReceiveRequestDto,
   ReceivesListQuery,
   type ReceivesListResponse,
@@ -54,8 +58,10 @@ import {
   M3_ROUTES,
   ScheduleListQuery,
 } from './api-local.js';
+import { bookRows, booksPage, buildReceipt, defaultAsset, finalBalance } from './books.js';
 import { buildDesk } from './desk.js';
 import type { WalletFiscalService } from './fiscal.js';
+import { StoreHistory } from './history.js';
 import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
 import { healthHints, NOT_READY_MESSAGES, type WalletHolder } from './onboarding.js';
@@ -84,6 +90,8 @@ export interface RouteDeps {
   problems: () => string[];
   /** Largest accepted upload in MB. */
   uploadMaxMb: number;
+  /** Below this many sats no RGB send fits (Desk no_fee_money). */
+  feeMinSats?: number;
   /** Background sync state (nulls on the mock wallet). */
   walletSync: () => WalletSyncState;
   /** B's on-device speech-to-text (Parakeet); the text only fills the chat box. */
@@ -158,6 +166,40 @@ export function toBtcTransactions(raw: unknown): BtcTransactionDto[] {
     });
   }
   return out.sort((a, b) => b.at - a.at).map(({ at: _at, ...dto }) => dto);
+}
+
+/** A payment request stays valid 1 h … 30 days (rgb-lib needs an expiry; longer ones only clutter the proxy). */
+export const RECEIVE_MIN_SEC = 3600;
+export const RECEIVE_MAX_SEC = 30 * 86_400;
+
+/** expirySec, else validUntil, else expiryMinutes (≤ 7 days), else 24 h; plain 400 outside 1 h … 30 days. */
+export function receiveExpirySec(
+  body: Pick<WalletReceiveRequest, 'expirySec' | 'validUntil' | 'expiryMinutes'>,
+  now = Date.now(),
+): number {
+  const sec =
+    body.expirySec ??
+    (body.validUntil !== undefined
+      ? Math.round((Date.parse(body.validUntil) - now) / 1000)
+      : (body.expiryMinutes ?? 24 * 60) * 60);
+  // A minute of slack: "valid for 1 hour" picked in the form arrives a few seconds short.
+  if (!(sec >= RECEIVE_MIN_SEC - 60 && sec <= RECEIVE_MAX_SEC + 60)) {
+    throw new ApiFailure(
+      400,
+      'EXPIRY_OUT_OF_RANGE',
+      'A payment request can stay valid from 1 hour to 30 days. Pick a time in that range.',
+    );
+  }
+  return Math.min(RECEIVE_MAX_SEC, Math.max(RECEIVE_MIN_SEC, sec));
+}
+
+/** The wallet's Bitcoin transactions when the backend exposes them ([] otherwise; never fails a screen). */
+function btcTransactions(wallet: WalletPort): BtcTransactionDto[] {
+  try {
+    return toBtcTransactions((wallet as { btcTransactions?: () => unknown }).btcTransactions?.());
+  } catch {
+    return [];
+  }
 }
 
 function isTooLarge(err: unknown): boolean {
@@ -304,10 +346,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // Money Desk home: local state only (no model call, no wallet sync), so it answers in milliseconds.
   route(app, API_ROUTES.desk, async (): Promise<DeskResponse> => {
     const ready = deps.holder.state === 'ready';
-    const [assets, transfers, pendingJobs] = await Promise.all([
+    const [assets, transfers, pendingJobs, runningJobs, recoveryWordsSaved] = await Promise.all([
       ready ? wallet.listAssets().catch(() => []) : Promise.resolve([]),
       ready ? wallet.listTransfers().catch(() => []) : Promise.resolve([]),
       deps.jobs.list({ status: 'pending' }),
+      deps.jobs.list({ status: 'running' }),
+      deps.holder.seedShown(),
     ]);
     if (ready) deps.receives.reconcile(transfers);
     const sats = ready ? btcBalanceSats(wallet) : undefined;
@@ -317,12 +361,87 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       invoices: store.list(),
       receives: deps.receives.list(),
       pendingJobs,
+      runningJobs: runningJobs.length,
       transfers,
       assets,
+      recoveryWordsSaved,
+      ...(deps.feeMinSats !== undefined ? { feeMinSats: deps.feeMinSats } : {}),
       ...(sats !== undefined ? { feeSats: Number(sats) } : {}),
       problems: [...notReady, ...deps.problems()],
       lastSyncAt: deps.walletSync().lastSyncAt,
     });
+  });
+
+  // Books: the asset's ledger with a running settled balance, newest first (computed on every call).
+  route(app, API_ROUTES.books, async (req): Promise<BooksResponse> => {
+    const q = BooksQuery.parse(req.query ?? {});
+    const assets = await wallet.listAssets();
+    const asset = q.assetId
+      ? assets.find((a) => a.assetId === q.assetId)
+      : defaultAsset(assets, deps.limits?.assetAllowlist);
+    if (!asset) {
+      if (q.assetId)
+        throw new ApiFailure(
+          404,
+          'UNKNOWN_ASSET',
+          'This wallet holds no such token. Open Settings › Your money, technically to see your tokens.',
+        );
+      return { settledBalance: '0', rows: [] };
+    }
+    const [transfers, balance] = await Promise.all([wallet.listTransfers(), wallet.assetBalance(asset.assetId)]);
+    const fees = new Map(btcTransactions(wallet).map((b) => [b.txid, b.feeSats]));
+    const rows = await bookRows(transfers, asset.assetId, deps, (txid) => {
+      const f = fees.get(txid);
+      return f && f !== '0' ? f : undefined;
+    });
+    if (finalBalance(rows) !== balance.settled) {
+      app.log.warn(
+        { assetId: asset.assetId, books: finalBalance(rows), settled: balance.settled },
+        'Books do not add up to the wallet balance',
+      );
+    }
+    return {
+      assetId: asset.assetId,
+      ticker: asset.ticker,
+      precision: asset.precision,
+      settledBalance: balance.settled,
+      ...booksPage(rows, { ...(q.limit ? { limit: q.limit } : {}), ...(q.before ? { before: q.before } : {}) }),
+    };
+  });
+
+  // A receipt for a settled payment (in or out); the web renders it and makes the PDF.
+  route(app, API_ROUTES.receipt, async (req): Promise<ReceiptResponse> => {
+    const id = (req.params as { transferId: string }).transferId;
+    const [t, assets] = await Promise.all([wallet.getTransfer(id), wallet.listAssets()]);
+    const receipt = await buildReceipt(t, assets, deps);
+    if (!receipt)
+      throw new ApiFailure(
+        404,
+        'NO_RECEIPT',
+        'There is no receipt for this payment: only settled payments have one. Wait until it shows as paid, then try again.',
+      );
+    return receipt;
+  });
+
+  // "Who pays you?" suggestions: names from the payee book and earlier payers, max 8.
+  const history = new StoreHistory(store);
+  route(app, API_ROUTES.payees, async (req): Promise<PayeesResponse> => {
+    const q = String((req.query as { q?: unknown } | undefined)?.q ?? '')
+      .trim()
+      .slice(0, 80);
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const book = (await history.payeeBook()).map((e) => e.name).reverse();
+    for (const raw of [...deps.receives.payers(q), ...book]) {
+      const name = safeName(raw); // instruction-like names never come back as suggestions
+      const key = name.toLowerCase();
+      if (names.length === 8) break;
+      if (name === '[name hidden]' || name === 'Unknown supplier' || seen.has(key) || !key.includes(q.toLowerCase()))
+        continue;
+      seen.add(key);
+      names.push(name);
+    }
+    return { names };
   });
 
   route(app, API_ROUTES.createInvoice, async (req, reply): Promise<CreateInvoiceResponse> => {
@@ -448,27 +567,27 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     };
   });
 
-  route(app, API_ROUTES.walletBtc, async (): Promise<BtcTransactionsResponse> => {
-    const w = wallet as { btcTransactions?: () => unknown };
-    let raw: unknown;
-    try {
-      raw = w.btcTransactions?.();
-    } catch {
-      raw = undefined; // the Bitcoin list is a read-only extra: never fail the wallet screen over it
-    }
-    return { transactions: toBtcTransactions(raw) };
-  });
+  route(
+    app,
+    API_ROUTES.walletBtc,
+    async (): Promise<BtcTransactionsResponse> => ({ transactions: btcTransactions(wallet) }),
+  );
 
   route(app, API_ROUTES.walletReceive, async (req): Promise<WalletReceiveResponse> => {
     const body = WalletReceiveRequest.parse(req.body ?? {});
     const inv = await wallet.createReceiveInvoice({
       // Default 24 h; no assetId by default, so the payer chooses the asset (amount optional too).
-      expirySec: (body.expiryMinutes ?? 24 * 60) * 60,
+      expirySec: receiveExpirySec(body),
       ...(body.assetId ? { assetId: body.assetId } : {}),
       ...(body.amount ? { amount: body.amount } : {}),
     });
     // Remembered so the app can tell when it is paid (matched after each wallet sync).
-    const stored = deps.receives.add(inv, body.note);
+    const stored = deps.receives.add(inv, {
+      madeIn: body.madeIn ?? 'form',
+      ...(body.payer ? { payer: body.payer } : {}),
+      ...(body.purpose ? { purpose: body.purpose } : {}),
+      ...(body.note ? { note: body.note } : {}),
+    });
     return {
       rgbInvoice: inv.rgbInvoice,
       expiresAt: inv.expiresAt,

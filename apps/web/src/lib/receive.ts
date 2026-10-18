@@ -28,7 +28,7 @@ export function whyNotUsable(r: Pick<ReceiveRequestDto, 'status' | 'cancelledAt'
       return 'Someone is paying it right now: wait for the payment to arrive.';
     case 'received':
       return r.cancelledAt
-        ? 'It was paid: the money arrived after you cancelled it, and it is in your wallet.'
+        ? 'It was paid: the money arrived after you cancelled it, and it is in your money.'
         : 'It was paid: a payment request is used once.';
     case 'expired':
       return 'It expired before anyone paid it. Make a new one to get paid.';
@@ -73,15 +73,15 @@ export function mergePage<T extends { receiveId: string }>(list: readonly T[], p
 }
 
 /** Hash of the Get paid detail view. */
-export const receiveHref = (receiveId: string): string => `#/wallet/get-paid/${encodeURIComponent(receiveId)}`;
+export const receiveHref = (receiveId: string): string => `#/get-paid/${encodeURIComponent(receiveId)}`;
 /** Hash of the Get paid form pre-filled like an old request. */
-export const likeHref = (receiveId: string): string => `#/wallet/get-paid?like=${encodeURIComponent(receiveId)}`;
+export const likeHref = (receiveId: string): string => `#/get-paid?like=${encodeURIComponent(receiveId)}`;
 
-/** "#/wallet/get-paid/rcv_1" → rcv_1; "#/wallet/get-paid?like=rcv_1" → { like: rcv_1 }. */
+/** "#/get-paid/rcv_1" → rcv_1; "#/get-paid?like=rcv_1" → { like: rcv_1 }. */
 export function parseGetPaid(hash: string): { receiveId?: string; like?: string } {
-  const detail = /^#\/wallet\/get-paid\/([^?/]+)$/.exec(hash)?.[1];
+  const detail = /^#\/get-paid\/([^?/]+)$/.exec(hash)?.[1];
   if (detail) return { receiveId: decodeURIComponent(detail) };
-  const like = /^#\/wallet\/get-paid\?like=([^&]+)$/.exec(hash)?.[1];
+  const like = /^#\/get-paid\?like=([^&]+)$/.exec(hash)?.[1];
   return like ? { like: decodeURIComponent(like) } : {};
 }
 
