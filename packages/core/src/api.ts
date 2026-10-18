@@ -82,6 +82,17 @@ export const ConfirmRequest = z.object({
 });
 export type ConfirmRequest = z.infer<typeof ConfirmRequest>;
 
+// POST /api/invoices/:id/amount — open-amount payment request: the user types the amount before confirming.
+// Validated by the server (> 0, ≤ payment cap, ≤ spendable); returns the plan and sentence to confirm.
+export const SetAmountRequest = z.object({ amount: BaseUnits });
+export type SetAmountRequest = z.infer<typeof SetAmountRequest>;
+export const SetAmountResponse = z.object({
+  invoiceId: z.string(),
+  plan: PaymentPlanDto,
+  confirmationSentence: z.string(),
+});
+export type SetAmountResponse = z.infer<typeof SetAmountResponse>;
+
 export const ConfirmResponse = z.object({
   invoiceId: z.string(),
   state: InvoiceStateDto,
@@ -175,6 +186,8 @@ export const WalletReceiveResponse = z.object({
   expiresAt: IsoDateTime,
   assetId: z.string().optional(),
   amount: BaseUnits.optional(),
+  /** The stored request (open it again under Wallet › Get paid, #/wallet/get-paid/<receiveId>). */
+  receiveId: z.string().optional(),
 });
 export type WalletReceiveResponse = z.infer<typeof WalletReceiveResponse>;
 
@@ -373,7 +386,7 @@ export type FiscalQuery = z.infer<typeof FiscalQuery>;
 
 /** Route table, for clients and docs. */
 // GET /api/wallet/receives (M4): payment requests handed out, newest first, with their incoming transfer.
-export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed']);
+export const ReceiveStatus = z.enum(['waiting', 'incoming', 'received', 'expired', 'failed', 'cancelled']);
 export type ReceiveStatus = z.infer<typeof ReceiveStatus>;
 export const ReceiveRequestDto = z.object({
   receiveId: z.string(),
@@ -389,9 +402,33 @@ export const ReceiveRequestDto = z.object({
   createdAt: z.string(),
   expiresAt: z.string(),
   updatedAt: z.string(),
+  /** Set when the user cancelled it; with status `received` the money arrived after the cancel. */
+  cancelledAt: z.string().optional(),
+  /** Set when the user archived it (it then lists under "Older requests"). */
+  archivedAt: z.string().optional(),
+  /** True when it lists under "Older requests" (archived, closed > 24 h ago, or received > 7 days ago). */
+  older: z.boolean().optional(),
 });
 export type ReceiveRequestDto = z.infer<typeof ReceiveRequestDto>;
-export const ReceivesListResponse = z.object({ receives: z.array(ReceiveRequestDto) });
+
+/** Filter groups for GET /api/wallet/receives?status=: open = waiting + incoming, paid = received, closed = the rest. */
+export const ReceiveFilter = z.enum(['open', 'paid', 'closed', 'all']);
+export type ReceiveFilter = z.infer<typeof ReceiveFilter>;
+// GET /api/wallet/receives?status=&archived=&limit=&before= — newest first, cursor = createdAt of the last row.
+export const ReceivesListQuery = z.object({
+  status: ReceiveFilter.optional(),
+  /** "1" = only "Older requests", "0" (default) = the main list. */
+  archived: z.enum(['0', '1']).optional(),
+  /** Default 20, max 100. */
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  before: z.string().optional(),
+});
+export type ReceivesListQuery = z.infer<typeof ReceivesListQuery>;
+export const ReceivesListResponse = z.object({
+  receives: z.array(ReceiveRequestDto),
+  /** Present when there are more rows: pass it as `before` for the next page. */
+  nextBefore: z.string().optional(),
+});
 export type ReceivesListResponse = z.infer<typeof ReceivesListResponse>;
 
 // POST /api/agent/transcribe: body = raw audio bytes (Content-Type audio/wav, 16 kHz mono preferred), max 2 MB / 30 s.
@@ -427,9 +464,13 @@ export const API_ROUTES = {
   invoiceEvents: 'GET /api/invoices/:id/events',
   confirmInvoice: 'POST /api/invoices/:id/confirm',
   rejectInvoice: 'POST /api/invoices/:id/reject',
+  setInvoiceAmount: 'POST /api/invoices/:id/amount',
   wallet: 'GET /api/wallet',
   walletReceive: 'POST /api/wallet/receive',
   walletReceives: 'GET /api/wallet/receives',
+  walletReceiveGet: 'GET /api/wallet/receives/:receiveId',
+  walletReceiveCancel: 'POST /api/wallet/receives/:receiveId/cancel',
+  walletReceiveArchive: 'POST /api/wallet/receives/:receiveId/archive',
   walletLightning: 'GET /api/wallet/lightning',
   walletBtc: 'GET /api/wallet/btc',
   transfers: 'GET /api/transfers',

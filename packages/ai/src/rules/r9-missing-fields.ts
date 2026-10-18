@@ -11,7 +11,9 @@ const KEY_FIELDS: { field: string; label: string }[] = [
   { field: 'payment.rgbInvoice', label: 'payment request' },
 ];
 
-export const r9MissingFields: Rule = ({ extraction }) => {
+export const r9MissingFields: Rule = ({ kind, extraction }) => {
+  // A payment request has no supplier, number or total to miss (the report says so in plain words).
+  if (kind === 'payment_request') return [];
   const flags: RiskFlag[] = [];
   const missing = [
     !extraction.issuer.name && 'supplier name',

@@ -46,6 +46,28 @@ The product is written from scratch during the hackathon, and its test asset is 
 ## How to run
 Everything runs on your own machine: the AI model, the wallet and the app. Only the Bitcoin test network (Mutinynet) is reached over the internet.
 
+### Quick start (copy-paste, checked from a fresh clone on 18 Oct 2026)
+```bash
+# 0. Check the machine first: must print linux x64 / linux arm64 / darwin arm64, glibc 2.38+ and Node v22
+node -e "console.log(process.platform, process.arch, process.version)"; ldd --version 2>/dev/null | head -1
+
+# 1. Get the code and the tools (Node 22 + pnpm 12.11.2, pinned in package.json)
+git clone https://github.com/LucaCraft89/WiseLedger && cd WiseLedger
+nvm install 22 && nvm use 22
+corepack enable || npm install -g pnpm@12.11.2
+pnpm install                  # ~10 s with a warm cache; RUN IT AGAIN AFTER EVERY git pull
+pnpm check                    # must end with "secret-scan: ok"
+pnpm demo:mock                # must end with "All three paths behaved"
+
+# 2. Real app (terminal 1): QVAC + RGB wallet on Mutinynet
+cp .env.example .env          # then set ASSET_ALLOWLIST (step 6 below)
+pnpm dev                      # server :8787 + web http://localhost:5173
+
+# 3. The supplier's wallet (terminal 2), so payments to it settle
+pnpm -F wallet payee watch
+```
+UI only, no chain and no AI (any machine, also Intel Mac / plain Windows): set `LLM_PROVIDER=mock` and `WALLET_BACKEND=mock` in `.env`, then `pnpm dev`.
+
 ### 1. Prerequisites
 | Need | Why |
 |---|---|
@@ -101,9 +123,10 @@ Optional: `pnpm wallet:smoke -- --pay` makes one real 5 TUSDT transfer payer →
 ### 7. Run
 ```bash
 pnpm demo:prepare            # fresh RGB invoices from the supplier wallet + 4 demo invoice PDFs in .data/demo/
-pnpm -F wallet payee watch & pnpm dev    # supplier side + server (:8787) and web → http://localhost:5173
+pnpm dev                     # terminal 1: server (:8787) and web → http://localhost:5173
+pnpm -F wallet payee watch    # terminal 2: the supplier side (accepts payments)
 ```
-The first start downloads the QVAC model (~2.6 GB, once) and the speech model on the first voice note. `http://localhost:8787/api/health` lists anything still missing (test sats, asset, indexer, proxy, model) in plain words; the app shows the same at the top of the page. One Ctrl+C stops both.
+The first start downloads the QVAC model (~2.6 GB, once) and the speech model on the first voice note. `http://localhost:8787/api/health` lists anything still missing (test sats, asset, indexer, proxy, model) in plain words; the app shows the same at the top of the page. Ctrl+C in each terminal stops it.
 
 ### 8. First demo
 Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sentence, watch the RGB transfer settle (explorer link). Then upload the scam, duplicate and injection invoices: each is blocked with a plain reason. Ask the Treasurer things like "how much do I have?", "create an invoice for 5 TUSDT" or "pay the Acme invoice tomorrow at 9".
@@ -115,6 +138,13 @@ Upload `.data/demo/1-good-acme.pdf`, read the Analyst's report, confirm the sent
 ### Troubleshooting
 | Symptom | Fix |
 |---|---|
+| `Cannot find module` / type errors right after `git pull` (e.g. `@fontsource-variable/…`) | a teammate added a dependency: `pnpm install` |
+| `Unsupported platform-arch` and the process exits | rgb-lib has no build for this machine (Intel Mac, Windows outside WSL): use WSL2 Ubuntu 24.04, or the mock wallet (`WALLET_BACKEND=mock`) for the UI |
+| `GLIBC_2.38 not found` | the OS is too old (Ubuntu 22.04 has 2.35): use Ubuntu 24.04 / Debian 13 / Fedora 40+, or WSL2 Ubuntu 24.04 |
+| `engine node … incompatible` or rgb-lib crashes on start | Node 24+ or < 22.17: `nvm install 22 && nvm use 22`, then `pnpm install` |
+| pnpm warns "Ignored build scripts" and rgb-lib is missing | `pnpm rebuild` (the allowed builds are listed in `pnpm-workspace.yaml`) |
+| WSL2 very slow or file watching broken | clone inside the Linux home (`cd ~`), not under `/mnt/c`; open http://localhost:5173 in the Windows browser |
+| `corepack enable` fails (permissions) | `npm install -g pnpm@12.11.2` |
 | `EADDRINUSE` on 8787 or 5173 | an old server is still running: `pkill -f "tsx.*src/main.ts"; pkill -f vite` |
 | "wallet is in use" / `WalletInUse` | another process holds the wallet folder (e.g. `payee watch` while running `payee pay`): stop it |
 | rgb-lib fails to load / `Cannot find module …rgb-lib-linux-x64` | wrong Node (use 22.x) or glibc < 2.38; rerun `pnpm install` after `nvm use` |
@@ -149,6 +179,8 @@ Chain details, troubleshooting and the offline regtest: [`infra/RUNBOOK-chain.md
 - Receive side: invoices to get paid, matched to incoming transfers. Scheduled payments, labels and a fiscal report over the wallet's transfers.
 - Treasurer chat: answers stream word by word, keeps the conversation when you switch pages (New chat clears it), knows the wallet and the platform, creates payment requests and links to what it made; replies about money are built by code from the tool results.
 - Web app polish for first-time users: wallet tabs (Overview, Get paid, Details) with the active spending rules and what was spent in 24 h, dark mode, drag-and-drop upload, plain-language errors, a clear message when the server is not reachable (no silent demo data), faster loading (background sync slows down when idle).
+- **Payment requests you can manage:** a request made in the chat shows as a card (copy, QR, live status, still there after a reload); under Wallet › Get paid every request can be opened again, copied, cancelled while nobody pays it (a payment that still arrives is shown, never hidden), archived, filtered and paged.
+- **No invented data:** every field the Analyst extracts is kept only if it is printed in the document (text, PDF text layer, OCR); a document that is only an RGB payment request is read by the wallet's decoder with no model call, and says so plainly ("This is a payment request, not an invoice"). Evals: 15/15 verdicts, 0 invented fields.
 - RGB over Lightning: our own LSP for TUSDT on Mutinynet, and the app pays RGB Lightning invoices from its own node ([channel funding](https://mutinynet.com/tx/642bba27cd0552bc6687fff584f12e1dc2869bb03a1ddadcc7b9917e323c8cd7); a Lightning invoice paid through the app in under 25 s from confirmation).
 
 ## Mocked, simulated or hard-coded

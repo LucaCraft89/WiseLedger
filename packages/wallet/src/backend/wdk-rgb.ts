@@ -31,6 +31,7 @@ import {
   type WalletPort,
 } from 'core';
 import { libNetwork, type WalletConfig } from '../config.js';
+import { requestAlreadyPaid, toDecodedInvoice } from '../decode.js';
 import { lockWalletDir, unlockWalletDir } from '../lock.js';
 import { buildSpendPolicy, policyDenied } from '../policy.js';
 import { type ReadRetryOptions, withReadRetry } from '../retry.js';
@@ -208,6 +209,9 @@ function str(n: number | undefined): string {
 }
 
 /** Maps rgb-lib / WDK error text to our typed errors (messages stay plain for the UI). */
+export const ALREADY_PAID =
+  'This payment request was already paid (a payment request can be paid only once). Nothing left your wallet: ask whoever sent it for a new one.';
+
 export function mapWalletError(e: unknown): WalletError {
   if (e instanceof WalletError) return e;
   const denied = policyDenied(e);
@@ -221,6 +225,7 @@ export function mapWalletError(e: unknown): WalletError {
   if (/InvoiceExpired|expired/i.test(msg)) return new InvoiceExpired();
   if (/InvalidInvoice|InvalidRecipient|invalid.*invoice/i.test(msg)) return new InvalidInvoice();
   if (/timed? ?out|ETIMEDOUT|ECONNRESET|socket hang up/i.test(msg)) return new SubmitTimeout();
+  if (/RecipientIDAlreadyUsed/i.test(msg)) return new TransferFailed(ALREADY_PAID, { cause: e });
   return new TransferFailed(msg, { cause: e });
 }
 
@@ -446,16 +451,9 @@ export class WdkRgbWallet implements WalletPort {
     } catch {
       throw new InvalidInvoice();
     }
-    const amount = assignmentAmount(d.assignment);
-    return {
-      rgbInvoice,
-      recipientId: d.recipientId,
-      ...(d.assetId ? { assetId: d.assetId } : {}),
-      ...(amount ? { amount } : {}),
-      network: String(d.network),
-      ...(d.expirationTimestamp ? { expiresAt: iso(d.expirationTimestamp) } : {}),
-      transportEndpoints: d.transportEndpoints ?? [],
-    };
+    const decoded = toDecodedInvoice(rgbInvoice, d);
+    const paid = await requestAlreadyPaid(decoded.recipientId, decoded.transportEndpoints);
+    return paid === undefined ? decoded : { ...decoded, alreadyPaid: paid };
   }
 
   async quotePay(req: PaymentRequest): Promise<QuoteResult> {
@@ -605,6 +603,8 @@ export class WdkRgbWallet implements WalletPort {
   private async precheck(req: PaymentRequest): Promise<void> {
     const inv = await this.decodeInvoice(req.rgbInvoice);
     if (inv.expiresAt && Date.parse(inv.expiresAt) <= Date.now()) throw new InvoiceExpired();
+    // Someone already paid it (its proxy holds a payment): stop before signing anything.
+    if (inv.alreadyPaid) throw new TransferFailed(ALREADY_PAID);
     if (inv.assetId && inv.assetId !== req.assetId)
       throw new TransferFailed(`The invoice asks for asset ${inv.assetId}, not ${req.assetId}.`);
     if (inv.amount && inv.amount !== req.amount)
@@ -620,8 +620,3 @@ export class WdkRgbWallet implements WalletPort {
 }
 
 /** rgb-lib Assignment: { Fungible: n } (or { type, value } in some bindings); returns base units or undefined. */
-function assignmentAmount(a: Record<string, unknown> | undefined): string | undefined {
-  if (!a) return undefined;
-  const v = a.Fungible ?? a.fungible ?? (a.type === 'Fungible' ? a.value : undefined);
-  return typeof v === 'number' && v > 0 ? String(v) : undefined;
-}

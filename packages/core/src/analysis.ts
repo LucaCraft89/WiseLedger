@@ -124,6 +124,7 @@ export const RgbCheckName = z.enum([
   'rail',
   'network',
   'not_expired',
+  'not_used',
   'asset_approved',
   'asset_matches',
   'amount_matches',
@@ -141,6 +142,27 @@ export const RgbCheckLine = z.object({
 });
 export type RgbCheckLine = z.infer<typeof RgbCheckLine>;
 
+/** `payment_request`: the document is only an RGB payment request (no invoice around it). */
+export const DocumentKind = z.enum(['invoice', 'payment_request']);
+export type DocumentKind = z.infer<typeof DocumentKind>;
+
+/** What a payment-request-only document says, read by the wallet's decoder (never by the model). */
+export const PaymentRequestFacts = z.object({
+  rail: z.enum(['onchain', 'lightning']),
+  network: z.string(),
+  /** Token the request asks for; absent = the payer chooses (we pay with `payAssetId`). */
+  assetId: z.string().optional(),
+  /** The approved token this wallet would pay with. */
+  payAssetId: z.string().optional(),
+  /** Base units; absent = open amount, typed by the user before paying (POST /api/invoices/:id/amount). */
+  amount: BaseUnits.optional(),
+  expiresAt: IsoDateTime.optional(),
+});
+export type PaymentRequestFacts = z.infer<typeof PaymentRequestFacts>;
+
+/** Payee name in the plan and sentence of a payment-request-only document (it names nobody). */
+export const PAYMENT_REQUEST_PAYEE = 'whoever sent this payment request';
+
 export const LlmProviderName = z.enum(['qvac', 'openai', 'mock']);
 export type LlmProviderName = z.infer<typeof LlmProviderName>;
 
@@ -150,6 +172,10 @@ export const AnalysisReport = z.object({
   flags: z.array(RiskFlag),
   verdict: Verdict,
   proposedPayment: ProposedPayment.optional(),
+  /** Absent = invoice. */
+  kind: DocumentKind.optional(),
+  /** Only for kind `payment_request`: the decoded request. */
+  paymentRequest: PaymentRequestFacts.optional(),
   /** The RGB payment request check, built by code from the decoded request (absent when the AI could not read it). */
   rgbCheck: z.array(RgbCheckLine).optional(),
   /** Plain-language summary (≤ 120 words), written by call 2 from fields + flags only. */

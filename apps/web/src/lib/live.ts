@@ -49,6 +49,7 @@ export const TOOL_WORDS: Record<string, string> = {
   execute_plan: 'Sending the payment you confirmed',
   get_balance: 'Checking the balance',
   create_receive_invoice: 'Creating a payment request',
+  check_payment_request: 'Opening the payment request for checking',
   schedule_payment: 'Scheduling a payment',
   label_transfer: 'Labelling a payment',
   list_transfers: 'Looking up past payments',

@@ -24,10 +24,14 @@ import {
   type OnboardingRestoreResponse,
   type OnboardingStatusResponse,
   type OnboardingUnlockRequest,
+  type ReceiveRequestDto,
+  type ReceivesListQuery,
   type ReceivesListResponse,
   type RejectResponse,
   type ScheduleCancelResponse,
   type ScheduleListResponse,
+  type SetAmountRequest,
+  type SetAmountResponse,
   SSE_EVENT_NAME,
   type TranscribeResponse,
   type TransferDetailResponse,
@@ -55,8 +59,16 @@ export interface ApiClient {
   wallet(): Promise<WalletResponse>;
   /** New RGB receive invoice (optional asset and amount in base units). */
   receive(req: WalletReceiveRequest): Promise<WalletReceiveResponse>;
-  /** Payment requests handed out, newest first, with the status of the payment that answers each. */
-  receives(): Promise<ReceivesListResponse>;
+  /** Payment requests handed out, newest first, one page (20 by default; `nextBefore` when more follow). */
+  receives(q?: ReceivesListQuery): Promise<ReceivesListResponse>;
+  /** One payment request with its live status. */
+  receiveGet(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Stop showing a waiting request as open (409 while someone is paying it). */
+  receiveCancel(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Move a closed or paid request under "Older requests". */
+  receiveArchive(receiveId: string): Promise<ReceiveRequestDto>;
+  /** Open-amount payment request: the amount the user typed → plan and sentence to confirm. */
+  setAmount(invoiceId: string, req: SetAmountRequest): Promise<SetAmountResponse>;
   /** Lightning node and channels. A server without the route (404) counts as Lightning off. */
   lightning(): Promise<LightningStatusResponse>;
   /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
@@ -201,7 +213,16 @@ export function createHttpClient(base = ''): ApiClient {
     reject: (id, reason) => call(`${base}/api/invoices/${encodeURIComponent(id)}/reject`, json({ reason })),
     wallet: () => call(`${base}/api/wallet`),
     receive: (req) => call(`${base}/api/wallet/receive`, json(req)),
-    receives: () => call(`${base}/api/wallet/receives`),
+    receives: (q) => {
+      const qs = new URLSearchParams(
+        Object.entries(q ?? {}).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])),
+      ).toString();
+      return call(`${base}/api/wallet/receives${qs ? `?${qs}` : ''}`);
+    },
+    receiveGet: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}`),
+    receiveCancel: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}/cancel`, json({})),
+    receiveArchive: (id) => call(`${base}/api/wallet/receives/${encodeURIComponent(id)}/archive`, json({})),
+    setAmount: (id, req) => call(`${base}/api/invoices/${encodeURIComponent(id)}/amount`, json(req)),
     async lightning() {
       try {
         return await call<LightningStatusResponse>(`${base}/api/wallet/lightning`);

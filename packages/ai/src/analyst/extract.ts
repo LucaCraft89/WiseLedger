@@ -2,6 +2,7 @@
 import { type ChatMessage, InvoiceExtraction, isLightningInvoice, type LlmProvider, LN_INVOICE_RE } from 'core';
 import { z } from 'zod';
 import type { InvoiceInput } from '../extract/text.js';
+import { groundExtraction } from './grounding.js';
 import {
   EXTRACT_IMAGE_PROMPT,
   EXTRACT_SYSTEM,
@@ -90,8 +91,15 @@ export async function extractInvoice(
     const parsed = LlmExtraction.safeParse(json);
     if (parsed.success) {
       const sourceText = input.mode === 'text' ? input.text : undefined;
+      const extraction = toExtraction(parsed.data, sourceText);
+      // Vision (no text to check against): every field stays, but never with more than 0.6 confidence.
+      if (input.mode === 'image') {
+        for (const k of Object.keys(extraction.fieldConfidence)) {
+          extraction.fieldConfidence[k] = Math.min(extraction.fieldConfidence[k] ?? 0, IMAGE_CONFIDENCE_CAP);
+        }
+      }
       return {
-        extraction: toExtraction(parsed.data, sourceText),
+        extraction,
         raw: parsed.data,
         attempts: attempt,
         ms: Date.now() - started,
@@ -103,6 +111,9 @@ export async function extractInvoice(
   throw new Error(`The AI could not read this invoice (${lastError}).`);
 }
 
+/** Highest confidence for a field read from an image by the vision model (it cannot be checked against a text). */
+export const IMAGE_CONFIDENCE_CAP = 0.6;
+
 const RGB_INVOICE_RE = /rgb:[^\s"'<>]+/g;
 
 /** Every payment request printed in the text: on-chain RGB (rgb:…) and RGB Lightning (BOLT11, lightning: dropped). */
@@ -113,7 +124,10 @@ export function paymentRequestsIn(text: string): string[] {
   return [...new Set([...(rest.match(RGB_INVOICE_RE) ?? []), ...ln])];
 }
 
-/** Maps the model output to the contract and applies deterministic clean-up. */
+/**
+ * Maps the model output to the contract and applies deterministic clean-up. With the source text, every field the
+ * model wrote but the document does not print is dropped (grounding.ts), so R9 reports it missing instead.
+ */
 export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceExtraction {
   const conf = clamp01(raw.confidence);
   const fieldConfidence: Record<string, number> = {};
@@ -171,7 +185,8 @@ export function toExtraction(raw: LlmExtraction, sourceText?: string): InvoiceEx
     pressure: { detected: raw.pressureLanguage, ...opt('evidence', raw.pressureQuote?.slice(0, 160) || undefined) },
     fieldConfidence,
   };
-  return InvoiceExtraction.parse(ext);
+  const parsed = InvoiceExtraction.parse(ext);
+  return sourceText === undefined ? parsed : groundExtraction(parsed, sourceText).extraction;
 }
 
 /** The amount on the one line that starts with TOTAL/TOTALE/AMOUNT DUE; undefined if absent or ambiguous. */

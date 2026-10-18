@@ -126,10 +126,12 @@ function distance(a: string, b: string): number {
 const nearMiss = (a: string, b: string) =>
   a !== b && Math.min(a.length, b.length) >= 4 && (a.includes(b) || b.includes(a) || distance(a, b) <= 2);
 
-export const r5NewPayee: Rule = ({ extraction, payees = [], sourceText }) => {
+export const r5NewPayee: Rule = ({ kind, extraction, payees = [], sourceText }) => {
   const flag = (severity: RiskFlag['severity'], message: string, evidence?: string): RiskFlag[] => [
     { code: FLAG_CODES.R5_NEW_PAYEE, severity, message, ...(evidence ? { evidence: evidence.slice(0, 80) } : {}) },
   ];
+  // A bare payment request names nobody: the user must know who sent it.
+  if (kind === 'payment_request') return flag('warn', 'You do not know who sent this request.');
   const name = extraction.issuer.name;
   const fake = lookalikeWord(name) ?? lookalikeWord(sourceText);
   if (fake) {

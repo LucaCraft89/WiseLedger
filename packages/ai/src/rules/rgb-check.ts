@@ -1,9 +1,17 @@
 // "Payment request check": every check on the RGB payment request as a list, passed ones included, for the report.
 // Code only, from the same inputs the rules see. A failing line names the flag that already explains it.
-import { FLAG_CODES, isLightningInvoice, type RgbCheckLine, type Verdict } from 'core';
+import { FLAG_CODES, formatAssetAmount, isLightningInvoice, type RgbCheckLine, type Verdict } from 'core';
 import { networkAccepted } from './r1-rgb-invoice.js';
 import { SOON_MS } from './r11-rgb-request.js';
-import { isDecoded, paymentAmount, paymentAsset, type RuleInput, toBaseUnits, unknownEndpoints } from './types.js';
+import {
+  isDecoded,
+  OPEN_AMOUNT_MESSAGE,
+  paymentAmount,
+  paymentAsset,
+  type RuleInput,
+  toBaseUnits,
+  unknownEndpoints,
+} from './types.js';
 
 const line = (check: RgbCheckLine['check'], result: Verdict, text: string, flagCode?: string): RgbCheckLine => ({
   check,
@@ -13,7 +21,7 @@ const line = (check: RgbCheckLine['check'], result: Verdict, text: string, flagC
 });
 
 /** "about 2 hours" / "about 40 minutes" / "about 3 days". */
-function duration(ms: number): string {
+export function duration(ms: number): string {
   const min = Math.round(ms / 60_000);
   if (min < 90) return `about ${min} minute${min === 1 ? '' : 's'}`;
   const h = Math.round(min / 60);
@@ -57,6 +65,14 @@ export function rgbRequestCheck(input: RuleInput): RgbCheckLine[] | undefined {
           : line('not_expired', 'ok', `It is still valid (for ${duration(left)} when we checked).`),
   );
 
+  if (decoded.alreadyPaid !== undefined && !ln) {
+    out.push(
+      decoded.alreadyPaid
+        ? line('not_used', 'block', 'Someone already paid it: a payment request can be paid only once.', R1)
+        : line('not_used', 'ok', 'Nobody has paid it yet (its delivery server holds no payment for it).'),
+    );
+  }
+
   const asset = paymentAsset(input);
   const info = asset ? config.assets[asset] : undefined;
   const name = info?.ticker ?? 'the token';
@@ -90,7 +106,16 @@ export function rgbRequestCheck(input: RuleInput): RgbCheckLine[] | undefined {
   const { total, currency } = extraction;
   const sameCurrency = !!info && !!currency && currency.toUpperCase() === info.ticker.toUpperCase();
   let amountLine: RgbCheckLine;
-  if (amount === undefined) amountLine = line('amount_matches', 'block', 'We could not work out how much to pay.', R3);
+  if (input.kind === 'payment_request')
+    amountLine = decoded.amount
+      ? line(
+          'amount_matches',
+          'ok',
+          `The amount comes from the request itself${info ? ` (${formatAssetAmount(decoded.amount, info.precision)} ${info.ticker})` : ''}.`,
+        )
+      : line('amount_matches', 'review', OPEN_AMOUNT_MESSAGE, R3);
+  else if (amount === undefined)
+    amountLine = line('amount_matches', 'block', 'We could not work out how much to pay.', R3);
   else if (total && info && currency && !sameCurrency)
     amountLine = line(
       'amount_matches',

@@ -43,5 +43,9 @@ export const r1RgbInvoice: Rule = ({ extraction, decoded, config, now }) => {
   if (decoded.expiresAt && Date.parse(decoded.expiresAt) <= now.getTime()) {
     return [flag(`The ${what} has expired. Ask the supplier for a new one.`, decoded.expiresAt)];
   }
+  // Its RGB proxy already holds a payment for it: someone paid it, and a request is paid once.
+  if (decoded.alreadyPaid) {
+    return [flag(`This ${what} was already paid by someone. A request can be paid only once: ask for a new one.`)];
+  }
   return [];
 };

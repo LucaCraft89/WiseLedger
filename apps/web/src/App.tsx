@@ -161,7 +161,7 @@ export function App() {
               ) : hash.startsWith('#/wallet') ? (
                 <>
                   <GettingStarted api={api} />
-                  <WalletPage api={api} tab={walletTab(hash)} />
+                  <WalletPage api={api} tab={walletTab(hash)} hash={hash} />
                 </>
               ) : hash === '#/transfers' ? (
                 <TransfersPage api={api} />

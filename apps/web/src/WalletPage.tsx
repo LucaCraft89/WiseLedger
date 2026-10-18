@@ -4,6 +4,7 @@ import {
   type BtcTransactionDto,
   formatAssetAmount,
   type LightningStatusResponse,
+  type ReceiveFilter,
   type ReceiveRequestDto,
   type WalletReceiveResponse,
   type WalletResponse,
@@ -12,13 +13,15 @@ import { formatDate } from './lib/format.js';
 import { recentTransfers } from './lib/ledger.js';
 import { BACKEND_WORDS, NETWORK_WORDS, shortId, toBaseUnits } from './lib/live.js';
 import { explorerTxUrl } from './lib/payment.js';
+import { isOpen, mergePage, openFirst, parseGetPaid, RECEIVE_FILTERS, receiveHref } from './lib/receive.js';
 import { EXPLORER_BASE } from './PaymentCards.js';
+import { ReceiveCard, requestAmount, StatusBadge } from './ReceiveCard.js';
 import { TransfersTable } from './TransfersTable.js';
 import { CopyButton, Empty, ErrorBox, errorText, Loading, Qr, useLoad, useToast } from './ui.js';
 
 const box = { border: '1px solid var(--wl-c-line)', borderRadius: 6, padding: 12, marginBottom: 16 } as const;
 
-export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: WalletTab }) {
+export function WalletPage({ api, tab = 'overview', hash = '' }: { api: ApiClient; tab?: WalletTab; hash?: string }) {
   const toast = useToast();
   const [w, setW] = useState<WalletResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +95,7 @@ export function WalletPage({ api, tab = 'overview' }: { api: ApiClient; tab?: Wa
         </>
       )}
 
-      {tab === 'get-paid' && <ReceiveForm api={api} wallet={w} />}
+      {tab === 'get-paid' && <GetPaid api={api} wallet={w} hash={hash} />}
 
       {tab === 'details' && (
         <>
@@ -140,7 +143,9 @@ export const WALLET_TABS: readonly { id: WalletTab; href: string; label: string 
 ];
 /** "#/wallet/get-paid" → "get-paid"; anything else under #/wallet → overview. */
 export const walletTab = (hash: string): WalletTab =>
-  WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview';
+  hash.startsWith('#/wallet/get-paid')
+    ? 'get-paid'
+    : (WALLET_TABS.find((t) => t.id !== 'overview' && hash === t.href)?.id ?? 'overview');
 
 /** The limits every payment must pass, and who enforces them (the Tether WDK policy engine on the real wallet). */
 export function SpendingRules({
@@ -353,16 +358,68 @@ function RecentTransfers({ api, assets }: { api: ApiClient; assets: WalletRespon
   );
 }
 
-function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }) {
+/** Get paid: one request (#/wallet/get-paid/<id>), or the form (pre-filled with ?like=<id>) and the list. */
+function GetPaid({ api, wallet, hash }: { api: ApiClient; wallet: WalletResponse; hash: string }) {
+  const { receiveId, like } = parseGetPaid(hash);
+  const [listTick, setListTick] = useState(0);
+  if (receiveId) {
+    return (
+      <>
+        <p>
+          <a href="#/wallet/get-paid">← All payment requests</a>
+        </p>
+        <ReceiveCard api={api} receiveId={receiveId} variant="detail" />
+      </>
+    );
+  }
+  return (
+    <>
+      <ReceiveForm api={api} wallet={wallet} like={like} onCreated={() => setListTick((t) => t + 1)} />
+      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
+    </>
+  );
+}
+
+function ReceiveForm({
+  api,
+  wallet,
+  like,
+  onCreated,
+}: {
+  api: ApiClient;
+  wallet: WalletResponse;
+  /** receiveId of an old request to copy (amount, token, note). */
+  like?: string | undefined;
+  onCreated: () => void;
+}) {
   const toast = useToast();
   const [assetId, setAssetId] = useState(wallet.assets[0]?.assetId ?? '');
   const [amount, setAmount] = useState('');
   const [expiry, setExpiry] = useState('60');
   const [note, setNote] = useState('');
-  const [listTick, setListTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [created, setCreated] = useState<WalletReceiveResponse | null>(null);
+
+  // "Make a new request like this": same token, amount and note as the old one.
+  useEffect(() => {
+    if (!like) return;
+    let live = true;
+    api.receiveGet(like).then(
+      (r) => {
+        if (!live) return;
+        const a = wallet.assets.find((x) => x.assetId === r.assetId);
+        setAssetId(r.assetId ?? '');
+        setAmount(r.amount && a ? formatAssetAmount(r.amount, a.precision) : '');
+        setNote(r.note ?? '');
+        setCreated(null);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, like, wallet.assets]);
 
   const asset = wallet.assets.find((a) => a.assetId === assetId);
 
@@ -385,7 +442,7 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
       });
       setCreated(res);
       setNote('');
-      setListTick((t) => t + 1);
+      onCreated();
       toast('Payment request created', 'success');
     } catch (err) {
       const msg = errorText(err, 'Could not create the payment request.');
@@ -410,6 +467,7 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
           Create a payment request (an “RGB invoice”) and send it to the person who will pay you. They paste it into
           their wallet.
         </p>
+        {like && <p data-testid="receive-prefilled">Filled in like your earlier request: check it, then create it.</p>}
         <label style={{ display: 'block', marginBottom: 8 }}>
           Asset{' '}
           <select value={assetId} onChange={(e) => setAssetId(e.target.value)}>
@@ -451,50 +509,94 @@ function ReceiveForm({ api, wallet }: { api: ApiClient; wallet: WalletResponse }
         </button>
       </form>
 
-      {created && (
-        <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
-          <strong>Your payment request</strong>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
-            <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
-              <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
-              {created.amount && asset && (
-                <p>
-                  Amount: {formatAssetAmount(created.amount, asset.precision)} {asset.ticker}
-                </p>
-              )}
-              <p>Valid until {formatDate(created.expiresAt)}. After that, create a new one.</p>
+      {created?.receiveId ? (
+        <div data-testid="receive-invoice">
+          <ReceiveCard api={api} receiveId={created.receiveId} variant="detail" onChanged={onCreated} />
+        </div>
+      ) : (
+        created && (
+          <div style={{ ...box, background: 'var(--wl-c-subtle-bg)' }} data-testid="receive-invoice">
+            <strong>Your payment request</strong>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+              <Qr value={created.rgbInvoice} size={200} alt="QR code of the payment request" />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <code style={{ wordBreak: 'break-all', display: 'block' }}>{created.rgbInvoice}</code>
+                <CopyButton value={created.rgbInvoice} what="Payment request" label="Copy payment request" />
+                <p>Valid until {formatDate(created.expiresAt)}. After that, create a new one.</p>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
-      <PaymentRequests api={api} wallet={wallet} tick={listTick} />
     </>
   );
 }
 
-export const RECEIVE_STATUS_WORDS: Record<ReceiveRequestDto['status'], string> = {
-  waiting: 'Waiting for payment',
-  incoming: 'Payment on its way (waiting for a block)',
-  received: 'Received ✓',
-  expired: 'Expired: create a new request',
-  failed: 'The payment failed: ask them to try again',
-};
-
-/** Payment requests handed out, refreshed every 10 s while one is still open. */
+/** Payment requests handed out: open ones first, filter chips, 20 at a time, older ones folded away. */
 export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet: WalletResponse; tick: number }) {
+  const [filter, setFilter] = useState<ReceiveFilter>('all');
+  const [olderOpen, setOlderOpen] = useState(false);
+  return (
+    <>
+      <h3>Payment requests you sent</h3>
+      <fieldset style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, border: 0, padding: 0 }}>
+        <legend style={{ position: 'absolute', left: -9999 }}>Show</legend>
+        {RECEIVE_FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            className={filter === f.id ? undefined : 'wl-secondary'}
+            aria-pressed={filter === f.id}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </fieldset>
+      <RequestList api={api} wallet={wallet} tick={tick} filter={filter} older={false} />
+      <details
+        style={{ marginTop: 12 }}
+        open={olderOpen}
+        onToggle={(e) => setOlderOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary>Older requests</summary>
+        {olderOpen && <RequestList api={api} wallet={wallet} tick={tick} filter={filter} older />}
+      </details>
+    </>
+  );
+}
+
+function RequestList({
+  api,
+  wallet,
+  tick,
+  filter,
+  older,
+}: {
+  api: ApiClient;
+  wallet: WalletResponse;
+  tick: number;
+  filter: ReceiveFilter;
+  older: boolean;
+}) {
   const [list, setList] = useState<ReceiveRequestDto[] | null>(null);
+  const [next, setNext] = useState<string | undefined>();
   const [error, setError] = useState<unknown>(null);
   const [refresh, setRefresh] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const query = useCallback(
+    (before?: string) => api.receives({ status: filter, archived: older ? '1' : '0', ...(before ? { before } : {}) }),
+    [api, filter, older],
+  );
   useEffect(() => {
     void tick;
     void refresh;
     let live = true;
-    api.receives().then(
+    query().then(
       (r) => {
         if (!live) return;
         setList(r.receives);
+        setNext(r.nextBefore);
         setError(null);
       },
       (e: unknown) => {
@@ -504,8 +606,8 @@ export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet:
     return () => {
       live = false;
     };
-  }, [api, tick, refresh]);
-  const open = list?.some((r) => r.status === 'waiting' || r.status === 'incoming');
+  }, [query, tick, refresh]);
+  const open = list?.some((r) => isOpen(r));
   useEffect(() => {
     if (!open) return;
     const id = setInterval(() => setRefresh((n) => n + 1), 10_000);
@@ -513,39 +615,68 @@ export function PaymentRequests({ api, wallet, tick }: { api: ApiClient; wallet:
   }, [open]);
 
   if (error) return <ErrorBox error={error} retry={() => setRefresh((n) => n + 1)} />;
-  if (!list || list.length === 0) return null;
+  if (!list) return <Loading text="Loading your payment requests…" />;
+  if (list.length === 0) {
+    return (
+      <Empty
+        text={
+          older
+            ? 'No older requests.'
+            : filter === 'all'
+              ? 'No payment requests yet. Create one above to get paid.'
+              : 'Nothing here. Try another filter, or look under “Older requests”.'
+        }
+      />
+    );
+  }
   return (
-    <>
-      <h3>Payment requests you sent</h3>
-      <div aria-live="polite">
-        {list.slice(0, 10).map((r) => (
-          <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
-        ))}
-      </div>
-    </>
+    <div aria-live="polite">
+      {openFirst(list).map((r) => (
+        <PaymentRequestRow key={r.receiveId} r={r} wallet={wallet} />
+      ))}
+      {next && (
+        <button
+          type="button"
+          className="wl-secondary"
+          disabled={loadingMore}
+          onClick={async () => {
+            setLoadingMore(true);
+            try {
+              const r = await query(next);
+              setList((cur) => mergePage(cur ?? [], r.receives));
+              setNext(r.nextBefore);
+            } catch (e) {
+              setError(e);
+            } finally {
+              setLoadingMore(false);
+            }
+          }}
+        >
+          {loadingMore ? 'Loading…' : 'Show more'}
+        </button>
+      )}
+    </div>
   );
 }
 
 export function PaymentRequestRow({ r, wallet }: { r: ReceiveRequestDto; wallet: WalletResponse }) {
-  const asset = wallet.assets.find((a) => a.assetId === r.assetId);
-  const amount = r.receivedAmount ?? r.amount;
   return (
-    <div style={{ ...box, marginBottom: 8 }} data-testid="receive-row">
-      <strong>{RECEIVE_STATUS_WORDS[r.status]}</strong>
-      {' · '}
-      {amount && asset ? `${formatAssetAmount(amount, asset.precision)} ${asset.ticker}` : 'any amount'}
-      {r.note ? ` · ${r.note}` : ''}
-      <div style={{ fontSize: '0.9em', marginTop: 4 }}>
+    <a
+      href={receiveHref(r.receiveId)}
+      data-testid="receive-row"
+      data-status={r.status}
+      style={{ ...box, marginBottom: 8, display: 'block', color: 'inherit', textDecoration: 'none' }}
+    >
+      <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <StatusBadge status={r.status} />
+        <strong>{requestAmount(r, wallet.assets)}</strong>
+        {r.note ? <span>· {r.note}</span> : null}
+      </span>
+      <span style={{ display: 'block', fontSize: '0.9em', marginTop: 4, color: 'var(--wl-c-muted)' }}>
         Created {formatDate(r.createdAt)}
-        {r.txid && (
-          <>
-            {' · '}
-            <a href={explorerTxUrl(r.txid, EXPLORER_BASE)} target="_blank" rel="noopener noreferrer">
-              View on the block explorer
-            </a>
-          </>
-        )}
-      </div>
-    </div>
+        {r.cancelledAt && r.status === 'received' ? ' · arrived after you cancelled it' : ''} ·{' '}
+        <span style={{ color: 'var(--wl-c-link, inherit)', textDecoration: 'underline' }}>Open</span>
+      </span>
+    </a>
   );
 }

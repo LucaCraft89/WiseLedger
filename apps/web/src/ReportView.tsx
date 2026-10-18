@@ -1,11 +1,59 @@
-import type { AnalysisReport } from './api/contracts.js';
+import { type AnalysisReport, formatAssetAmount } from './api/contracts.js';
 import { FlagList } from './FlagCard.js';
 import { VERDICT_ACCENT, VERDICT_COLORS, VERDICT_EXPLAIN, VERDICT_ICON, VERDICT_LABELS } from './lib/format.js';
-import { splitFlags } from './lib/payment.js';
+import { shortId, splitFlags } from './lib/payment.js';
+import { localTimeWithZone } from './lib/receive.js';
 import { RgbCheckCard } from './RgbCheckCard.js';
 
+type Asset = { assetId: string; ticker: string; precision: number };
+
+/** Plain notice for a document that is only a payment request, with what the wallet read from it. */
+export const PAYMENT_REQUEST_NOTICE =
+  'This is a payment request, not an invoice. We read the amount, token and expiry directly from it. There is no supplier name or invoice number to check, so only pay if you know who sent it.';
+
+function PaymentRequestFacts({ report, assets }: { report: AnalysisReport; assets: readonly Asset[] }) {
+  const pr = report.paymentRequest;
+  const assetId = pr?.assetId ?? pr?.payAssetId;
+  const a = assets.find((x) => x.assetId === assetId);
+  return (
+    <section className="wl-card" data-testid="payment-request-notice" style={{ marginTop: 12 }}>
+      <p style={{ marginTop: 0 }}>
+        <strong>{PAYMENT_REQUEST_NOTICE}</strong>
+      </p>
+      {pr ? (
+        <ul style={{ marginBottom: 0 }}>
+          <li>
+            Amount:{' '}
+            {pr.amount
+              ? a
+                ? `${formatAssetAmount(pr.amount, a.precision)} ${a.ticker}`
+                : `${pr.amount} smallest units`
+              : 'not in the request: you type it before paying'}
+          </li>
+          <li>
+            Token: {a?.ticker ?? 'unknown'}
+            {!pr.assetId && ' (the request lets you choose; we use your approved token)'}
+            {assetId && (
+              <>
+                {' '}
+                · <code title={assetId}>{shortId(assetId)}</code>
+              </>
+            )}
+          </li>
+          <li>
+            Paid {pr.rail === 'lightning' ? 'over Lightning' : 'on Bitcoin'} · network {pr.network}
+          </li>
+          <li>{pr.expiresAt ? `Valid until ${localTimeWithZone(pr.expiresAt)}` : 'No expiry'}</li>
+        </ul>
+      ) : (
+        <p style={{ marginBottom: 0 }}>Your wallet could not read it, so it cannot be paid.</p>
+      )}
+    </section>
+  );
+}
+
 /** The Analyst's report: verdict banner, flags by severity, plain-language summary, questions. */
-export function ReportView({ report }: { report: AnalysisReport }) {
+export function ReportView({ report, assets = [] }: { report: AnalysisReport; assets?: readonly Asset[] }) {
   const ex = report.extraction;
   const { alerts, notes } = splitFlags(report.flags);
   return (
@@ -26,12 +74,14 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         <div>{VERDICT_EXPLAIN[report.verdict]}</div>
       </div>
 
+      {report.kind === 'payment_request' && <PaymentRequestFacts report={report} assets={assets} />}
+
       {report.rgbCheck && report.rgbCheck.length > 0 && <RgbCheckCard lines={report.rgbCheck} />}
 
       <h4>In short</h4>
       <p>{report.summary}</p>
 
-      <ul>
+      <ul hidden={report.kind === 'payment_request'}>
         {ex.issuer.name && <li>From: {ex.issuer.name}</li>}
         {ex.invoiceNumber && <li>Invoice number: {ex.invoiceNumber}</li>}
         {ex.total && (

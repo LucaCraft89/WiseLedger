@@ -53,10 +53,11 @@ describe('chat retention', () => {
     expect(() => saveChat([{ id: 1, role: 'user', text: 'x' }], blocked)).not.toThrow();
   });
 
-  it('links what the Treasurer made and offers the payment request to copy', () => {
-    expect(toolLink({ name: 'create_receive_invoice', ok: true })).toEqual({
-      href: '#/wallet/get-paid',
-      label: 'See it in Wallet',
+  it('links what the Treasurer made; a payment request gets its own card (no chip link)', () => {
+    expect(toolLink({ name: 'create_receive_invoice', ok: true })).toBeNull();
+    expect(toolLink({ name: 'check_payment_request', ok: true, result: { invoiceId: 'inv_1' } })).toEqual({
+      href: '#/invoice/inv_1',
+      label: 'Open the check',
     });
     expect(toolLink({ name: 'label_transfer', ok: true })).toEqual({ href: '#/transfers', label: 'See transfers' });
     expect(toolLink({ name: 'create_receive_invoice', ok: false })).toBeNull();

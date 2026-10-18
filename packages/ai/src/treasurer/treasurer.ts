@@ -25,6 +25,7 @@ import {
   type WalletPort,
 } from 'core';
 import { z } from 'zod';
+import { paymentRequestsIn } from '../analyst/extract.js';
 import { findInjection } from '../rules/r7-injection.js';
 import { toBaseUnits } from '../rules/types.js';
 
@@ -213,8 +214,15 @@ export interface TreasurerDeps {
   invoices?: () => Promise<ChatInvoice[]>;
   /** IANA zone for dates in confirmation sentences (default: this machine's zone). */
   timeZone?: string;
-  /** Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own. */
-  onReceiveCreated?: (inv: ReceiveInvoice) => void | Promise<void>;
+  /**
+   * Called with every payment request made from chat, so the server lists it under "Get paid" like the UI's own.
+   * Returns the stored receiveId: the chat card is rendered from the stored request (live status, survives reloads).
+   */
+  onReceiveCreated?: (
+    inv: ReceiveInvoice,
+  ) => { receiveId: string } | undefined | Promise<{ receiveId: string } | undefined>;
+  /** A payment request pasted in the chat ("pay this: rgb:…") is opened as an invoice to check, never paid here. */
+  checkPaymentRequest?: (text: string) => Promise<{ invoiceId: string }>;
 }
 
 /** Guard stub: knows the confirmed plans, checks the hash and executes each plan once. */
@@ -286,8 +294,8 @@ export class Treasurer implements TreasurerAgent {
             ...(amount ? { amount } : {}),
             expirySec: (args.expiryMinutes ?? 60) * 60,
           });
-          await this.deps.onReceiveCreated?.(inv);
-          return inv;
+          const stored = await this.deps.onReceiveCreated?.(inv);
+          return stored ? { ...inv, receiveId: stored.receiveId } : inv;
         },
       } as ToolDef<never>,
       {
@@ -474,6 +482,34 @@ export class Treasurer implements TreasurerAgent {
    * run from chat: they come back as a NeedsConfirmation whose sentence is built by code, and the UI asks the user.
    */
   async chat(message: string, history: AgentChatTurn[], emit: EmitFn, stream?: ChatStreamHooks): Promise<AgentReply> {
+    // A payment request pasted in the chat goes to the same check as an upload (code, no model): the user reads the
+    // report and confirms there. The request string never reaches the model.
+    const pasted = paymentRequestsIn(message);
+    if (pasted.length === 1 && pasted[0] && this.deps.checkPaymentRequest) {
+      const record: AgentToolCallRecord = { name: 'check_payment_request', args: {}, ok: true };
+      let text: string;
+      try {
+        const { invoiceId } = await this.deps.checkPaymentRequest(pasted[0]);
+        record.result = { invoiceId };
+        text =
+          'I opened this payment request for checking. Read the check, then confirm the payment there: nothing is paid from the chat.';
+      } catch (err) {
+        record.ok = false;
+        record.error = err instanceof Error ? err.message : String(err);
+        text = `I could not open this payment request: ${record.error}`;
+      }
+      emit({
+        type: 'toolCall',
+        at: this.at(),
+        agent: 'treasurer',
+        name: record.name,
+        args: {},
+        status: record.ok ? 'ok' : 'error',
+        message: record.ok ? 'Opened for checking.' : (record.error ?? 'failed'),
+      });
+      stream?.onToken(text);
+      return { text, toolCalls: [record] };
+    }
     const ctx = { emit };
     const tools = this.tools(ctx);
     const specs = tools.map((t) => ({
@@ -579,7 +615,7 @@ export class Treasurer implements TreasurerAgent {
     const address = /\b(tb1|bc1|bcrt1)[a-z0-9]{20,}/i.test(message)
       ? ' A payment request needs no Bitcoin address: whoever pays uses this request.'
       : '';
-    return `Done: a payment request for ${what}${valid}. Copy it below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
+    return `Done: a payment request for ${what}${valid}. Copy it from the card below and send it to whoever pays you; it is also listed under Wallet → Get paid.${address}`;
   }
 
   /** One sentence in the user's language from the tool result (numbers already formatted by code). */

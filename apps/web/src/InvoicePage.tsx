@@ -100,6 +100,10 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
   const errors = progress.failed ? [] : events.filter((e) => e.type === 'error');
   const live = liveAiView(events);
   const toolCalls = events.filter((e) => e.type === 'toolCall');
+  // A payment request without an amount: the user types it (the asset is the request's or the approved one).
+  const pr = report?.kind === 'payment_request' ? report.paymentRequest : undefined;
+  const openAmountAsset =
+    pr && !pr.amount ? assets.find((a) => a.assetId === (pr.assetId ?? pr.payAssetId)) : undefined;
 
   // Analysis steps, live AI text, tool calls and status history: on top while the check runs, folded away at the
   // bottom once the report is there (the answer comes first).
@@ -168,7 +172,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
 
       {!report && steps}
 
-      {report && <ReportView report={report} />}
+      {report && <ReportView report={report} assets={assets} />}
 
       {errors.map((e) => (e.type === 'error' ? <ErrorLine key={eventKey(e)} message={e.message} /> : null))}
       {error && <ErrorLine message={error} />}
@@ -178,6 +182,18 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
           verdict={invoice.state === 'BLOCKED' ? 'block' : report.verdict}
           flags={report.flags}
           sentence={plan ? sentenceFor(plan, assets, confirmationSentence) : undefined}
+          {...(openAmountAsset
+            ? {
+                amount: {
+                  ticker: openAmountAsset.ticker,
+                  precision: openAmountAsset.precision,
+                  onSet: async (amount: string) => {
+                    await api.setAmount(invoiceId, { amount });
+                    await refresh();
+                  },
+                },
+              }
+            : {})}
           onConfirm={async (override) => {
             if (!plan) return;
             await api.confirm(invoiceId, { planId: plan.planId, override });

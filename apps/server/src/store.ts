@@ -133,6 +133,12 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX receives_status ON receives(status);
   `,
+  // 5: payment requests can be cancelled and archived (additive, never drops data).
+  `
+  ALTER TABLE receives ADD COLUMN cancelled_at TEXT;
+  ALTER TABLE receives ADD COLUMN archived_at TEXT;
+  CREATE INDEX receives_created ON receives(created_at);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
