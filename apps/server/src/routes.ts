@@ -13,6 +13,7 @@ import {
   ConfirmRequest,
   type CreateInvoiceResponse,
   CreateInvoiceTextRequest,
+  type DeskResponse,
   type HealthResponse,
   IllegalTransition,
   type InvoiceDetailResponse,
@@ -53,10 +54,11 @@ import {
   M3_ROUTES,
   ScheduleListQuery,
 } from './api-local.js';
+import { buildDesk } from './desk.js';
 import type { WalletFiscalService } from './fiscal.js';
 import type { SqliteJobStore } from './jobs.js';
 import { PAYEE_PREFIX, payeeTarget, type SqliteLabelStore } from './labels.js';
-import { healthHints, type WalletHolder } from './onboarding.js';
+import { healthHints, NOT_READY_MESSAGES, type WalletHolder } from './onboarding.js';
 import { ApiFailure, invalidTransition, type Orchestrator } from './orchestrator.js';
 import type { SqliteReceiveStore } from './receives.js';
 import { streamGlobalEvents, streamInvoiceEvents } from './sse.js';
@@ -243,7 +245,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
-      return reply.status(400).send(apiError('VALIDATION', `The request is not valid${where}: ${first?.message}`));
+      return reply
+        .status(400)
+        .send(
+          apiError(
+            'VALIDATION',
+            `The request is not valid${where}: ${first?.message}. Check what you typed and try again.`,
+          ),
+        );
     }
     if (isWalletError(err)) {
       app.log.warn({ err }, 'Wallet operation failed');
@@ -256,13 +265,19 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     }
     const e = err as { statusCode?: number; code?: string; message?: string };
     if (e.statusCode && e.statusCode >= 400 && e.statusCode < 500) {
-      return reply.status(e.statusCode).send(apiError(e.code ?? 'BAD_REQUEST', e.message ?? 'Bad request.'));
+      return reply
+        .status(e.statusCode)
+        .send(
+          apiError(e.code ?? 'BAD_REQUEST', e.message ?? 'The request is not valid. Reload the page and try again.'),
+        );
     }
     app.log.error(err);
     return reply.status(500).send(apiError('INTERNAL', 'Something went wrong on our side. Please try again.'));
   });
 
-  app.setNotFoundHandler((_req, reply) => reply.status(404).send(apiError('NOT_FOUND', 'This page does not exist.')));
+  app.setNotFoundHandler((_req, reply) =>
+    reply.status(404).send(apiError('NOT_FOUND', 'This address does not exist. Reload the app and try again.')),
+  );
 
   route(app, API_ROUTES.health, async (): Promise<HealthBody> => {
     const llm = deps.llmInfo();
@@ -286,6 +301,30 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     };
   });
 
+  // Money Desk home: local state only (no model call, no wallet sync), so it answers in milliseconds.
+  route(app, API_ROUTES.desk, async (): Promise<DeskResponse> => {
+    const ready = deps.holder.state === 'ready';
+    const [assets, transfers, pendingJobs] = await Promise.all([
+      ready ? wallet.listAssets().catch(() => []) : Promise.resolve([]),
+      ready ? wallet.listTransfers().catch(() => []) : Promise.resolve([]),
+      deps.jobs.list({ status: 'pending' }),
+    ]);
+    if (ready) deps.receives.reconcile(transfers);
+    const sats = ready ? btcBalanceSats(wallet) : undefined;
+    const notReady = deps.holder.state === 'ready' ? [] : [NOT_READY_MESSAGES[deps.holder.state]];
+    return buildDesk({
+      now: new Date(),
+      invoices: store.list(),
+      receives: deps.receives.list(),
+      pendingJobs,
+      transfers,
+      assets,
+      ...(sats !== undefined ? { feeSats: Number(sats) } : {}),
+      problems: [...notReady, ...deps.problems()],
+      lastSyncAt: deps.walletSync().lastSyncAt,
+    });
+  });
+
   route(app, API_ROUTES.createInvoice, async (req, reply): Promise<CreateInvoiceResponse> => {
     let created: StoredInvoice;
     if (req.isMultipart()) {
@@ -298,7 +337,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         if (isTooLarge(err)) throw tooLarge(deps.uploadMaxMb);
         throw err;
       }
-      if (data.length === 0) throw new ApiFailure(400, 'EMPTY_FILE', 'The uploaded file is empty.');
+      if (data.length === 0)
+        throw new ApiFailure(400, 'EMPTY_FILE', 'The uploaded file is empty. Export the invoice again and upload it.');
       const filename = file.filename || 'invoice';
       const kind = checkUpload(filename, data);
       created = await orchestrator.createInvoice({ filename, mimeType: file.mimetype, data, kind });
@@ -323,7 +363,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.getInvoice, async (req): Promise<InvoiceDetailResponse> => {
     const inv = store.get(idParam(req));
-    if (!inv) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this invoice.');
+    if (!inv)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this invoice. Open My invoices to see the current list.',
+      );
     return {
       invoice: toSummary(inv),
       events: store.eventsOf(inv.id),
@@ -336,7 +381,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   route(app, API_ROUTES.invoiceEvents, async (req, reply) => {
     const id = idParam(req);
-    if (!store.get(id)) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this invoice.');
+    if (!store.get(id))
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this invoice. Open My invoices to see the current list.',
+      );
     streamInvoiceEvents(store, id, req, reply);
   });
 
@@ -444,7 +494,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   route(app, API_ROUTES.walletReceiveGet, async (req): Promise<ReceiveRequestDto> => {
     const id = (req.params as { receiveId: string }).receiveId;
     const before = deps.receives.get(id);
-    if (!before) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this payment request.');
+    if (!before)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this payment request. Open Wallet › Get paid to see your requests.',
+      );
     if (before.status === 'waiting' || before.status === 'incoming' || before.status === 'cancelled') {
       deps.receives.reconcile(await wallet.listTransfers());
     }
@@ -471,7 +526,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   );
   route(app, API_ROUTES.agentTranscribe, async (req): Promise<TranscribeResponse> => {
     if (!deps.transcriber)
-      throw new ApiFailure(503, 'STT_UNAVAILABLE', 'Voice input is not available on this computer.');
+      throw new ApiFailure(
+        503,
+        'STT_UNAVAILABLE',
+        'Voice input is not available on this computer. Type your message instead.',
+      );
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       throw new ApiFailure(
         400,
@@ -504,7 +563,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   route(app, API_ROUTES.transferDetail, async (req): Promise<TransferDetailResponse> => {
     const id = idParam(req);
     const t = await wallet.getTransfer(id);
-    if (!t) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this payment in your wallet.');
+    if (!t)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this payment in your wallet. Wait for the next wallet update, then open Transfers again.',
+      );
     const invoiceId = store.invoiceForTransfer(id);
     const labels = await deps.labels.effectiveLabelsMap([id]);
     const asset = t.assetId ? (await wallet.listAssets()).find((a) => a.assetId === t.assetId) : undefined;
@@ -610,12 +674,17 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   route(app, M3_ROUTES.scheduleCancel, async (req): Promise<ScheduleCancelResponse> => {
     const { jobId } = req.params as { jobId: string };
     const job = await deps.jobs.get(jobId);
-    if (!job) throw new ApiFailure(404, 'NOT_FOUND', 'We could not find this scheduled payment.');
+    if (!job)
+      throw new ApiFailure(
+        404,
+        'NOT_FOUND',
+        'We could not find this scheduled payment. Open Scheduled payments to see the current list.',
+      );
     if (!(await deps.jobs.cancel(jobId))) {
       throw new ApiFailure(
         409,
         'JOB_NOT_PENDING',
-        `This scheduled payment cannot be cancelled any more (it is ${job.status}).`,
+        `This scheduled payment cannot be cancelled any more (it is ${job.status}). Open Scheduled payments to see what happened.`,
       );
     }
     if (store.get(job.invoiceId)?.state === 'SCHEDULED') orchestrator.reject(job.invoiceId, {});

@@ -509,7 +509,74 @@ export const LightningStatusResponse = z.object({
 });
 export type LightningStatusResponse = z.infer<typeof LightningStatusResponse>;
 
+// GET /api/desk — the Money Desk home in one call. Built by code from local state only (store, payment requests,
+// scheduled jobs, the wallet's last synced state, /api/health problems): no model call, no wallet sync awaited.
+export const DeskNeedsKind = z.enum([
+  'awaiting_confirmation',
+  'review_verdict',
+  'due_soon',
+  'scheduled_today',
+  'request_expiring',
+  'low_fee_balance',
+  'health_problem',
+]);
+export type DeskNeedsKind = z.infer<typeof DeskNeedsKind>;
+export const DeskLatelyKind = z.enum(['paid', 'received', 'blocked', 'scheduled']);
+export type DeskLatelyKind = z.infer<typeof DeskLatelyKind>;
+/** The one next step for an item: a button label and the app page it opens ("#/invoice/<id>"). */
+export const DeskAction = z.object({ label: z.string(), href: z.string() });
+export type DeskAction = z.infer<typeof DeskAction>;
+export const DeskNeedsItem = z.object({
+  kind: DeskNeedsKind,
+  /** Stable per item (invoice, receive or job id; "health-<n>", "fee-balance"). */
+  id: z.string(),
+  /** Plain text built by code; supplier names are cleaned and instruction-like names hidden. */
+  title: z.string(),
+  /** When it is due, expires or runs. */
+  dueAt: IsoDateTime.optional(),
+  action: DeskAction,
+});
+export type DeskNeedsItem = z.infer<typeof DeskNeedsItem>;
+export const DeskLatelyItem = z.object({
+  kind: DeskLatelyKind,
+  id: z.string(),
+  title: z.string(),
+  amount: BaseUnits.optional(),
+  assetId: z.string().optional(),
+  at: IsoDateTime,
+});
+export type DeskLatelyItem = z.infer<typeof DeskLatelyItem>;
+export const DeskResponse = z.object({
+  greetingCounts: z.object({
+    /** All items that need the user (needsYou shows at most 5). */
+    needsYou: z.number().int().nonnegative(),
+    /** Unpaid invoices due in the next 7 days (or overdue). */
+    dueThisWeek: z.number().int().nonnegative(),
+    /** Scheduled payments still to run. */
+    scheduled: z.number().int().nonnegative(),
+    /** Open payment requests (waiting or incoming). */
+    waitingToBePaid: z.number().int().nonnegative(),
+  }),
+  balances: z.array(
+    z.object({ assetId: z.string(), ticker: z.string(), spendable: BaseUnits, precision: z.number().int().min(0) }),
+  ),
+  /** Spendable test sats for network fees; absent when the wallet does not expose them (mock, not ready). */
+  feeSats: BaseUnits.optional(),
+  /** Max 5, most urgent first. */
+  needsYou: z.array(DeskNeedsItem).max(5),
+  /** Max 5, newest first. */
+  lately: z.array(DeskLatelyItem).max(5),
+  /** The wallet state is the last background sync, not a live read: "Updated 12 s ago". */
+  updated: z.object({
+    at: IsoDateTime.optional(),
+    secondsAgo: z.number().int().nonnegative().optional(),
+    text: z.string(),
+  }),
+});
+export type DeskResponse = z.infer<typeof DeskResponse>;
+
 export const API_ROUTES = {
+  desk: 'GET /api/desk',
   createInvoice: 'POST /api/invoices',
   listInvoices: 'GET /api/invoices',
   getInvoice: 'GET /api/invoices/:id',

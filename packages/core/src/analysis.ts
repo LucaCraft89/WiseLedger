@@ -224,6 +224,8 @@ export interface HistoryQuery {
 export interface HistoryMatch {
   invoiceId: string;
   matchedOn: 'issuer+number' | 'sha256' | 'rgbInvoice';
+  /** True when that earlier copy was stopped or closed without paying (BLOCKED, REJECTED): nothing paid or pending. */
+  stopped?: boolean;
 }
 
 /** Previously seen invoices (R4) and the payee book (R5). Implemented by A's store. */
