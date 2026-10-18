@@ -95,7 +95,7 @@ const LN_RANK: Record<Exclude<TransferStatus, 'Failed'>, number> = {
 export const PROGRESS_LABELS = [
   'Submitted',
   "Waiting for the supplier's wallet",
-  'Waiting for a block confirmation',
+  'Waiting for Bitcoin to confirm (about a minute)',
   'Paid',
 ] as const;
 

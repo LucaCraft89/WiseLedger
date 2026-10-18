@@ -50,7 +50,7 @@ export function JobRow({ api, job, onChanged }: { api: ApiClient; job: Job; onCh
       else toast('This payment can no longer be cancelled (it already ran or was cancelled).', 'error');
       onChanged();
     } catch (err) {
-      toast(errorText(err, 'Could not cancel the payment.'), 'error');
+      toast(errorText(err, 'I could not cancel the payment. Reload the page and check if it already ran.'), 'error');
     } finally {
       setBusy(false);
       setAsking(false);

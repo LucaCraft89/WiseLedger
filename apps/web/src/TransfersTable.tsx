@@ -144,7 +144,7 @@ function LabelCell({ api, transferId, initial }: { api: ApiClient; transferId: s
       setLabels(res.labels);
       dispatch({ type: 'saved' });
     } catch (err) {
-      const msg = errorText(err, 'Could not save the label.');
+      const msg = errorText(err, 'I could not save the label. Try again in a moment.');
       dispatch({ type: 'failed', error: msg });
       toast(msg, 'error');
     }

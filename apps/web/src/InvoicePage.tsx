@@ -57,7 +57,7 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
       setDetail(d);
       addEvents(d.events);
     } catch (err) {
-      const msg = errorText(err, 'Could not load this invoice.');
+      const msg = errorText(err, 'I could not load this invoice. Go to My invoices and open it again.');
       setError(msg);
       toast(msg, 'error');
     }
@@ -72,7 +72,11 @@ export function InvoicePage({ api, invoiceId }: { api: ApiClient; invoiceId: str
         if (e.type === 'state' || e.type === 'report') void refresh();
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not follow this invoice.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'I lost the live updates for this invoice. Reload the page to see where it is.',
+      );
     }
     void refresh();
     return unsubscribe;

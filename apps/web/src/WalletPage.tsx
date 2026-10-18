@@ -198,7 +198,10 @@ export function LightningPanel({ api, assets }: { api: ApiClient; assets: Wallet
     api
       .lightning()
       .then((r) => live && setLn(r))
-      .catch((err: unknown) => live && setError(errorText(err, 'Could not read the Lightning status.')));
+      .catch(
+        (err: unknown) =>
+          live && setError(errorText(err, 'I could not read the Lightning status. Try again in a minute.')),
+      );
     return () => {
       live = false;
     };
@@ -393,7 +396,7 @@ function ReceiveForm({
       onCreated();
       toast('Payment request created', 'success');
     } catch (err) {
-      const msg = errorText(err, 'Could not create the payment request.');
+      const msg = errorText(err, 'I could not create the payment request. Check the amount and try again.');
       setFormError(msg);
       toast(msg, 'error');
     } finally {

@@ -38,7 +38,12 @@ export function InvoiceListPage({ api }: { api: ApiClient }) {
         setInvoices(r.invoices);
         setError(null);
       } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : 'Could not load your invoices.');
+        if (alive)
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'I could not load your invoices. Make sure the server is running, then try again.',
+          );
       }
     };
     void load();

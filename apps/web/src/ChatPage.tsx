@@ -328,7 +328,10 @@ function ConfirmCard({ api, nc, calls }: { api: ApiClient; nc: NeedsConfirmation
       setSt({ s: 'done', text });
       toast(text, 'success');
     } catch (err) {
-      setSt({ s: 'error', text: errorText(err, 'Could not schedule the payment.') });
+      setSt({
+        s: 'error',
+        text: errorText(err, 'I could not schedule the payment. Ask me again, or schedule it from the invoice page.'),
+      });
     }
   }
 

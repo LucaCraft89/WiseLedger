@@ -92,7 +92,11 @@ export function apiErrorWords(code: string, message: string, status?: number): s
 }
 
 export function errorWords(code: string | undefined, fallback?: string): string {
-  return (code && ERROR_WORDS[code]) || fallback || 'The payment failed.';
+  return (
+    (code && ERROR_WORDS[code]) ||
+    fallback ||
+    'The payment failed. Nothing is retried automatically: check My invoices before paying again.'
+  );
 }
 
 /** Failures before signing (the wallet's RELEASE_ON_FAILURE list) plus TREASURER_PARSE (nothing was sent). */

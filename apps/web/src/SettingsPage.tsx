@@ -28,7 +28,7 @@ export function SettingsPage({ api }: { api: ApiClient }) {
     try {
       setHealth(await api.health());
     } catch (err) {
-      setError(errorText(err, 'Could not check the system.'));
+      setError(errorText(err, 'I could not check the system. Make sure the server is running, then try again.'));
     }
   }, [api]);
 

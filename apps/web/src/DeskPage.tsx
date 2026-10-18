@@ -1,7 +1,7 @@
 import { type DragEvent, useCallback, useState } from 'react';
 import type { ApiClient } from './api/client.js';
 import { OWL_NAME } from './api/contracts.js';
-import { balanceSentence, greeting } from './lib/desk.js';
+import { balanceSentence, greeting, latelyHref } from './lib/desk.js';
 import { shortDate } from './lib/format.js';
 import { Empty, ErrorBox, errorText, Loading, OwlChip, useLoad } from './ui.js';
 
@@ -69,7 +69,7 @@ export function DeskPage({ api }: { api: ApiClient }) {
   return (
     <section>
       <div className="wl-desk-hello">
-        <OwlChip mood={data && data.needsYou.length > 0 ? 'thinking' : 'all_good'} size={56} />
+        <OwlChip mood={data && data.greetingCounts.needsYou > 0 ? 'thinking' : 'all_good'} size={56} />
       </div>
       {error ? (
         <ErrorBox
@@ -83,7 +83,7 @@ export function DeskPage({ api }: { api: ApiClient }) {
       {loading && !data ? <Loading text="Opening your desk… (a few seconds)" /> : null}
       {data && (
         <>
-          <h2 style={{ margin: '0 0 4px' }}>{greeting(data.needsYou.length)}</h2>
+          <h2 style={{ margin: '0 0 4px' }}>{greeting(data.greetingCounts.needsYou)}</h2>
           <p style={{ marginTop: 0, color: 'var(--wl-c-muted)' }}>{balanceSentence(data)}</p>
 
           <div className="wl-doors">
@@ -100,15 +100,10 @@ export function DeskPage({ api }: { api: ApiClient }) {
           ) : (
             <ul className="wl-list" aria-label="Needs you">
               {data.needsYou.map((n) => (
-                <li key={`${n.kind}-${n.href}-${n.title}`}>
-                  <span>
-                    {n.title}
-                    {n.detail ? (
-                      <small style={{ display: 'block', color: 'var(--wl-c-muted)' }}>{n.detail}</small>
-                    ) : null}
-                  </span>
-                  <a href={n.href} className="wl-secondary">
-                    {n.action}
+                <li key={`${n.kind}-${n.id}`}>
+                  <span>{n.title}</span>
+                  <a href={n.action.href} className="wl-secondary">
+                    {n.action.label}
                   </a>
                 </li>
               ))}
@@ -121,8 +116,8 @@ export function DeskPage({ api }: { api: ApiClient }) {
           ) : (
             <ul className="wl-list" aria-label="Lately">
               {data.lately.map((l) => (
-                <li key={`${l.kind}-${l.href}-${l.at}`}>
-                  <a href={l.href}>{l.text}</a>
+                <li key={`${l.kind}-${l.id}`}>
+                  <a href={latelyHref(l)}>{l.title}</a>
                   <small style={{ color: 'var(--wl-c-muted)' }}>{shortDate(l.at)}</small>
                 </li>
               ))}

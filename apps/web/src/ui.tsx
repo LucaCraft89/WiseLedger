@@ -19,7 +19,7 @@ const ToastContext = createContext<ShowToast>(() => {});
 export const useToast = (): ShowToast => useContext(ToastContext);
 
 /** Error → message for a toast (ApiCallError messages are already plain language). */
-export const errorText = (err: unknown, fallback = 'Something went wrong. Please try again.'): string => {
+export const errorText = (err: unknown, fallback = 'That did not work. Wait a moment and try again.'): string => {
   if (err instanceof ApiCallError) return apiErrorWords(err.code, err.message, err.status);
   return err instanceof Error && err.message ? err.message : fallback;
 };
@@ -100,7 +100,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
     if (!this.state.failed) return this.props.children;
     return (
       <div role="alert" style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
-        <h2>Something went wrong on this page.</h2>
+        <h2>That page did not load.</h2>
         <p>Reload to try again. Your invoices and your wallet are safe: nothing is paid without your OK.</p>
         <button type="button" onClick={() => window.location.reload()}>
           Reload

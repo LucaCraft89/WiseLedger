@@ -41,7 +41,6 @@ import {
   type WalletReceiveResponse,
   type WalletResponse,
 } from './contracts.js';
-import { deskFromApi } from './desk.js';
 
 export type InvoiceInput = { file: File } | { text: string; filename?: string };
 
@@ -75,7 +74,7 @@ export interface ApiClient {
   lightning(): Promise<LightningStatusResponse>;
   /** On-chain Bitcoin (sats) movements: network fees and test bitcoin in or out. Newest first. */
   btcTransactions(): Promise<BtcTransactionsResponse>;
-  /** What needs the user today and what happened lately (GET /api/desk; built from the other routes when the server has none). */
+  /** What needs the user today and what happened lately (GET /api/desk). */
   desk(): Promise<DeskResponse>;
   /** Wallet transfers with their labels. */
   transfers(): Promise<TransfersResponse>;
@@ -235,14 +234,7 @@ export function createHttpClient(base = ''): ApiClient {
         throw err;
       }
     },
-    async desk() {
-      try {
-        return await call<DeskResponse>(`${base}/api/desk`);
-      } catch (err) {
-        if (err instanceof ApiCallError && err.status === 404) return deskFromApi(client);
-        throw err;
-      }
-    },
+    desk: () => call(`${base}/api/desk`),
     btcTransactions: () => call(`${base}/api/wallet/btc`),
     transfers: () => call(`${base}/api/transfers`),
     transfer: (transferId) => call(`${base}/api/transfers/${encodeURIComponent(transferId)}`),
