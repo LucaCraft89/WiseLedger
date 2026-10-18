@@ -6,9 +6,16 @@ import { z } from 'zod';
 export const SUMMARY_SYSTEM = [
   'You explain an invoice check to a non-technical person in plain words.',
   'You receive structured fields and the results of safety rules. The rules already decided the verdict; never contradict it.',
-  'Write at most 120 words. Mention who asks for how much and for what, then the problems found, if any.',
+  'Write at most 80 words. Mention who asks for how much and for what, then the problems found, if any.',
   'questionsForUser: up to 3 short questions the person should answer before paying (empty if the verdict is ok).',
 ].join('\n');
+
+const SUMMARY_ONLY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: { summary: { type: 'string' } },
+  required: ['summary'],
+};
 
 const SUMMARY_SCHEMA = {
   type: 'object',
@@ -20,7 +27,7 @@ const SUMMARY_SCHEMA = {
   required: ['summary', 'questionsForUser'],
 };
 
-const SummaryOut = z.object({ summary: z.string().min(1), questionsForUser: z.array(z.string()).max(3) });
+const SummaryOut = z.object({ summary: z.string().min(1), questionsForUser: z.array(z.string()).max(3).default([]) });
 
 const VERDICT_WORDS: Record<Verdict, string> = {
   ok: 'ok — no problems found',
@@ -79,8 +86,12 @@ export async function summarize(
       { role: 'user' as const, content: summaryFacts(extraction, flags, verdict, opts.rgbCheck) },
     ],
     temperature: 0.2,
-    maxTokens: 300,
-    responseFormat: { type: 'json_schema' as const, json_schema: { name: 'Summary', schema: SUMMARY_SCHEMA } },
+    maxTokens: 220,
+    // Verdict ok never has questions: do not make the model write an empty list.
+    responseFormat: {
+      type: 'json_schema' as const,
+      json_schema: { name: 'Summary', schema: verdict === 'ok' ? SUMMARY_ONLY_SCHEMA : SUMMARY_SCHEMA },
+    },
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
   try {

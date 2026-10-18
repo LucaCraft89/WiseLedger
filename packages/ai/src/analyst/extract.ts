@@ -3,16 +3,10 @@ import { type ChatMessage, InvoiceExtraction, isLightningInvoice, type LlmProvid
 import { z } from 'zod';
 import type { InvoiceInput } from '../extract/text.js';
 import { groundExtraction } from './grounding.js';
-import {
-  EXTRACT_IMAGE_PROMPT,
-  EXTRACT_SYSTEM,
-  EXTRACTION_LLM_SCHEMA,
-  extractUserPrompt,
-  repairPrompt,
-} from './prompts.js';
+import { EXTRACT_IMAGE_PROMPT, EXTRACT_SYSTEM, extractionSchema, extractUserPrompt, repairPrompt } from './prompts.js';
 
 const nul = z.string().nullable();
-/** What the model returns (mirror of EXTRACTION_LLM_SCHEMA). */
+/** What the model returns (mirror of the schema in prompts.ts). */
 export const LlmExtraction = z.object({
   issuerName: nul,
   issuerVatId: nul,
@@ -26,7 +20,7 @@ export const LlmExtraction = z.object({
     .array(z.object({ description: z.string(), quantity: z.number().nullable().optional(), amount: nul }))
     .default([]),
   paymentMethod: z.enum(['rgb', 'iban', 'btc', 'ln', 'unknown']),
-  rgbInvoice: nul,
+  rgbInvoice: nul.optional(),
   iban: nul.optional(),
   btcAddress: nul.optional(),
   pressureLanguage: z.boolean(),
@@ -61,6 +55,8 @@ export async function extractInvoice(
       ? { role: 'user', content: extractUserPrompt(input.text) }
       : { role: 'user', content: EXTRACT_IMAGE_PROMPT, attachments: [{ path: input.imagePath }] },
   ];
+  // Text with at most one printed payment request: code takes it from the text, the model need not copy it.
+  const schema = extractionSchema(input.mode !== 'text' || paymentRequestsIn(input.text).length > 1);
   const maxRetries = opts.maxRetries ?? 2;
   let lastError = '';
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -70,7 +66,7 @@ export async function extractInvoice(
       maxTokens: 700,
       responseFormat: {
         type: 'json_schema' as const,
-        json_schema: { name: 'InvoiceFields', schema: EXTRACTION_LLM_SCHEMA },
+        json_schema: { name: 'InvoiceFields', schema },
       },
       ...(opts.signal ? { signal: opts.signal } : {}),
     };

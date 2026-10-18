@@ -33,7 +33,7 @@ export function repairPrompt(error: string): string {
  * are not asked for.
  */
 const str = { type: ['string', 'null'] } as const;
-export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
+const FULL_EXTRACTION_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -50,14 +50,14 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
       items: {
         type: 'object',
         additionalProperties: false,
-        properties: { description: { type: 'string' }, amount: str },
+        properties: { description: { type: 'string', maxLength: 60 }, amount: str },
         required: ['description', 'amount'],
       },
     },
     paymentMethod: { type: 'string', enum: ['rgb', 'iban', 'btc', 'ln', 'unknown'] },
     rgbInvoice: str,
     pressureLanguage: { type: 'boolean' },
-    pressureQuote: str,
+    pressureQuote: { type: ['string', 'null'], maxLength: 100 },
     confidence: { type: 'number' },
   },
   required: [
@@ -76,3 +76,17 @@ export const EXTRACTION_LLM_SCHEMA: Record<string, unknown> = {
     'confidence',
   ],
 };
+
+/**
+ * Same schema without `rgbInvoice`: the model would copy ~100 characters the code already finds in the text
+ * (extract.ts takes the single printed payment request), which is about a fifth of the generation time.
+ */
+export function extractionSchema(modelWritesRgbInvoice: boolean): Record<string, unknown> {
+  if (modelWritesRgbInvoice) return FULL_EXTRACTION_SCHEMA;
+  const { rgbInvoice: _drop, ...properties } = FULL_EXTRACTION_SCHEMA.properties as Record<string, unknown>;
+  return {
+    ...FULL_EXTRACTION_SCHEMA,
+    properties,
+    required: (FULL_EXTRACTION_SCHEMA.required as string[]).filter((k) => k !== 'rgbInvoice'),
+  };
+}
