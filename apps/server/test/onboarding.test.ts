@@ -54,7 +54,11 @@ function fakeFactory(dir: string): WalletFactory {
       try {
         words = normalizeMnemonic(mnemonic);
       } catch {
-        throw new ApiFailure(400, 'INVALID_MNEMONIC', 'These words are not a valid recovery phrase.');
+        throw new ApiFailure(
+          400,
+          'INVALID_MNEMONIC',
+          'These words are not a valid recovery phrase. Check each word and their order, then try again.',
+        );
       }
       writeSeed(dir, words, passphrase);
       const w = new SeedWallet(dir, passphrase);
@@ -165,7 +169,7 @@ describe('onboarding on the real backend (fake wallet factory)', () => {
     expect(bad.statusCode).toBe(400);
     expect(bad.json().error).toEqual({
       code: 'INVALID_MNEMONIC',
-      message: 'These words are not a valid recovery phrase.',
+      message: 'These words are not a valid recovery phrase. Check each word and their order, then try again.',
     });
     const empty = await post('/api/onboarding/restore', { mnemonic: '   ' });
     expect(empty.statusCode).toBe(400);
@@ -188,7 +192,10 @@ describe('onboarding on the real backend (fake wallet factory)', () => {
 
     const wrong = await post('/api/onboarding/unlock', { passphrase: 'wrong one' });
     expect(wrong.statusCode).toBe(401);
-    expect(wrong.json().error).toEqual({ code: 'WalletLocked', message: 'Wrong wallet passphrase.' });
+    expect(wrong.json().error).toEqual({
+      code: 'WalletLocked',
+      message: 'Wrong wallet passphrase. Check it and try again.',
+    });
     for (let i = 0; i < 4; i++) await post('/api/onboarding/unlock', { passphrase: 'wrong one' });
     const limited = await post('/api/onboarding/unlock', { passphrase: 'correct horse' });
     expect(limited.statusCode).toBe(429);

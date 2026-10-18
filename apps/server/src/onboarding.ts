@@ -57,7 +57,8 @@ export const NOT_READY_MESSAGES: Record<Exclude<OnboardingState, 'ready'>, strin
 };
 
 export const RESTORE_NOTE = 'Bitcoin comes back from the words; RGB assets need the wallet backup file.';
-const INVALID_MNEMONIC = 'These words are not a valid recovery phrase.';
+const INVALID_MNEMONIC =
+  'These words are not a valid recovery phrase. Check each word and their order, then try again.';
 
 function invalidMnemonic(): ApiFailure {
   return new ApiFailure(400, 'INVALID_MNEMONIC', INVALID_MNEMONIC);
@@ -244,7 +245,8 @@ export class WalletHolder {
       const wallet = await factory.create(passphrase);
       const info = await wallet.onboarding({ reveal: true });
       this.becomeReady(wallet);
-      if (!info.mnemonic) throw new ApiFailure(500, 'INTERNAL', 'The new wallet did not return its recovery words.');
+      if (!info.mnemonic)
+        throw new ApiFailure(500, 'INTERNAL', 'The new wallet did not return its recovery words. Please try again.');
       return info.mnemonic;
     });
   }
@@ -267,7 +269,8 @@ export class WalletHolder {
   async unlock(passphrase: string, now = Date.now()): Promise<void> {
     const pending = this.pending;
     if (!pending) {
-      if (this.wallet) throw new ApiFailure(409, 'NOT_LOCKED', 'The wallet is not locked.');
+      if (this.wallet)
+        throw new ApiFailure(409, 'NOT_LOCKED', 'The wallet is already unlocked. Reload the app to use it.');
       throw this.notReady();
     }
     if (now < this.blockedUntil) {
@@ -285,7 +288,7 @@ export class WalletHolder {
             this.failures = 0;
             this.blockedUntil = now + UNLOCK_BLOCK_MS;
           }
-          throw new ApiFailure(401, 'WalletLocked', 'Wrong wallet passphrase.');
+          throw new ApiFailure(401, 'WalletLocked', 'Wrong wallet passphrase. Check it and try again.');
         }
         throw err;
       }
