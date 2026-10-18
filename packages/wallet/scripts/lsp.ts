@@ -3,6 +3,7 @@
 // node pubkey with TUSDT on A's side, so a new node can receive TUSDT over Lightning at once.
 //
 //   pnpm -F wallet lsp              serve: GET /info · POST /channel-request {pubkey} · GET /channel-request/:pubkey
+//                                   · POST /test-pay {invoice} (localhost: A pays an RGB LN invoice, a test payer)
 //   pnpm -F wallet lsp status       node, BTC, TUSDT, channels, requests
 //   pnpm -F wallet lsp fund [sats]  payer WDK wallet → sats to node A (default 50,000), + 2 free colorable UTXOs
 //   pnpm -F wallet dev              `pnpm dev` runs this: serve when LN_ENABLED=true on a real wallet, else exit quietly
@@ -223,6 +224,31 @@ async function serve(): Promise<void> {
           });
         const r = await openFor(pubkey);
         return send(res, r.status === 'failed' ? 502 : 202, r);
+      }
+      // Test payer (Mutinynet, localhost only): the LSP pays an RGB Lightning invoice from its own side of the
+      // channel, e.g. a Get paid request of the app (A → C), so receiving can be tried without a customer node.
+      if (req.method === 'POST' && url.pathname === '/test-pay') {
+        const raw = req.socket.remoteAddress ?? '';
+        if (!/^(127\.|::1$|::ffff:127\.)/.test(raw))
+          return send(res, 403, {
+            error: { code: 'LOCAL_ONLY', message: 'Test payments are for this computer only.' },
+          });
+        const invoice = String((await readJson(req)).invoice ?? '').replace(/^lightning:/i, '');
+        if (!/^ln(tbs|bcrt|tb)/i.test(invoice))
+          return send(res, 400, { error: { code: 'BAD_INVOICE', message: 'Send an RGB Lightning invoice (lntbs…).' } });
+        const t0 = Date.now();
+        const sent = await node.call<{ payment_hash: string; status?: string }>('sendPayment', { invoice });
+        let status = sent.status ?? 'Pending';
+        for (let i = 0; i < 30 && !/succeeded|failed/i.test(status); i++) {
+          await sleep(1_000);
+          status = (await node.payments()).find((p) => p.payment_hash === sent.payment_hash)?.status ?? status;
+        }
+        log('lsp', `test payment ${status} in ${((Date.now() - t0) / 1000).toFixed(1)} s · hash ${sent.payment_hash}`);
+        return send(res, /succeeded/i.test(status) ? 200 : 502, {
+          paymentHash: sent.payment_hash,
+          status,
+          ms: Date.now() - t0,
+        });
       }
       const m = /^\/channel-request\/(0[23][0-9a-f]{64})$/.exec(url.pathname);
       if (req.method === 'GET' && m?.[1]) {
