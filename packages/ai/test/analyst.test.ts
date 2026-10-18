@@ -72,6 +72,11 @@ describe('Analyst v1 with MockLlm', () => {
       .filter((e) => e.type === 'stage' && e.status === 'end')
       .map((e) => (e as { stage: string }).stage);
     expect(stages).toEqual(['reading', 'extracting', 'checking', 'summarizing', 'analyzed']);
+    // Stable step keys for the owl's live line, in order (checking: the request first, then the rules).
+    const steps = events
+      .filter((e) => e.type === 'stage' && e.status === 'start' && e.step)
+      .map((e) => (e as { step: string }).step);
+    expect(steps).toEqual(['reading_text', 'reading_amount', 'checking_request', 'checking_rules', 'writing_summary']);
   });
 
   it('the summary prompt contains no raw invoice text (injection fixture)', async () => {

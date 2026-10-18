@@ -98,9 +98,13 @@ interface SdkAsset {
 /** rgb-sdk's internal client: the rgb-lib binding and the transport endpoint it was built with. */
 interface RgbLibClient {
   transportEndpoint: string;
+  /** rgb-sdk: the cached rgb-lib Online handle (goes online once, then reuses it). */
+  getOnline?(): object;
   wallet: {
     /** rgb-lib: `online` may be null when `skipSync` is true (a local read of the last synced state). */
     getBtcBalance?(online: null, skipSync: boolean): { vanilla: SdkBalance; colored: SdkBalance };
+    /** Unlike getBtcBalance, `online` must be the Online object; skipSync true reads the last synced state. */
+    listTransactions?(online: object, skipSync: boolean): SdkTransaction[];
     blindReceive(
       assetId: string | null,
       assignment: string,
@@ -342,8 +346,21 @@ export class WdkRgbWallet implements WalletPort {
     return this.rgb.getBtcBalance();
   }
 
-  /** On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). */
+  /**
+   * On-chain Bitcoin movements (not RGB transfers); duck-typed by the server like btcBalance(). rgb-sdk's
+   * listTransactions() also syncs on every call (~8 s on Mutinynet, blocking the server): read the last synced
+   * state like btcBalance(), falling back to the syncing call only if the rgb-lib client is not reachable.
+   */
   btcTransactions(): SdkTransaction[] {
+    const client = (this.rgb as unknown as { client?: RgbLibClient }).client;
+    const lib = client?.wallet;
+    if (lib?.listTransactions && client?.getOnline) {
+      try {
+        return lib.listTransactions(client.getOnline(), true);
+      } catch {
+        // fall through to the syncing call
+      }
+    }
     return this.rgb.listTransactions();
   }
 
